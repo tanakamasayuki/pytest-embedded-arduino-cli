@@ -171,6 +171,13 @@ Additional sample:
   - Expects `TEST_WIFI_SSID` and `TEST_WIFI_PASSWORD`
   - Verifies that the board prints `WIFI_OK <ip-address>`
 
+## Warnings
+
+You may see `PytestExperimentalApiWarning: record_xml_attribute is an experimental feature`.
+
+This warning comes from `pytest-embedded`, not from this plugin. It is usually safe to ignore.
+If you want to suppress it in your project, add a warning filter in `pytest.ini`, `pyproject.toml`, or a local config such as `examples/pytest.ini`.
+
 ## What This Plugin Does Not Try To Be
 
 - A drop-in replacement for `pytest-embedded-arduino`

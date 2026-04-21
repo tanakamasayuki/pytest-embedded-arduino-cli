@@ -175,6 +175,13 @@ void loop() {}
   - `TEST_WIFI_SSID` と `TEST_WIFI_PASSWORD` を使う
   - ボードが `WIFI_OK <ip-address>` を出力することを検証する
 
+## warning について
+
+`PytestExperimentalApiWarning: record_xml_attribute is an experimental feature` が出ることがあります。
+
+これはこの plugin ではなく `pytest-embedded` 由来の warning です。通常は無視して構いません。
+気になる場合は `pytest.ini`、`pyproject.toml`、または `examples/pytest.ini` のようなローカル設定で warning filter を追加して抑制してください。
+
 ## この plugin が目指していないもの
 
 - `pytest-embedded-arduino` の drop-in replacement
