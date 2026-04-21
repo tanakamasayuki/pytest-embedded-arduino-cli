@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import subprocess
+import os
+import tomllib
 from typing import Any
 
 import yaml
@@ -73,6 +75,12 @@ def resolve_profile_name(sketch_data: dict[str, Any], profile: str | None) -> st
     if len(profiles) == 1:
         return next(iter(profiles))
 
+    if len(profiles) > 1:
+        raise SketchConfigError(
+            "multiple profiles found in sketch.yaml; "
+            "specify --profile or set default_profile"
+        )
+
     return None
 
 
@@ -82,6 +90,50 @@ def resolve_build_path(sketch_dir: str | Path, profile: str | None, build_path: 
 
     suffix = profile or "default"
     return Path(sketch_dir).resolve() / "build" / suffix
+
+
+def load_build_config(sketch_dir: str | Path) -> dict[str, Any]:
+    config_path = Path(sketch_dir).resolve() / "build_config.toml"
+    if not config_path.is_file():
+        return {}
+
+    with config_path.open("rb") as handle:
+        data = tomllib.load(handle)
+
+    if not isinstance(data, dict):
+        raise SketchConfigError(f"build_config.toml must contain a mapping: {config_path}")
+
+    defines = data.get("defines", {})
+    if defines is not None and not isinstance(defines, dict):
+        raise SketchConfigError(f"'defines' must be a mapping in {config_path}")
+
+    return data
+
+
+def _format_define_value(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def resolve_build_properties(
+    sketch_dir: str | Path,
+    build_config: dict[str, Any] | None = None,
+) -> tuple[str, ...]:
+    config = build_config if build_config is not None else load_build_config(sketch_dir)
+    defines = config.get("defines") or {}
+    extra_flags: list[str] = []
+
+    for env_name, define_name in defines.items():
+        if not isinstance(env_name, str) or not isinstance(define_name, str):
+            raise SketchConfigError("build_config.toml defines keys and values must be strings")
+
+        value = os.getenv(env_name, "")
+        extra_flags.append(f"-D{define_name}={_format_define_value(value)}")
+
+    if not extra_flags:
+        return ()
+
+    return (f"build.extra_flags={' '.join(extra_flags)}",)
 
 
 @dataclass(frozen=True)
@@ -110,14 +162,16 @@ class ArduinoCliBuildConfig:
         sketch_dir = resolve_sketch_dir(test_file_or_dir)
         sketch_yaml = find_sketch_yaml(sketch_dir)
         sketch_data = load_sketch_yaml(sketch_yaml)
+        build_config = load_build_config(sketch_dir)
         resolved_profile = resolve_profile_name(sketch_data, profile)
         resolved_build_path = resolve_build_path(sketch_dir, resolved_profile, build_path)
+        resolved_build_properties = tuple(build_properties) + resolve_build_properties(sketch_dir, build_config)
         return cls(
             sketch_dir=sketch_dir,
             sketch_yaml=sketch_yaml,
             build_path=resolved_build_path,
             profile=resolved_profile,
-            build_properties=tuple(build_properties),
+            build_properties=resolved_build_properties,
             extra_args=tuple(extra_args),
             clean=clean,
             cli_path=cli_path,
@@ -142,4 +196,3 @@ class ArduinoCliBuildConfig:
             cwd=self.sketch_dir,
             text=True,
         )
-

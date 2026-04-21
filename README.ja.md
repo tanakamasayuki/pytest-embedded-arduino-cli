@@ -103,6 +103,44 @@ uv run pytest
 `pytest-embedded-serial` は通常依存に含めているため、実機テストで serial service を追加インストールなしで使えます。
 `--embedded-services` を指定しない場合、この plugin は `serial` をデフォルトで有効化します。
 
+profile ごとの serial port は次の順で解決します。
+
+1. `--flash-port`
+2. `--port`
+3. `TEST_SERIAL_PORT_<PROFILE>`
+4. `TEST_SERIAL_PORT`
+
+例:
+
+```bash
+export TEST_SERIAL_PORT_ESP32S3=/dev/ttyUSB1
+uv run pytest tests/my_app --profile esp32s3
+```
+
+`--profile` を省略した場合でも、plugin は `sketch.yaml` から解決した profile を使います。`default_profile` もこの対象です。
+
+compile-time define を渡したい場合は、sketch ディレクトリに `build_config.toml` を置きます。
+
+```toml
+[defines]
+TEST_WIFI_SSID = "WIFI_SSID"
+TEST_WIFI_PASSWORD = "WIFI_PASSWORD"
+```
+
+左側は環境変数名、右側は C/C++ 側で使う define 名です。
+例えば `TEST_WIFI_SSID` は compile 時に `-DWIFI_SSID="..."` に変換されます。
+
+実行前に対応する環境変数を設定しておくと、plugin が `arduino-cli compile --build-property build.extra_flags=...` に変換して渡します。
+
+```bash
+export TEST_WIFI_SSID=my-ssid
+export TEST_WIFI_PASSWORD=my-password
+uv run pytest tests/my_app
+```
+
+環境変数が未設定でも、その define には空文字が渡されます。
+未設定をどう扱うかは、テスト側または sketch 側で判断できます。
+
 ## verbosity とログ
 
 コマンド表示には pytest 標準の verbosity を使います。
@@ -128,6 +166,14 @@ void setup() {
 
 void loop() {}
 ```
+
+追加サンプル:
+
+- `examples/wifi`
+  - ESP32 / ESP32-S3 で Wi-Fi 接続を行う
+  - Wi-Fi 非対応 profile の例として `uno` では skip する
+  - `TEST_WIFI_SSID` と `TEST_WIFI_PASSWORD` を使う
+  - ボードが `WIFI_OK <ip-address>` を出力することを検証する
 
 ## この plugin が目指していないもの
 

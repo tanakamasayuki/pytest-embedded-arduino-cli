@@ -103,6 +103,44 @@ Use `pytest-embedded` standard options for runtime control, such as:
 `pytest-embedded-serial` is installed as a normal dependency so hardware tests can use the serial service without extra package installation.
 If `--embedded-services` is not specified, this plugin enables `serial` by default.
 
+For profile-specific serial ports, the plugin resolves ports in this order:
+
+1. `--flash-port`
+2. `--port`
+3. `TEST_SERIAL_PORT_<PROFILE>`
+4. `TEST_SERIAL_PORT`
+
+Example:
+
+```bash
+export TEST_SERIAL_PORT_ESP32S3=/dev/ttyUSB1
+uv run pytest tests/my_app --profile esp32s3
+```
+
+If `--profile` is omitted, the plugin uses the resolved profile from `sketch.yaml`, including `default_profile`.
+
+For compile-time defines, place a `build_config.toml` in the sketch directory:
+
+```toml
+[defines]
+TEST_WIFI_SSID = "WIFI_SSID"
+TEST_WIFI_PASSWORD = "WIFI_PASSWORD"
+```
+
+Here, the left side is the environment variable name and the right side is the C/C++ define name.
+For example, `TEST_WIFI_SSID` becomes `-DWIFI_SSID="..."` at compile time.
+
+Set values before running pytest:
+
+```bash
+export TEST_WIFI_SSID=my-ssid
+export TEST_WIFI_PASSWORD=my-password
+uv run pytest tests/my_app
+```
+
+If an environment variable is missing, the plugin still passes the define with an empty string value.
+This allows the test or sketch code to decide how to handle missing settings.
+
 For command visibility, follow pytest's standard verbosity:
 
 - `-v` shows the `arduino-cli compile` / `arduino-cli upload` command line
@@ -124,6 +162,14 @@ void setup() {
 
 void loop() {}
 ```
+
+Additional sample:
+
+- `examples/wifi`
+  - Connects to Wi-Fi on ESP32/ESP32-S3
+  - Includes `uno` as a skip example for a non-Wi-Fi profile
+  - Expects `TEST_WIFI_SSID` and `TEST_WIFI_PASSWORD`
+  - Verifies that the board prints `WIFI_OK <ip-address>`
 
 ## What This Plugin Does Not Try To Be
 

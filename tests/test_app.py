@@ -7,6 +7,7 @@ from pytest_embedded_arduino_cli.app import (
     SketchConfigError,
     find_sketch_yaml,
     load_sketch_yaml,
+    resolve_build_properties,
     resolve_build_path,
     resolve_profile_name,
     resolve_sketch_dir,
@@ -46,6 +47,13 @@ def test_resolve_profile_name_rejects_unknown_profile() -> None:
 
     with pytest.raises(SketchConfigError):
         resolve_profile_name(sketch_data, "mega")
+
+
+def test_resolve_profile_name_rejects_ambiguous_profiles() -> None:
+    sketch_data = {"profiles": {"esp32": {}, "esp32s3": {}}}
+
+    with pytest.raises(SketchConfigError):
+        resolve_profile_name(sketch_data, None)
 
 
 def test_default_build_path_uses_profile_name(tmp_path: Path) -> None:
@@ -100,3 +108,61 @@ def test_load_sketch_yaml_requires_mapping(tmp_path: Path) -> None:
     with pytest.raises(SketchConfigError):
         load_sketch_yaml(config_path)
 
+
+def test_resolve_build_properties_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(
+        sketch_dir / "build_config.toml",
+        '[defines]\nTEST_WIFI_SSID = "WIFI_SSID"\nTEST_WIFI_PASSWORD = "WIFI_PASSWORD"\n',
+    )
+    monkeypatch.setenv("TEST_WIFI_SSID", "my-ssid")
+    monkeypatch.setenv("TEST_WIFI_PASSWORD", "my-password")
+
+    assert resolve_build_properties(sketch_dir) == (
+        'build.extra_flags=-DWIFI_SSID="my-ssid" -DWIFI_PASSWORD="my-password"',
+    )
+
+
+def test_resolve_build_properties_uses_empty_string_for_missing_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(
+        sketch_dir / "build_config.toml",
+        '[defines]\nTEST_WIFI_SSID = "WIFI_SSID"\nTEST_WIFI_PASSWORD = "WIFI_PASSWORD"\n',
+    )
+    monkeypatch.setenv("TEST_WIFI_SSID", "my-ssid")
+    monkeypatch.delenv("TEST_WIFI_PASSWORD", raising=False)
+
+    assert resolve_build_properties(sketch_dir) == (
+        'build.extra_flags=-DWIFI_SSID="my-ssid" -DWIFI_PASSWORD=""',
+    )
+
+
+def test_build_command_includes_build_config_defines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(sketch_dir / "sample.ino", "void setup() {}\nvoid loop() {}\n")
+    write_text(
+        sketch_dir / "sketch.yaml",
+        "default_profile: esp32\nprofiles:\n  esp32: {}\n",
+    )
+    write_text(
+        sketch_dir / "build_config.toml",
+        '[defines]\nTEST_WIFI_SSID = "WIFI_SSID"\n',
+    )
+    monkeypatch.setenv("TEST_WIFI_SSID", "test-ap")
+
+    config = ArduinoCliBuildConfig.from_test_path(sketch_dir / "test_sample.py")
+
+    assert config.build_command() == [
+        "arduino-cli",
+        "compile",
+        "--build-path",
+        str(sketch_dir / "build" / "esp32"),
+        "--profile",
+        "esp32",
+        "--build-property",
+        'build.extra_flags=-DWIFI_SSID="test-ap"',
+        str(sketch_dir),
+    ]
