@@ -184,3 +184,30 @@ Additional sample:
 - Serial reset / monitor helpers
 - Multi-device support
 - Optional `fqbn` or sketch path overrides
+
+## Release
+
+This repository uses GitHub Actions for releases.
+
+Before triggering a release:
+
+- Update the `## Unreleased` section in `CHANGELOG.md`
+- Make sure `uv run pytest tests` passes locally if needed
+
+Release flow:
+
+1. Open GitHub Actions
+2. Run the `Release` workflow manually
+3. Enter the release version such as `0.1.0`
+4. Choose whether to publish to PyPI
+
+The workflow will:
+
+- Update versions in `pyproject.toml` and `src/pytest_embedded_arduino_cli/__init__.py`
+- Move `CHANGELOG.md` unreleased entries into `## <version>`
+- Run tests and build the package
+- Commit the release changes and create tag `v<version>`
+- Create a GitHub Release
+- Publish to PyPI when enabled
+
+PyPI publishing is configured for Trusted Publishing via GitHub Actions.
