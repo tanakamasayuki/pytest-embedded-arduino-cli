@@ -92,12 +92,17 @@ def _log_command(
 
 @pytest.fixture
 def app_path(request: pytest.FixtureRequest) -> str:
+    if not _request_has_sketch(request):
+        return str(resolve_test_path(_request_path(request)))
     return str(resolve_sketch_dir(_request_path(request)))
 
 
 @pytest.fixture
 def build_dir(request: pytest.FixtureRequest) -> str:
-    return str(_build_config_from_request(request).build_path)
+    arduino_cli_app = _build_config_from_request(request, required=False)
+    if arduino_cli_app is None:
+        return str(resolve_test_path(_request_path(request)) / "build" / "default")
+    return str(arduino_cli_app.build_path)
 
 
 @pytest.fixture

@@ -103,6 +103,27 @@ def test_paths(arduino_cli_app):
     result.assert_outcomes(passed=1)
 
 
+def test_plugin_does_not_require_ino_for_plain_python_tests(pytester: pytest.Pytester) -> None:
+    test_dir = pytester.path / "plain_tests"
+    test_dir.mkdir()
+    (test_dir / "test_plain.py").write_text(
+        """
+def test_plain():
+    assert True
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_plain.py"),
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(passed=1)
+
+
 def test_log_command_respects_v_level() -> None:
     reporter = DummyReporter()
     config = DummyConfig(verbose=1, reporter=reporter)
