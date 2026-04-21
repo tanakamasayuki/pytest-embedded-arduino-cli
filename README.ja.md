@@ -188,3 +188,30 @@ void loop() {}
 - serial reset / monitor helper
 - 複数デバイス対応
 - `fqbn` や sketch path の override
+
+## リリース方法
+
+このリポジトリは GitHub Actions ベースでリリースします。
+
+リリース前に最低限やること:
+
+- `CHANGELOG.md` の `## Unreleased` を更新する
+- 必要ならローカルで `uv run pytest tests` を通しておく
+
+リリース手順:
+
+1. GitHub Actions を開く
+2. `Release` workflow を手動実行する
+3. `0.1.0` のような version を入力する
+4. PyPI に publish するかを選ぶ
+
+workflow が行うこと:
+
+- `pyproject.toml` と `src/pytest_embedded_arduino_cli/__init__.py` の version 更新
+- `CHANGELOG.md` の `## Unreleased` を `## <version>` に反映
+- テストとパッケージ build の実行
+- release 用 commit と `v<version>` tag の作成
+- GitHub Release の作成
+- 必要に応じて PyPI への publish
+
+PyPI publish は GitHub Actions の Trusted Publishing を前提にしています。

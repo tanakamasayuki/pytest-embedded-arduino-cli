@@ -1,0 +1,157 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (X.Y.Z)"
+        required: true
+      publish_pypi:
+        description: "Publish package to PyPI"
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Run release preparation
+        run: uv run python tools/prepare_release.py --version "${{ github.event.inputs.version }}"
+
+      - name: Run tests
+        run: uv run pytest tests
+
+      - name: Build package
+        run: uv build
+
+      - name: Commit release changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml src/pytest_embedded_arduino_cli/__init__.py CHANGELOG.md
+          git commit -m "chore(release): v${{ github.event.inputs.version }}"
+
+      - name: Create tag
+        run: git tag "v${{ github.event.inputs.version }}"
+
+      - name: Push commit and tag
+        run: |
+          git push origin HEAD
+          git push origin "v${{ github.event.inputs.version }}"
+
+  create_github_release:
+    runs-on: ubuntu-latest
+    needs: prepare
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: "v${{ github.event.inputs.version }}"
+          fetch-depth: 0
+
+      - name: Build release body from CHANGELOG
+        run: |
+          VERSION="${{ github.event.inputs.version }}" python - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          current_tag = f"v{version}"
+
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+          section_header = f"## {version}"
+
+          try:
+              start = changelog.index(section_header)
+          except ValueError as exc:
+              raise SystemExit(f"Version section {section_header} not found in CHANGELOG.md") from exc
+
+          end = len(changelog)
+          for i in range(start + 1, len(changelog)):
+              if changelog[i].startswith("## "):
+                  end = i
+                  break
+
+          section = "\n".join(changelog[start:end]).strip()
+          body = section + "\n\nRepository: https://github.com/tanakamasayuki/pytest-embedded-arduino-cli"
+
+          tags = (
+              subprocess.check_output(
+                  ["git", "tag", "--list", "v*", "--sort=v:refname"],
+                  text=True,
+              )
+              .strip()
+              .splitlines()
+          )
+
+          prev_tag = ""
+          for i, tag in enumerate(tags):
+              if tag == current_tag and i > 0:
+                  prev_tag = tags[i - 1]
+                  break
+
+          if prev_tag:
+              body += (
+                  "\n\nFull Changelog: "
+                  "https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/compare/"
+                  f"{prev_tag}...{current_tag}"
+              )
+
+          Path("release_body.md").write_text(body + "\n", encoding="utf-8")
+          PY
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ github.event.inputs.version }}"
+          body_path: release_body.md
+          generate_release_notes: false
+
+  publish_pypi:
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: ${{ github.event.inputs.publish_pypi == 'true' }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: "v${{ github.event.inputs.version }}"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Build package
+        run: uv build
+
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
