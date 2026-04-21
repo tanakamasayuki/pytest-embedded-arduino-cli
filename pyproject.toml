@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pytest-embedded-arduino-cli"
+version = "0.1.0"
+description = "A pytest plugin to test Arduino projects using pytest-embedded and arduino-cli"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+  { name = "TANAKA Masayuki" },
+]
+dependencies = [
+  "pytest>=8",
+  "pytest-embedded>=2.0",
+  "pytest-embedded-serial>=2.0",
+  "PyYAML>=6.0",
+]
+
+[project.entry-points.pytest11]
+embedded-arduino-cli = "pytest_embedded_arduino_cli.plugin"
+
+[project.urls]
+Homepage = "https://github.com/tanakamasayuki/pytest-embedded-arduino-cli"
+Repository = "https://github.com/tanakamasayuki/pytest-embedded-arduino-cli"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
