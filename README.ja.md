@@ -1,6 +1,6 @@
 # pytest-embedded-arduino-cli
 
-[English README](README.md)
+[English README](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/README.md)
 
 `pytest-embedded` と `arduino-cli` を使って Arduino プロジェクトをテストするための pytest plugin です。
 
