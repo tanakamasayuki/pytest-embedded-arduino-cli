@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 
 from pytest_embedded_arduino_cli.plugin import _log_command, _should_build, _should_upload
-from pytest_embedded_arduino_cli.serial import ensure_default_embedded_services
+from pytest_embedded_arduino_cli.serial import (
+    ensure_default_embedded_services,
+    normalize_profile_name,
+    resolve_port,
+    resolve_upload_port,
+)
 
 
 class DummyReporter:
@@ -157,3 +162,37 @@ def test_default_embedded_services_appends_serial() -> None:
     ensure_default_embedded_services(config)
 
     assert config.option.embedded_services == "idf,serial"
+
+
+def test_normalize_profile_name() -> None:
+    assert normalize_profile_name("esp32-s3") == "ESP32_S3"
+
+
+def test_resolve_upload_port_prefers_profile_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.option.port = None
+    config.option.flash_port = None
+    config.option.profile = "esp32-s3"
+    monkeypatch.setenv("TEST_SERIAL_PORT_ESP32_S3", "/dev/ttyUSB1")
+
+    assert resolve_upload_port(config) == "/dev/ttyUSB1"
+
+
+def test_resolve_upload_port_falls_back_to_common_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.option.port = None
+    config.option.flash_port = None
+    config.option.profile = None
+    monkeypatch.setenv("TEST_SERIAL_PORT", "/dev/ttyUSB0")
+
+    assert resolve_upload_port(config) == "/dev/ttyUSB0"
+
+
+def test_resolve_port_uses_explicit_profile_argument(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.option.port = None
+    config.option.flash_port = None
+    config.option.profile = None
+    monkeypatch.setenv("TEST_SERIAL_PORT_ESP32", "/dev/ttyUSB0")
+
+    assert resolve_port(config, profile="esp32") == "/dev/ttyUSB0"

@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-from .app import ArduinoCliBuildConfig, SketchConfigError, resolve_sketch_dir
+from .app import ArduinoCliBuildConfig, SketchConfigError, resolve_sketch_dir, resolve_test_path
 from .flasher import ArduinoCliUploadConfig
-from .serial import ensure_default_embedded_services, resolve_upload_port
+from .serial import ensure_default_embedded_services, resolve_port, resolve_upload_port
 
 
 def _should_build(run_mode: str) -> bool:
@@ -50,6 +50,11 @@ def _request_path(request: pytest.FixtureRequest) -> Path:
     if hasattr(request, "path"):
         return Path(request.path)
     return Path(str(request.fspath))
+
+
+def _request_has_sketch(request: pytest.FixtureRequest) -> bool:
+    test_path = resolve_test_path(_request_path(request))
+    return any(test_path.glob("*.ino"))
 
 
 def _terminal_reporter(config: pytest.Config) -> Any | None:
@@ -107,13 +112,14 @@ def _build_config_from_request(
     required: bool = True,
 ) -> ArduinoCliBuildConfig | None:
     config = request.config
+    should_require = required or _request_has_sketch(request)
     try:
         return ArduinoCliBuildConfig.from_test_path(
             _request_path(request),
             profile=config.getoption("profile"),
         )
     except SketchConfigError:
-        if required:
+        if should_require:
             raise
         return None
 
@@ -130,13 +136,30 @@ def arduino_cli_flasher(
 ) -> ArduinoCliUploadConfig:
     return ArduinoCliUploadConfig.from_build_config(
         arduino_cli_app,
-        port=resolve_upload_port(request.config),
+        port=resolve_upload_port(request.config, profile=arduino_cli_app.profile),
     )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def arduino_cli_resolved_port(request: pytest.FixtureRequest) -> None:
+    arduino_cli_app = _build_config_from_request(request, required=False)
+    if arduino_cli_app is None:
+        return
+
+    if getattr(request.config.option, "flash_port", None):
+        return
+    if getattr(request.config.option, "port", None):
+        return
+
+    resolved_port = resolve_port(request.config, profile=arduino_cli_app.profile)
+    if resolved_port:
+        request.config.option.port = resolved_port
 
 
 @pytest.fixture(scope="module", autouse=True)
 def arduino_cli_build(
     request: pytest.FixtureRequest,
+    arduino_cli_resolved_port: None,
 ) -> None:
     arduino_cli_app = _build_config_from_request(request, required=False)
     if arduino_cli_app is None:
@@ -162,6 +185,7 @@ def arduino_cli_build(
 def arduino_cli_upload(
     request: pytest.FixtureRequest,
     arduino_cli_build: None,
+    arduino_cli_resolved_port: None,
 ) -> None:
     run_mode = request.config.getoption("run_mode")
     if not _should_upload(run_mode):
@@ -177,7 +201,7 @@ def arduino_cli_upload(
 
     arduino_cli_flasher = ArduinoCliUploadConfig.from_build_config(
         arduino_cli_app,
-        port=resolve_upload_port(request.config),
+        port=resolve_upload_port(request.config, profile=arduino_cli_app.profile),
     )
 
     _log_command(
