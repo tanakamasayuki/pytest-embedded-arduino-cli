@@ -50,6 +50,16 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
 
 def pytest_configure(config: pytest.Config) -> None:
     ensure_default_embedded_services(config)
+    _set_optional_metadata(config)
+
+
+def _set_optional_metadata(config: pytest.Config) -> None:
+    try:
+        from pytest_metadata.plugin import metadata_key
+    except ImportError:
+        return
+
+    config.stash[metadata_key]["Profile"] = config.getoption("profile") or "default"
 
 
 def _request_path(request: pytest.FixtureRequest) -> Path:
