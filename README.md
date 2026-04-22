@@ -59,13 +59,13 @@ When pytest runs a specific `.py` file, this plugin treats that file's directory
 Build, upload, and run tests:
 
 ```bash
-uv run pytest tests/my_app --port /dev/ttyACM0
+uv run pytest tests/my_app --port=/dev/ttyACM0
 ```
 
 Select an Arduino CLI profile from `sketch.yaml`:
 
 ```bash
-uv run pytest tests/my_app --profile esp32s3 --port /dev/ttyACM0
+uv run pytest tests/my_app --profile esp32s3 --port=/dev/ttyACM0
 ```
 
 Build only:
@@ -77,7 +77,7 @@ uv run pytest tests/my_app --run-mode=build
 Upload and test against an already-built image:
 
 ```bash
-uv run pytest tests/my_app --run-mode=test --port /dev/ttyACM0
+uv run pytest tests/my_app --run-mode=test --port=/dev/ttyACM0
 ```
 
 `--run-mode=test` skips compile, reuses the existing build output, uploads it, and then runs the test.
@@ -109,6 +109,10 @@ For profile-specific serial ports, the plugin resolves ports in this order:
 2. `--port`
 3. `TEST_SERIAL_PORT_<PROFILE>`
 4. `TEST_SERIAL_PORT`
+
+Because of how `pytest` parses arguments, options that take path-like values such as `--port` and `--flash-port` are safer when written with `=`, for example `--port=/dev/ttyUSB0`.
+Depending on the environment, `uv run pytest --port /dev/ttyUSB0` may cause that path to be interpreted as another base path.
+If needed, `uv run pytest --rootdir . --port /dev/ttyUSB0` is also a valid workaround.
 
 Example:
 
@@ -144,7 +148,7 @@ Set values before running pytest:
 ```bash
 export TEST_WIFI_SSID=my-ssid
 export TEST_WIFI_PASSWORD=my-password
-uv run pytest tests/my_app
+uv run pytest tests/my_app --port=/dev/ttyACM0
 ```
 
 If an environment variable is missing, the plugin still passes the define with an empty string value.
@@ -195,6 +199,9 @@ Additional samples:
 - `examples/07_arduino_library_project`
   - Demonstrates a practical Arduino library project with `tests/` as the `uv` root
   - Includes `run_wsl.sh` as a practical test workspace example
+- `examples/08_arduino_ide_project`
+  - Demonstrates an Arduino IDE style sketch project with `tests/` as the `uv` root
+  - Uses thin wrapper `#include` files so the runner can reference sketch-side code that is not separated as a library
 
 Execution guidance for `examples/` is described in [examples/README.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.md).
 

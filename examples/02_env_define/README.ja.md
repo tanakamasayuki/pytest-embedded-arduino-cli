@@ -23,13 +23,13 @@
 ```bash
 export TEST_WIFI_SSID=my-ssid
 export TEST_WIFI_PASSWORD=my-password
-uv run pytest examples/02_env_define --port /dev/ttyUSB0
+uv run pytest examples/02_env_define --port=/dev/ttyUSB0
 ```
 
 同じ内容は `.env` ファイルから注入しても構いません。
 
 ```bash
-uv run --env-file .env pytest examples/02_env_define
+uv run --env-file .env pytest examples/02_env_define --port=/dev/ttyUSB0
 ```
 
 他の profile を使う例:

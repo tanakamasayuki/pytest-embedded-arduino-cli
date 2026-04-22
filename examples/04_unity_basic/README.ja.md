@@ -16,7 +16,7 @@ ESP32 では Arduino の標準環境で `unity.h` を利用できるため、追
 実行例:
 
 ```bash
-uv run pytest -s examples/04_unity_basic --port /dev/ttyUSB0
+uv run pytest -s examples/04_unity_basic --port=/dev/ttyUSB0
 ```
 
 sketch は起動時に 2 つの Unity テストケースを実行し、標準的な Unity のサマリを出力します。

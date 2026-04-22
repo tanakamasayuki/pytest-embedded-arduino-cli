@@ -14,13 +14,13 @@
 実行例:
 
 ```bash
-uv run pytest examples/03_dut_input --port /dev/ttyUSB0
+uv run pytest examples/03_dut_input --port=/dev/ttyUSB0
 ```
 
 他の profile を使う例:
 
 ```bash
-uv run pytest examples/03_dut_input --profile uno --port /dev/ttyACM0
+uv run pytest examples/03_dut_input --profile uno --port=/dev/ttyACM0
 ```
 
 テストは `READY` を待ってから `dut.write(...)` で1行送り、デバイスからの応答を検証します。

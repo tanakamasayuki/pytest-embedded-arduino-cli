@@ -1,11 +1,10 @@
-# demo_add_library
+# demo_add_sketch
 
-This is a small Arduino library project used as a realistic test layout example.
+This is a practical project example based on a sketch that can still be opened directly in Arduino IDE.
 
 Project root:
 
-- `library.properties`
-- `src/`
+- `basic_add/`
 - `tests/`
 - `.gitignore`
 
@@ -31,15 +30,19 @@ Run commands from `tests/`.
 Example:
 
 ```bash
-cd examples/07_arduino_library_project/demo_add_library/tests
+cd examples/08_arduino_ide_project/demo_add_sketch/tests
 cp .env.example .env
-uv run --env-file .env pytest basic_runner --profile esp32 --port=/dev/ttyUSB0
+uv run --env-file .env pytest unity_wrapper_runner --profile esp32 --port=/dev/ttyUSB0
 ```
 
-The `basic_runner` sketch uses the library directly.
+The `unity_wrapper_runner` sketch is the smallest example that runs Unity tests against the sketch-side code.
 
-Each runner keeps its own `sketch.yaml` next to the `.ino` file.
-In this example, `sketch.yaml` points back to the library root with `libraries: - dir: ../../`.
+In this layout, the application must remain a regular sketch project for Arduino IDE.
+That means the target code is not split out like a library project.
+Instead, the runner keeps thin wrapper files that `#include` the real files under `../../basic_add/`.
+
+Those wrappers are explicit static files.
+They do not copy or generate source code at runtime.
 
 ## run_wsl.sh
 

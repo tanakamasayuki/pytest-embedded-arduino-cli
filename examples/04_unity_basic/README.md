@@ -16,7 +16,7 @@ For boards such as `uno`, Unity is not available in the same way, so you would n
 Example:
 
 ```bash
-uv run pytest -s examples/04_unity_basic --port /dev/ttyUSB0
+uv run pytest -s examples/04_unity_basic --port=/dev/ttyUSB0
 ```
 
 The sketch runs two Unity test cases on boot and prints the standard Unity summary.

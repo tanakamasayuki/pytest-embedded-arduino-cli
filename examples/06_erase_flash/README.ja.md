@@ -13,7 +13,7 @@
 実行例:
 
 ```bash
-uv run pytest -s examples/06_erase_flash --port /dev/ttyUSB0
+uv run pytest -s examples/06_erase_flash --port=/dev/ttyUSB0
 ```
 
 erase が正しく行われていれば、毎回 `BOOT_COUNT 1` が出力されます。
