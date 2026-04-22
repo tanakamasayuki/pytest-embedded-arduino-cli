@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.1.0
 - (EN) Skip unsupported `--profile` values before build by treating profiles listed in `sketch.yaml` as the supported set for each sketch.
 - (JA) `sketch.yaml` に定義された profile を各 sketch の対応 profile とみなし、未対応の `--profile` は build 前に skip するように変更。
 - (EN) Expanded and reorganized `examples/` and related documentation, including basic usage samples, persistence / erase behavior, Unity-based testing, and independent project examples for both Arduino library-style and Arduino IDE-style layouts.
