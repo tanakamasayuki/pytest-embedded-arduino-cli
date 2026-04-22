@@ -5,6 +5,7 @@ import pytest
 from pytest_embedded_arduino_cli.app import (
     ArduinoCliBuildConfig,
     SketchConfigError,
+    UnsupportedProfileError,
     find_sketch_yaml,
     load_sketch_yaml,
     resolve_build_properties,
@@ -45,7 +46,7 @@ def test_resolve_profile_name_uses_default_profile() -> None:
 def test_resolve_profile_name_rejects_unknown_profile() -> None:
     sketch_data = {"profiles": {"uno": {}}}
 
-    with pytest.raises(SketchConfigError):
+    with pytest.raises(UnsupportedProfileError):
         resolve_profile_name(sketch_data, "mega")
 
 

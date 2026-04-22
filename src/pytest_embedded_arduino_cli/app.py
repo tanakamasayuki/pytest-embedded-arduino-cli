@@ -14,6 +14,10 @@ class SketchConfigError(ValueError):
     """Raised when the sketch directory or sketch.yaml is invalid."""
 
 
+class UnsupportedProfileError(SketchConfigError):
+    """Raised when a requested profile is not supported by the sketch."""
+
+
 def resolve_test_path(raw_path: str | Path) -> Path:
     path = Path(raw_path).resolve()
     if path.is_dir():
@@ -62,7 +66,7 @@ def resolve_profile_name(sketch_data: dict[str, Any], profile: str | None) -> st
     profiles = sketch_data.get("profiles") or {}
     if profile:
         if profiles and profile not in profiles:
-            raise SketchConfigError(f"profile '{profile}' not found in sketch.yaml")
+            raise UnsupportedProfileError(f"profile '{profile}' not found in sketch.yaml")
         return profile
 
     default_profile = sketch_data.get("default_profile")

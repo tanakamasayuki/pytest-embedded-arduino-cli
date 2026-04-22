@@ -1,23 +1,29 @@
-String readLineFromSerial() {
+String readLineFromSerial()
+{
   String line = "";
 
-  while (true) {
-    while (Serial.available() == 0) {
+  while (true)
+  {
+    while (Serial.available() == 0)
+    {
       delay(10);
     }
 
     char ch = static_cast<char>(Serial.read());
-    if (ch == '\r') {
+    if (ch == '\r')
+    {
       continue;
     }
-    if (ch == '\n') {
+    if (ch == '\n')
+    {
       return line;
     }
     line += ch;
   }
 }
 
-void setup() {
+void setup()
+{
   Serial.begin(115200);
   delay(1000);
 
@@ -28,4 +34,6 @@ void setup() {
   Serial.println("OK");
 }
 
-void loop() {}
+void loop()
+{
+}

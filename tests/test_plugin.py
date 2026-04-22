@@ -103,6 +103,34 @@ def test_paths(arduino_cli_app):
     result.assert_outcomes(passed=1)
 
 
+def test_plugin_skips_unsupported_profile_before_build(pytester: pytest.Pytester) -> None:
+    test_dir = pytester.path / "sample_app"
+    test_dir.mkdir()
+    (test_dir / "sample_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text(
+        "default_profile: esp32\nprofiles:\n  esp32: {}\n",
+        encoding="utf-8",
+    )
+    (test_dir / "test_sample.py").write_text(
+        """
+def test_never_reached():
+    assert False
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--profile",
+        "uno",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(skipped=1)
+
+
 def test_plugin_does_not_require_ino_for_plain_python_tests(pytester: pytest.Pytester) -> None:
     test_dir = pytester.path / "plain_tests"
     test_dir.mkdir()

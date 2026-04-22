@@ -12,4 +12,6 @@ void setup()
   Serial.println(result);
 }
 
-void loop() {}
+void loop()
+{
+}
