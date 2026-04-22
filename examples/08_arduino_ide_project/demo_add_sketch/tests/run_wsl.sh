@@ -24,6 +24,8 @@ CMD+="pushd ${WIN_DIR}"
 if [ -n "$UV_PROJECT_ENVIRONMENT_WIN" ]; then
   CMD+="&&set UV_PROJECT_ENVIRONMENT=${UV_PROJECT_ENVIRONMENT_WIN}"
 fi
-CMD+="&&uv run ${ENV} pytest --run-mode=test"
+CMD+="&&uv run ${ENV} pytest --run-mode=test $@"
+CMD+="&&start report.html"
+CMD+="&&timeout /t 1"
 
-cmd.exe /C "${CMD}" "$@"
+cmd.exe /C "${CMD}"
