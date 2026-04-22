@@ -7,16 +7,19 @@
 DemoAdd demo;
 
 #ifdef ARDUINO_ARCH_ESP32
-void test_add_positive_numbers() {
+void test_add_positive_numbers()
+{
   TEST_ASSERT_EQUAL(3, demo.add(1, 2));
 }
 
-void test_add_negative_numbers() {
+void test_add_negative_numbers()
+{
   TEST_ASSERT_EQUAL(-1, demo.add(2, -3));
 }
 #endif
 
-void setup() {
+void setup()
+{
   Serial.begin(115200);
   delay(1000);
 
