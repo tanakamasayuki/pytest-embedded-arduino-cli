@@ -1,7 +1,5 @@
 import re
-
 import pytest
-
 
 def test_unity_runner_executes_library_tests(dut, pytestconfig):
     if pytestconfig.getoption("profile") == "uno":
