@@ -1,17 +1,18 @@
-# 04_nvs_persistent
+# 05_nvs_persistent
 
 このサンプルは、ESP32 の永続領域が default では消去されないことを示します。
 
 - デフォルト profile は `esp32` です
 - 将来ほかの ESP32 系 target を追加した場合は `--profile` を明示して使います
-- `uno` はこの例では skip 用の経路としてだけ含めています
+- このサンプルは ESP32 の `Preferences` と NVS を対象にしています
+- `uno` のような非対応 profile は `sketch.yaml` に含めておらず、指定した場合は build 前に skip されます
 
 `uno` では挙動が異なり、近い話題は EEPROM ですが、このサンプルは ESP32 の `Preferences` と NVS を対象にしています。
 
 実行例:
 
 ```bash
-uv run pytest -s examples/04_nvs_persistent --port /dev/ttyUSB0
+uv run pytest -s examples/05_nvs_persistent --port /dev/ttyUSB0
 ```
 
 この sketch は `Preferences` に起動回数を保存します。
