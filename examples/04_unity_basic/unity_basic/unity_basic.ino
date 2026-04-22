@@ -1,16 +1,18 @@
-#include <DemoAdd.h>
 #include <unity.h>
 
-DemoAdd demo;
+int add(int left, int right)
+{
+  return left + right;
+}
 
 void test_add_positive_numbers()
 {
-  TEST_ASSERT_EQUAL(3, demo.add(1, 2));
+  TEST_ASSERT_EQUAL(3, add(1, 2));
 }
 
 void test_add_negative_numbers()
 {
-  TEST_ASSERT_EQUAL(-1, demo.add(2, -3));
+  TEST_ASSERT_EQUAL(-1, add(2, -3));
 }
 
 void setup()

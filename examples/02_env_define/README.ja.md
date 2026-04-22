@@ -4,7 +4,8 @@
 
 - デフォルト profile は `esp32` です
 - `esp32s3` を使う場合は `--profile` を明示します
-- `uno` は Wi-Fi が使えないため skip される経路の例としてだけサポートします
+- このサンプルは ESP32 系 target を対象にしています
+- `uno` のような非対応 profile は `sketch.yaml` に含めておらず、指定した場合は build 前に skip されます
 - sketch の中身は Wi-Fi ですが、サンプルの主眼は `build_config.toml` です
 
 このサンプルは `default_profile: esp32` を定義しているため、`--profile` なしでも動きます。

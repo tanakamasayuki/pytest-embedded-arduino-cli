@@ -1,17 +1,18 @@
-# 04_nvs_persistent
+# 05_nvs_persistent
 
 This sample demonstrates that ESP32 persistent storage is not erased by default.
 
 - The default profile is `esp32`
 - Use `--profile` explicitly if you add another ESP32-class target later
-- `uno` is included only as a skipped path for this example
+- This sample is specifically about ESP32 `Preferences` backed by NVS
+- Unsupported profiles such as `uno` are not listed in `sketch.yaml` and are skipped before build if selected
 
 On `uno`, the behavior is different and EEPROM would be a closer topic, but this sample is specifically about ESP32 `Preferences` backed by NVS.
 
 Example:
 
 ```bash
-uv run pytest -s examples/04_nvs_persistent --port /dev/ttyUSB0
+uv run pytest -s examples/05_nvs_persistent --port /dev/ttyUSB0
 ```
 
 This sketch stores a boot counter in `Preferences`.

@@ -180,19 +180,21 @@ Additional samples:
   - Includes port resolution from `TEST_SERIAL_PORT` and `TEST_SERIAL_PORT_<PROFILE>`
 - `examples/02_env_define`
   - Demonstrates compile-time defines from environment variables
-  - Uses Wi-Fi on ESP32-class targets and skips on `uno`
+  - Uses Wi-Fi on ESP32-class targets to explain `build_config.toml`
 - `examples/03_dut_input`
   - Demonstrates runtime input over serial through `dut.write(...)`
   - Works on both `esp32` and `uno`
-- `examples/04_nvs_persistent`
+- `examples/04_unity_basic`
+  - Demonstrates a minimal Unity-based test sketch for ESP32
+- `examples/05_nvs_persistent`
   - Demonstrates that ESP32 `Preferences` / NVS data remains by default
-  - Skips on `uno` because the example is specifically about ESP32 persistence
-- `examples/05_erase_flash`
+  - Unsupported profiles are skipped before build because the example is specifically about ESP32 persistence
+- `examples/06_erase_flash`
   - Demonstrates `EraseFlash=all` for resetting ESP32 persistent data before upload
-  - Pairs with `04_nvs_persistent`
-- `examples/06_arduino_library_project`
+  - Pairs with `05_nvs_persistent`
+- `examples/07_arduino_library_project`
   - Demonstrates a practical Arduino library project with `tests/` as the `uv` root
-  - Includes helper scripts for a practical test workspace
+  - Includes `run_wsl.sh` as a practical test workspace example
 
 Execution guidance for `examples/` is described in [examples/README.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.md).
 

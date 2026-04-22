@@ -4,7 +4,8 @@ This sample demonstrates compile-time defines loaded from environment variables.
 
 - The default profile is `esp32`
 - Use `--profile` explicitly when selecting `esp32s3`
-- `uno` is supported only as a skipped path because Wi-Fi is not available there
+- This sample targets ESP32-class boards
+- Unsupported profiles such as `uno` are not listed in `sketch.yaml` and are skipped before build if selected
 - The sketch itself uses Wi-Fi, but the focus of the example is `build_config.toml`
 
 This sample defines `default_profile: esp32`, so it also works without `--profile`.

@@ -184,19 +184,21 @@ void loop() {}
   - `TEST_SERIAL_PORT` と `TEST_SERIAL_PORT_<PROFILE>` による serial port 解決も含む
 - `examples/02_env_define`
   - 環境変数から compile-time define を渡す例
-  - ESP32 系では Wi-Fi を使い、`uno` では skip する
+  - ESP32 系 target 向けに、Wi-Fi を題材として `build_config.toml` を説明する
 - `examples/03_dut_input`
   - `dut.write(...)` による serial 経由の実行時入力を示す
   - `esp32` と `uno` の両方で動く
-- `examples/04_nvs_persistent`
+- `examples/04_unity_basic`
+  - ESP32 向けの最小 Unity テスト sketch を示す
+- `examples/05_nvs_persistent`
   - ESP32 の `Preferences` / NVS が default では残ることを示す
-  - ESP32 固有の永続領域の例なので `uno` では skip する
-- `examples/05_erase_flash`
+  - ESP32 固有の永続領域を扱うため、非対応 profile は build 前に skip される
+- `examples/06_erase_flash`
   - `EraseFlash=all` で ESP32 の永続データを upload 前に消去する例
-  - `04_nvs_persistent` と対にして使う
-- `examples/06_arduino_library_project`
+  - `05_nvs_persistent` と対にして使う
+- `examples/07_arduino_library_project`
   - `tests/` を `uv` ルートにした実プロジェクト向けの Arduino ライブラリ構成を示す
-  - 補助スクリプトを含む実用的なテストワークスペース例
+  - `run_wsl.sh` を含む実用的なテストワークスペース例
 
 `examples/` 配下の実行方法は [examples/README.ja.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.ja.md) にまとめています。
 

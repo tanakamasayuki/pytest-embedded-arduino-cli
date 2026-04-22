@@ -89,17 +89,20 @@ The directories are numbered in the recommended reading and verification order.
   - Also documents port resolution from `TEST_SERIAL_PORT` and `TEST_SERIAL_PORT_<PROFILE>`
 - `02_env_define`
   - Compile-time defines from environment variables
-  - Uses Wi-Fi to demonstrate a feature that `uno` should skip
+  - Uses Wi-Fi to explain `build_config.toml` on ESP32-class targets
 - `03_dut_input`
   - Runtime input sent over serial through `dut.write(...)`
   - Works on both `esp32` and `uno`
-- `04_nvs_persistent`
+- `04_unity_basic`
+  - Minimal Unity-based test sketch for ESP32
+  - Useful when you want device-side assertions instead of ad-hoc serial output checks
+- `05_nvs_persistent`
   - ESP32 `Preferences` / NVS data remains across runs by default
-  - `uno` is skipped because this example is specifically about ESP32 persistence
-- `05_erase_flash`
+  - Unsupported profiles are skipped before build because this example is specifically about ESP32 persistence
+- `06_erase_flash`
   - `EraseFlash=all` resets ESP32 persistent data before upload
-  - Pairs with `04_nvs_persistent` to show the difference
-- `06_arduino_library_project`
+  - Pairs with `05_nvs_persistent` to show the difference
+- `07_arduino_library_project`
   - Practical Arduino library project layout with `tests/` as the `uv` root
   - Includes shell and batch helper scripts for a practical test workspace
 
@@ -128,19 +131,25 @@ examples/
       sketch.yaml
       serial_dut_input.ino
       test_dut_input.py
-  04_nvs_persistent/
+  04_unity_basic/
+    README.md
+    unity_basic/
+      sketch.yaml
+      unity_basic.ino
+      test_unity_basic.py
+  05_nvs_persistent/
     README.md
     nvs_persistent/
       sketch.yaml
       nvs_persistent.ino
       test_nvs_persistent.py
-  05_erase_flash/
+  06_erase_flash/
     README.md
     nvs_erase_flash/
       sketch.yaml
       nvs_erase_flash.ino
       test_nvs_erase_flash.py
-  06_arduino_library_project/
+  07_arduino_library_project/
     README.md
     demo_add_library/
       library.properties
