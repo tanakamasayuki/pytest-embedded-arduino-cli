@@ -117,7 +117,16 @@ export TEST_SERIAL_PORT_ESP32S3=/dev/ttyUSB1
 uv run pytest tests/my_app --profile esp32s3
 ```
 
-`--profile` を省略した場合でも、plugin は `sketch.yaml` から解決した profile を使います。`default_profile` もこの対象です。
+profile の解決順は次のとおりです。
+
+1. `--profile` が指定されていればその profile を使う
+2. そうでなければ、`sketch.yaml` に `default_profile` が定義されていればそれを使う
+3. そうでなければ、`sketch.yaml` の profile が 1 つだけならそれを自動選択する
+4. それ以外で profile が複数ある場合は、曖昧なためエラーになる
+
+実運用では `--profile` を明示することを推奨します。
+`--profile` を省略したい場合は、`sketch.yaml` に `default_profile` を定義してください。
+profile が 1 つだけのときの自動選択は fallback としてサポートしていますが、通常の設定ではそれに依存しない方が明確です。
 
 compile-time define を渡したい場合は、sketch ディレクトリに `build_config.toml` を置きます。
 
@@ -169,11 +178,27 @@ void loop() {}
 
 追加サンプル:
 
-- `examples/wifi`
-  - ESP32 / ESP32-S3 で Wi-Fi 接続を行う
-  - Wi-Fi 非対応 profile の例として `uno` では skip する
-  - `TEST_WIFI_SSID` と `TEST_WIFI_PASSWORD` を使う
-  - ボードが `WIFI_OK <ip-address>` を出力することを検証する
+- `examples/01_basic`
+  - 最小構成の hello world
+  - `esp32` をデフォルト profile としつつ `uno` もサポートする
+  - `TEST_SERIAL_PORT` と `TEST_SERIAL_PORT_<PROFILE>` による serial port 解決も含む
+- `examples/02_env_define`
+  - 環境変数から compile-time define を渡す例
+  - ESP32 系では Wi-Fi を使い、`uno` では skip する
+- `examples/03_dut_input`
+  - `dut.write(...)` による serial 経由の実行時入力を示す
+  - `esp32` と `uno` の両方で動く
+- `examples/04_nvs_persistent`
+  - ESP32 の `Preferences` / NVS が default では残ることを示す
+  - ESP32 固有の永続領域の例なので `uno` では skip する
+- `examples/05_erase_flash`
+  - `EraseFlash=all` で ESP32 の永続データを upload 前に消去する例
+  - `04_nvs_persistent` と対にして使う
+- `examples/06_arduino_library_project`
+  - `tests/` を `uv` ルートにした実プロジェクト向けの Arduino ライブラリ構成を示す
+  - 補助スクリプトを含む実用的なテストワークスペース例
+
+`examples/` 配下の実行方法は [examples/README.ja.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.ja.md) にまとめています。
 
 ## warning について
 
