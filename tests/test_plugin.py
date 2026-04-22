@@ -1,8 +1,15 @@
 from pathlib import Path
+import sys
+import types
 
 import pytest
 
-from pytest_embedded_arduino_cli.plugin import _log_command, _should_build, _should_upload
+from pytest_embedded_arduino_cli.plugin import (
+    _log_command,
+    _set_optional_metadata,
+    _should_build,
+    _should_upload,
+)
 from pytest_embedded_arduino_cli.serial import (
     ensure_default_embedded_services,
     normalize_profile_name,
@@ -36,9 +43,14 @@ class DummyConfig:
             {
                 "verbose": verbose,
                 "embedded_services": embedded_services,
+                "profile": None,
             },
         )()
         self.pluginmanager = DummyPluginManager(reporter)
+        self.stash = {}
+
+    def getoption(self, name: str):
+        return getattr(self.option, name)
 
 
 def test_plugin_help_lists_options(pytester: pytest.Pytester) -> None:
@@ -245,3 +257,32 @@ def test_resolve_port_uses_explicit_profile_argument(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("TEST_SERIAL_PORT_ESP32", "/dev/ttyUSB0")
 
     assert resolve_port(config, profile="esp32") == "/dev/ttyUSB0"
+
+
+def test_set_optional_metadata_adds_profile_when_pytest_metadata_is_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata_key = object()
+    plugin_module = types.ModuleType("pytest_metadata.plugin")
+    plugin_module.metadata_key = metadata_key
+    pytest_metadata_pkg = types.ModuleType("pytest_metadata")
+
+    monkeypatch.setitem(sys.modules, "pytest_metadata", pytest_metadata_pkg)
+    monkeypatch.setitem(sys.modules, "pytest_metadata.plugin", plugin_module)
+
+    config = DummyConfig(verbose=0, reporter=None)
+    config.option.profile = "esp32"
+    config.stash[metadata_key] = {}
+
+    _set_optional_metadata(config)
+
+    assert config.stash[metadata_key]["Profile"] == "esp32"
+
+
+def test_set_optional_metadata_ignores_missing_pytest_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delitem(sys.modules, "pytest_metadata.plugin", raising=False)
+    monkeypatch.delitem(sys.modules, "pytest_metadata", raising=False)
+
+    config = DummyConfig(verbose=0, reporter=None)
+
+    _set_optional_metadata(config)
