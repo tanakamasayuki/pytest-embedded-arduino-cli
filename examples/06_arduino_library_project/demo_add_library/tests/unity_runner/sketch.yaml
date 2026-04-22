@@ -7,11 +7,4 @@ profiles:
     libraries:
       - dir: ../../
 
-  uno:
-    fqbn: arduino:avr:uno
-    platforms:
-      - platform: arduino:avr (1.8.6)
-    libraries:
-      - dir: ../../
-
 default_profile: esp32

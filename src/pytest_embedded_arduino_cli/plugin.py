@@ -6,7 +6,13 @@ from typing import Any
 
 import pytest
 
-from .app import ArduinoCliBuildConfig, SketchConfigError, resolve_sketch_dir, resolve_test_path
+from .app import (
+    ArduinoCliBuildConfig,
+    SketchConfigError,
+    UnsupportedProfileError,
+    resolve_sketch_dir,
+    resolve_test_path,
+)
 from .flasher import ArduinoCliUploadConfig
 from .serial import ensure_default_embedded_services, resolve_port, resolve_upload_port
 
@@ -90,6 +96,17 @@ def _log_command(
         reporter.write_line(f"[arduino-cli] {action} {key}: {value}")
 
 
+def _log_skip(config: pytest.Config, reason: str) -> None:
+    if _verbose_level(config) < 1:
+        return
+
+    reporter = _terminal_reporter(config)
+    if reporter is None:
+        return
+
+    reporter.write_line(f"[arduino-cli] skip: {reason}")
+
+
 @pytest.fixture
 def app_path(request: pytest.FixtureRequest) -> str:
     if not _request_has_sketch(request):
@@ -99,7 +116,11 @@ def app_path(request: pytest.FixtureRequest) -> str:
 
 @pytest.fixture
 def build_dir(request: pytest.FixtureRequest) -> str:
-    arduino_cli_app = _build_config_from_request(request, required=False)
+    try:
+        arduino_cli_app = _build_config_from_request(request, required=False)
+    except UnsupportedProfileError:
+        profile = request.config.getoption("profile") or "default"
+        return str(resolve_test_path(_request_path(request)) / "build" / profile)
     if arduino_cli_app is None:
         return str(resolve_test_path(_request_path(request)) / "build" / "default")
     return str(arduino_cli_app.build_path)
@@ -123,6 +144,8 @@ def _build_config_from_request(
             _request_path(request),
             profile=config.getoption("profile"),
         )
+    except UnsupportedProfileError:
+        raise
     except SketchConfigError:
         if should_require:
             raise
@@ -131,7 +154,11 @@ def _build_config_from_request(
 
 @pytest.fixture(scope="module")
 def arduino_cli_app(request: pytest.FixtureRequest) -> ArduinoCliBuildConfig:
-    return _build_config_from_request(request)
+    try:
+        return _build_config_from_request(request)
+    except UnsupportedProfileError as e:
+        _log_skip(request.config, str(e))
+        pytest.skip(str(e))
 
 
 @pytest.fixture(scope="module")
@@ -147,7 +174,11 @@ def arduino_cli_flasher(
 
 @pytest.fixture(scope="module", autouse=True)
 def arduino_cli_resolved_port(request: pytest.FixtureRequest) -> None:
-    arduino_cli_app = _build_config_from_request(request, required=False)
+    try:
+        arduino_cli_app = _build_config_from_request(request, required=False)
+    except UnsupportedProfileError as e:
+        _log_skip(request.config, str(e))
+        pytest.skip(str(e))
     if arduino_cli_app is None:
         return
 
@@ -166,7 +197,11 @@ def arduino_cli_build(
     request: pytest.FixtureRequest,
     arduino_cli_resolved_port: None,
 ) -> None:
-    arduino_cli_app = _build_config_from_request(request, required=False)
+    try:
+        arduino_cli_app = _build_config_from_request(request, required=False)
+    except UnsupportedProfileError as e:
+        _log_skip(request.config, str(e))
+        pytest.skip(str(e))
     if arduino_cli_app is None:
         return
     if not _should_build(request.config.getoption("run_mode")):
@@ -195,7 +230,11 @@ def arduino_cli_upload(
     run_mode = request.config.getoption("run_mode")
     if not _should_upload(run_mode):
         return
-    arduino_cli_app = _build_config_from_request(request, required=False)
+    try:
+        arduino_cli_app = _build_config_from_request(request, required=False)
+    except UnsupportedProfileError as e:
+        _log_skip(request.config, str(e))
+        pytest.skip(str(e))
     if arduino_cli_app is None:
         return
     if not arduino_cli_app.build_path.is_dir():

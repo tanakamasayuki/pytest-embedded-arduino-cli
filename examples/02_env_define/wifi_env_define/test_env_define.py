@@ -1,12 +1,6 @@
 import re
 
-import pytest
-
-
-def test_env_define_gets_ip_address(dut, pytestconfig):
-    if pytestconfig.getoption("profile") == "uno":
-        pytest.skip("Environment define example requires an ESP32-class profile")
-
+def test_env_define_gets_ip_address(dut):
     match = dut.expect(
         [
             re.compile(rb"WIFI_OK ((\d{1,3}\.){3}\d{1,3})"),
