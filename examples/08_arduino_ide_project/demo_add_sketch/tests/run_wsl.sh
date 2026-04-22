@@ -21,8 +21,10 @@ WIN_DIR=$(wslpath -w "$SCRIPT_DIR")
 
 CMD=""
 CMD+="pushd ${WIN_DIR}"
-if [ -n "$UV_PROJECT_ENVIRONMENT_WIN" ]; then
+if [ -n "${UV_PROJECT_ENVIRONMENT_WIN:-}" ]; then
   CMD+="&&set UV_PROJECT_ENVIRONMENT=${UV_PROJECT_ENVIRONMENT_WIN}"
+else
+  CMD+="&&set UV_PROJECT_ENVIRONMENT=%TEMP%/.venv.pytest"
 fi
 CMD+="&&uv run ${ENV} pytest --run-mode=test $@"
 CMD+="&&start report.html"
