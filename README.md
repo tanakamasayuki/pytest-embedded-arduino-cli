@@ -117,7 +117,16 @@ export TEST_SERIAL_PORT_ESP32S3=/dev/ttyUSB1
 uv run pytest tests/my_app --profile esp32s3
 ```
 
-If `--profile` is omitted, the plugin uses the resolved profile from `sketch.yaml`, including `default_profile`.
+Profile resolution works as follows:
+
+1. If `--profile` is specified, that profile is used
+2. Otherwise, if `sketch.yaml` defines `default_profile`, that profile is used
+3. Otherwise, if `sketch.yaml` has exactly one profile, it is selected automatically
+4. Otherwise, pytest exits with an error because the profile is ambiguous
+
+In practice, explicitly specifying `--profile` is recommended.
+If you do not want to pass `--profile`, define `default_profile` in `sketch.yaml`.
+The single-profile auto-selection is supported as a fallback, but it is better not to rely on it for regular project configuration.
 
 For compile-time defines, place a `build_config.toml` in the sketch directory:
 
@@ -163,13 +172,29 @@ void setup() {
 void loop() {}
 ```
 
-Additional sample:
+Additional samples:
 
-- `examples/wifi`
-  - Connects to Wi-Fi on ESP32/ESP32-S3
-  - Includes `uno` as a skip example for a non-Wi-Fi profile
-  - Expects `TEST_WIFI_SSID` and `TEST_WIFI_PASSWORD`
-  - Verifies that the board prints `WIFI_OK <ip-address>`
+- `examples/01_basic`
+  - Minimal hello-world example
+  - Uses `esp32` as the default profile and also supports `uno`
+  - Includes port resolution from `TEST_SERIAL_PORT` and `TEST_SERIAL_PORT_<PROFILE>`
+- `examples/02_env_define`
+  - Demonstrates compile-time defines from environment variables
+  - Uses Wi-Fi on ESP32-class targets and skips on `uno`
+- `examples/03_dut_input`
+  - Demonstrates runtime input over serial through `dut.write(...)`
+  - Works on both `esp32` and `uno`
+- `examples/04_nvs_persistent`
+  - Demonstrates that ESP32 `Preferences` / NVS data remains by default
+  - Skips on `uno` because the example is specifically about ESP32 persistence
+- `examples/05_erase_flash`
+  - Demonstrates `EraseFlash=all` for resetting ESP32 persistent data before upload
+  - Pairs with `04_nvs_persistent`
+- `examples/06_arduino_library_project`
+  - Demonstrates a practical Arduino library project with `tests/` as the `uv` root
+  - Includes helper scripts for a practical test workspace
+
+Execution guidance for `examples/` is described in [examples/README.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.md).
 
 ## Warnings
 

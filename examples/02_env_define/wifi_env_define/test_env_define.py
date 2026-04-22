@@ -3,9 +3,9 @@ import re
 import pytest
 
 
-def test_wifi_gets_ip_address(dut, pytestconfig):
+def test_env_define_gets_ip_address(dut, pytestconfig):
     if pytestconfig.getoption("profile") == "uno":
-        pytest.skip("Wi-Fi example requires an ESP32-class profile")
+        pytest.skip("Environment define example requires an ESP32-class profile")
 
     match = dut.expect(
         [
