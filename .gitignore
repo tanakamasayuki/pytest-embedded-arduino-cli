@@ -24,6 +24,7 @@ env/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+report.html
 
 # IDE / OS
 .DS_Store
