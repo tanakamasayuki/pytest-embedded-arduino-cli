@@ -11,19 +11,19 @@
 実行例:
 
 ```bash
-uv run pytest examples/01_basic --port /dev/ttyUSB0
+uv run pytest examples/01_basic --port=/dev/ttyUSB0
 ```
 
 sketch を直接指定しても構いません。
 
 ```bash
-uv run pytest examples/01_basic/basic --port /dev/ttyUSB0
+uv run pytest examples/01_basic/basic --port=/dev/ttyUSB0
 ```
 
 他の profile を使う例:
 
 ```bash
-uv run pytest examples/01_basic --profile uno --port /dev/ttyACM0
+uv run pytest examples/01_basic --profile uno --port=/dev/ttyACM0
 ```
 
 このサンプルでは、環境変数から serial port を解決する方法も確認できます。

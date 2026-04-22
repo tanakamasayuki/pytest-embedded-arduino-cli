@@ -12,7 +12,7 @@ On `uno`, the behavior is different and EEPROM would be a closer topic, but this
 Example:
 
 ```bash
-uv run pytest -s examples/05_nvs_persistent --port /dev/ttyUSB0
+uv run pytest -s examples/05_nvs_persistent --port=/dev/ttyUSB0
 ```
 
 This sketch stores a boot counter in `Preferences`.

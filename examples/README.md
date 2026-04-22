@@ -17,13 +17,13 @@ These examples assume you have a real device available.
 Common example command:
 
 ```bash
-uv run pytest examples/01_basic --port /dev/ttyUSB0
+uv run pytest examples/01_basic --port=/dev/ttyUSB0
 ```
 
 Select another profile explicitly when needed:
 
 ```bash
-uv run pytest examples/01_basic --profile uno --port /dev/ttyACM0
+uv run pytest examples/01_basic --profile uno --port=/dev/ttyACM0
 ```
 
 Sample-specific requirements are documented in each sample's own `README.md`.
@@ -53,7 +53,7 @@ This is especially useful for examples where the meaning comes from comparing pr
 Run the whole examples tree only when you want to verify all samples.
 
 ```bash
-uv run pytest examples/
+uv run pytest examples/ --port=/dev/ttyUSB0
 ```
 
 ## Basic Features
@@ -73,6 +73,10 @@ Port resolution uses this priority:
 2. `--port`
 3. `TEST_SERIAL_PORT_<PROFILE>`
 4. `TEST_SERIAL_PORT`
+
+Because of how `pytest` parses arguments, options that take path-like values such as `--port` and `--flash-port` are safer when written with `=`, for example `--port=/dev/ttyUSB0`.
+Depending on the environment, `uv run pytest --port /dev/ttyUSB0` may cause that path to be interpreted as another base path.
+If needed, `uv run pytest --rootdir . --port /dev/ttyUSB0` is also a valid workaround.
 
 Use verbosity when you need to inspect what the plugin is doing:
 
@@ -105,6 +109,9 @@ The directories are numbered in the recommended reading and verification order.
 - `07_arduino_library_project`
   - Practical Arduino library project layout with `tests/` as the `uv` root
   - Includes shell and batch helper scripts for a practical test workspace
+- `08_arduino_ide_project`
+  - Arduino IDE style sketch project with `tests/` as the `uv` root
+  - Demonstrates thin wrapper `#include` files for code that cannot be separated as a library
 
 ## Layout
 
@@ -154,6 +161,11 @@ examples/
     demo_add_library/
       library.properties
       src/
+      tests/
+  08_arduino_ide_project/
+    README.md
+    demo_add_sketch/
+      basic_add/
       tests/
 ```
 

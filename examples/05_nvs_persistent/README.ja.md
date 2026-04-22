@@ -12,7 +12,7 @@
 実行例:
 
 ```bash
-uv run pytest -s examples/05_nvs_persistent --port /dev/ttyUSB0
+uv run pytest -s examples/05_nvs_persistent --port=/dev/ttyUSB0
 ```
 
 この sketch は `Preferences` に起動回数を保存します。

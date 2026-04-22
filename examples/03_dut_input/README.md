@@ -14,13 +14,13 @@ Use this approach when you do not want to embed a value into the firmware image,
 Example:
 
 ```bash
-uv run pytest examples/03_dut_input --port /dev/ttyUSB0
+uv run pytest examples/03_dut_input --port=/dev/ttyUSB0
 ```
 
 Example with another profile:
 
 ```bash
-uv run pytest examples/03_dut_input --profile uno --port /dev/ttyACM0
+uv run pytest examples/03_dut_input --profile uno --port=/dev/ttyACM0
 ```
 
 The test waits for `READY`, sends a line through `dut.write(...)`, and then verifies the reply from the device.

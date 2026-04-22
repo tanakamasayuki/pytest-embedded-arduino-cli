@@ -13,7 +13,7 @@ Both sketches store a boot counter in ESP32 `Preferences`, but this sample erase
 Example:
 
 ```bash
-uv run pytest -s examples/06_erase_flash --port /dev/ttyUSB0
+uv run pytest -s examples/06_erase_flash --port=/dev/ttyUSB0
 ```
 
 The sketch should report `BOOT_COUNT 1` on every run as long as erase completes before upload.

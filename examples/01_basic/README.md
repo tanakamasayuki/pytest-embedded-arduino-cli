@@ -11,19 +11,19 @@ This sample defines `default_profile: esp32`, so it also works without `--profil
 Example:
 
 ```bash
-uv run pytest examples/01_basic --port /dev/ttyUSB0
+uv run pytest examples/01_basic --port=/dev/ttyUSB0
 ```
 
 You can also target the sketch directory directly.
 
 ```bash
-uv run pytest examples/01_basic/basic --port /dev/ttyUSB0
+uv run pytest examples/01_basic/basic --port=/dev/ttyUSB0
 ```
 
 Example with another profile:
 
 ```bash
-uv run pytest examples/01_basic --profile uno --port /dev/ttyACM0
+uv run pytest examples/01_basic --profile uno --port=/dev/ttyACM0
 ```
 
 This sample also demonstrates port resolution from environment variables.

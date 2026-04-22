@@ -23,13 +23,13 @@ Set environment variables before running it.
 ```bash
 export TEST_WIFI_SSID=my-ssid
 export TEST_WIFI_PASSWORD=my-password
-uv run pytest examples/02_env_define --port /dev/ttyUSB0
+uv run pytest examples/02_env_define --port=/dev/ttyUSB0
 ```
 
 You can also inject the same variables from an env file:
 
 ```bash
-uv run --env-file .env pytest examples/02_env_define
+uv run --env-file .env pytest examples/02_env_define --port=/dev/ttyUSB0
 ```
 
 Example with another profile:
