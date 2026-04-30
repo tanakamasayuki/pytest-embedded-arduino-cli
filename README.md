@@ -114,6 +114,23 @@ Because of how `pytest` parses arguments, options that take path-like values suc
 Depending on the environment, `uv run pytest --port /dev/ttyUSB0` may cause that path to be interpreted as another base path.
 If needed, `uv run pytest --rootdir . --port /dev/ttyUSB0` is also a valid workaround.
 
+For targets that run on the host machine and expose the DUT over TCP/IP, use the URL format supported by `pytest-embedded-serial` / pyserial.
+
+```bash
+uv run pytest tests/my_app --profile host --port=socket://localhost
+```
+
+When the port number is specified, such as `socket://localhost:56789`, the DUT connects to that socket directly.
+When the port number is omitted, such as `socket://localhost`, the plugin is expected to read `port` from `*.host-arduino.json` generated under the build output directory and then connect to `socket://localhost:<port>`.
+This resolution should prefer the host-arduino information file instead of capturing upload stdout.
+
+```json
+{
+  "pid": 21228,
+  "port": 56789
+}
+```
+
 Example:
 
 ```bash
@@ -202,6 +219,9 @@ Additional samples:
 - `examples/08_arduino_ide_project`
   - Demonstrates an Arduino IDE style sketch project with `tests/` as the `uv` root
   - Uses thin wrapper `#include` files so the runner can reference sketch-side code that is not separated as a library
+- `examples/09_host_arduino_core`
+  - Demonstrates a board core that builds and runs the Arduino sketch on the host machine
+  - Intended to connect from `--port=socket://localhost` to the TCP/IP endpoint opened by the host executable
 
 Execution guidance for `examples/` is described in [examples/README.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.md).
 
@@ -223,6 +243,7 @@ If you want to suppress it in your project, add a warning filter in `pytest.ini`
 - Board-family-specific upload strategies
 - Smarter artifact discovery
 - Serial reset / monitor helpers
+- TCP/IP connection helpers for host Arduino cores
 - Multi-device support
 - Optional `fqbn` or sketch path overrides
 

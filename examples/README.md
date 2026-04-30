@@ -78,6 +78,22 @@ Because of how `pytest` parses arguments, options that take path-like values suc
 Depending on the environment, `uv run pytest --port /dev/ttyUSB0` may cause that path to be interpreted as another base path.
 If needed, `uv run pytest --rootdir . --port /dev/ttyUSB0` is also a valid workaround.
 
+For board cores that run the Arduino sketch on the host machine, use a pyserial socket URL instead of a serial device path.
+
+```bash
+uv run pytest examples/09_host_arduino_core --profile host --port=socket://localhost
+```
+
+When the port number is omitted, such as `socket://localhost`, the plugin is expected to read `port` from `*.host-arduino.json` generated under the build output directory and complete the actual connection URL.
+When the port number is specified, such as `socket://localhost:56789`, that value is used directly.
+
+```json
+{
+  "pid": 21228,
+  "port": 56789
+}
+```
+
 Use verbosity when you need to inspect what the plugin is doing:
 
 - `-v`
@@ -112,6 +128,9 @@ The directories are numbered in the recommended reading and verification order.
 - `08_arduino_ide_project`
   - Arduino IDE style sketch project with `tests/` as the `uv` root
   - Demonstrates thin wrapper `#include` files for code that cannot be separated as a library
+- `09_host_arduino_core`
+  - Builds the sketch with host tools such as gcc and launches it as a host executable
+  - Intended to connect from `--port=socket://localhost` to the TCP/IP endpoint opened by the host executable
 
 ## Layout
 
@@ -167,6 +186,12 @@ examples/
     demo_add_sketch/
       basic_add/
       tests/
+  09_host_arduino_core/
+    README.md
+    host_smoke/
+      sketch.yaml
+      host_smoke.ino
+      test_host_smoke.py
 ```
 
 This plugin treats the directory containing the selected test file as the sketch directory.
