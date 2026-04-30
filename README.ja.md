@@ -114,6 +114,23 @@ profile ごとの serial port は次の順で解決します。
 環境によっては `uv run pytest --port /dev/ttyUSB0` の形だと、その path を別の基準パスとして解釈してしまうことがあります。
 必要なら `uv run pytest --rootdir . --port /dev/ttyUSB0` のように `--rootdir .` を明示しても構いません。
 
+host 上で動く Arduino core など、TCP/IP 経由で DUT に接続する target では、`pytest-embedded-serial` / pyserial の URL 形式を使う方針です。
+
+```bash
+uv run pytest tests/my_app --profile host --port=socket://localhost
+```
+
+`socket://localhost:56789` のように port 番号まで指定した場合は、その socket に直接接続します。
+`socket://localhost` のように port 番号を省略した場合は、build 出力ディレクトリに生成される `*.host-arduino.json` から `port` を読み取り、`socket://localhost:<port>` として DUT に接続する想定です。
+この解決では upload の標準出力ではなく、host-arduino の情報ファイルを優先して参照します。
+
+```json
+{
+  "pid": 21228,
+  "port": 56789
+}
+```
+
 例:
 
 ```bash
@@ -206,6 +223,9 @@ void loop() {}
 - `examples/08_arduino_ide_project`
   - `tests/` を `uv` ルートにした Arduino IDE 向け sketch プロジェクト構成を示す
   - ライブラリ分離できないコードを薄い wrapper `#include` で runner から参照する例
+- `examples/09_host_arduino_core`
+  - host machine 上で Arduino sketch をビルド・実行する board core の利用例
+  - `--port=socket://localhost` から host 実行ファイルの TCP/IP 接続先へ接続する想定
 
 `examples/` 配下の実行方法は [examples/README.ja.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.ja.md) にまとめています。
 
@@ -227,6 +247,7 @@ void loop() {}
 - board family ごとの upload strategy
 - artifact 探索の改善
 - serial reset / monitor helper
+- host Arduino core の TCP/IP 接続補助
 - 複数デバイス対応
 - `fqbn` や sketch path の override
 
