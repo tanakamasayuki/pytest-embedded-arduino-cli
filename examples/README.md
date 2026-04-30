@@ -94,6 +94,12 @@ When the port number is specified, such as `socket://localhost:56789`, that valu
 }
 ```
 
+Host execution is a lightweight test path for pure logic and serial protocol checks without physical hardware.
+Results may vary with the host OS, gcc or other toolchain versions, and platform implementations such as the host Arduino core's `Serial` class.
+It is not a replacement for real hardware testing.
+Use real hardware for peripherals, timing, interrupts, Flash/NVS, and board-specific APIs.
+Builds should also be checked separately with the production board profile.
+
 Use verbosity when you need to inspect what the plugin is doing:
 
 - `-v`
@@ -131,6 +137,7 @@ The directories are numbered in the recommended reading and verification order.
 - `09_host_arduino_core`
   - Builds the sketch with host tools such as gcc and launches it as a host executable
   - Intended to connect from `--port=socket://localhost` to the TCP/IP endpoint opened by the host executable
+  - Useful for simple pure-logic and serial-protocol checks, not a replacement for hardware tests or build tests with the real board profile
 
 ## Layout
 

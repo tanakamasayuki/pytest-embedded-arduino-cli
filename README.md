@@ -131,6 +131,11 @@ This resolution should prefer the host-arduino information file instead of captu
 }
 ```
 
+Host execution is an early, lightweight test path for pure logic and serial protocol checks without physical hardware.
+Results may differ depending on the host OS, gcc or other toolchain versions, and the `Serial` class implementation provided by the host Arduino core, so this does not guarantee behavior on real hardware.
+Use real hardware for peripherals, timing, interrupts, memory layout, Flash/NVS, and board-specific APIs.
+Build success can also differ by board core and platform, so running build tests with the production board profile is still recommended.
+
 Example:
 
 ```bash
@@ -222,6 +227,7 @@ Additional samples:
 - `examples/09_host_arduino_core`
   - Demonstrates a board core that builds and runs the Arduino sketch on the host machine
   - Intended to connect from `--port=socket://localhost` to the TCP/IP endpoint opened by the host executable
+  - Useful for simple pure-logic and serial-protocol checks, not a replacement for real hardware tests or build tests with the real board profile
 
 Execution guidance for `examples/` is described in [examples/README.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.md).
 

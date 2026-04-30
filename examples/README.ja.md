@@ -94,6 +94,12 @@ uv run pytest examples/09_host_arduino_core --profile host --port=socket://local
 }
 ```
 
+host 実行は、純粋なロジックや serial protocol を実機なしで確認するための簡易テストです。
+host machine の OS、gcc などの toolchain version、host Arduino core が提供する `Serial` class などの platform 実装差によって結果が変わることがあります。
+そのため、実機テストの代替ではありません。
+peripheral、timing、割り込み、Flash/NVS、board 固有 API は実機で確認してください。
+build についても本番で使う board profile で別途確認することを推奨します。
+
 plugin が何をしているか確認したい場合は verbosity を使います。
 
 - `-v`
@@ -131,6 +137,7 @@ plugin が何をしているか確認したい場合は verbosity を使いま�
 - `09_host_arduino_core`
   - host machine の gcc などで sketch をビルドし、host 上の実行ファイルとして起動する例
   - `--port=socket://localhost` から host 実行ファイルの TCP/IP 接続先へ接続する想定です
+  - 純粋なロジックや serial protocol の簡易確認向けで、実機テストや実 board profile の build test の代替ではありません
 
 ## ディレクトリ構成
 
