@@ -160,10 +160,16 @@ For compile-time defines, place a `build_config.toml` in the sketch directory:
 [defines]
 TEST_WIFI_SSID = "WIFI_SSID"
 TEST_WIFI_PASSWORD = "WIFI_PASSWORD"
+
+[flags]
+PYTEST_BUILD = true
+ENABLE_TEST_HOOKS = true
 ```
 
-Here, the left side is the environment variable name and the right side is the C/C++ define name.
+In `[defines]`, the left side is the environment variable name and the right side is the C/C++ define name.
 For example, `TEST_WIFI_SSID` becomes `-DWIFI_SSID="..."` at compile time.
+`[flags]` is for value-less defines.
+Only `true` entries are passed, such as `-DPYTEST_BUILD`; `false` entries are omitted.
 
 Set values before running pytest:
 
@@ -175,6 +181,8 @@ uv run pytest tests/my_app --port=/dev/ttyACM0
 
 If an environment variable is missing, the plugin still passes the define with an empty string value.
 This allows the test or sketch code to decide how to handle missing settings.
+The plugin does not add test flags such as `PYTEST_BUILD` automatically.
+Projects that need them should declare them explicitly under `[flags]`.
 
 For command visibility, follow pytest's standard verbosity:
 
@@ -228,6 +236,9 @@ Additional samples:
   - Demonstrates a board core that builds and runs the Arduino sketch on the host machine
   - Intended to connect from `--port=socket://localhost` to the TCP/IP endpoint opened by the host executable
   - Useful for simple pure-logic and serial-protocol checks, not a replacement for real hardware tests or build tests with the real board profile
+- `examples/10_build_flags`
+  - Demonstrates value-less compile-time defines with `[flags]` in `build_config.toml`
+  - Shows how a project can explicitly enable test flags such as `PYTEST_BUILD`
 
 Execution guidance for `examples/` is described in [examples/README.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.md).
 

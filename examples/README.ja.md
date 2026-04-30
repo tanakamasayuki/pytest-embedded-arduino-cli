@@ -138,6 +138,9 @@ plugin が何をしているか確認したい場合は verbosity を使いま�
   - host machine の gcc などで sketch をビルドし、host 上の実行ファイルとして起動する例
   - `--port=socket://localhost` から host 実行ファイルの TCP/IP 接続先へ接続する想定です
   - 純粋なロジックや serial protocol の簡易確認向けで、実機テストや実 board profile の build test の代替ではありません
+- `10_build_flags`
+  - `build_config.toml` の `[flags]` で値なし compile-time define を渡す例
+  - `PYTEST_BUILD` のようなテスト用 flag を project 側が明示する方法を示します
 
 ## ディレクトリ構成
 
@@ -199,6 +202,13 @@ examples/
       sketch.yaml
       host_smoke.ino
       test_host_smoke.py
+  10_build_flags/
+    README.ja.md
+    build_flag_switch/
+      sketch.yaml
+      build_config.toml
+      build_flag_switch.ino
+      test_build_flag_switch.py
 ```
 
 この plugin は、実行したテストファイルがあるディレクトリを sketch ディレクトリとして扱います。

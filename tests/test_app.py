@@ -141,6 +141,50 @@ def test_resolve_build_properties_uses_empty_string_for_missing_env(
     )
 
 
+def test_resolve_build_properties_includes_enabled_flags(tmp_path: Path) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(
+        sketch_dir / "build_config.toml",
+        "[flags]\nPYTEST_BUILD = true\nDEBUG_TRACE = false\nENABLE_TEST_HOOKS = true\n",
+    )
+
+    assert resolve_build_properties(sketch_dir) == (
+        "build.extra_flags=-DPYTEST_BUILD -DENABLE_TEST_HOOKS",
+    )
+
+
+def test_resolve_build_properties_combines_defines_and_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(
+        sketch_dir / "build_config.toml",
+        '[defines]\nTEST_API_URL = "API_URL"\n\n[flags]\nPYTEST_BUILD = true\n',
+    )
+    monkeypatch.setenv("TEST_API_URL", "https://example.test")
+
+    assert resolve_build_properties(sketch_dir) == (
+        'build.extra_flags=-DAPI_URL="https://example.test" -DPYTEST_BUILD',
+    )
+
+
+def test_load_build_config_rejects_non_mapping_flags(tmp_path: Path) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(sketch_dir / "build_config.toml", 'flags = ["PYTEST_BUILD"]\n')
+
+    with pytest.raises(SketchConfigError):
+        resolve_build_properties(sketch_dir)
+
+
+def test_resolve_build_properties_rejects_non_boolean_flags(tmp_path: Path) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(sketch_dir / "build_config.toml", '[flags]\nPYTEST_BUILD = "yes"\n')
+
+    with pytest.raises(SketchConfigError):
+        resolve_build_properties(sketch_dir)
+
+
 def test_build_command_includes_build_config_defines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sketch_dir = tmp_path / "sample"
     write_text(sketch_dir / "sample.ino", "void setup() {}\nvoid loop() {}\n")

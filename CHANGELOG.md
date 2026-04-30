@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Add `[flags]` support in `build_config.toml` for value-less compile-time defines and add `examples/10_build_flags`.
+- (JA) `build_config.toml` の `[flags]` で値なし compile-time define を渡せるようにし、`examples/10_build_flags` を追加。
 
 ## 1.1.0
 - (EN) Skip unsupported `--profile` values before build by treating profiles listed in `sketch.yaml` as the supported set for each sketch.
