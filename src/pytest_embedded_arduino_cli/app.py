@@ -111,6 +111,10 @@ def load_build_config(sketch_dir: str | Path) -> dict[str, Any]:
     if defines is not None and not isinstance(defines, dict):
         raise SketchConfigError(f"'defines' must be a mapping in {config_path}")
 
+    flags = data.get("flags", {})
+    if flags is not None and not isinstance(flags, dict):
+        raise SketchConfigError(f"'flags' must be a mapping in {config_path}")
+
     return data
 
 
@@ -133,6 +137,15 @@ def resolve_build_properties(
 
         value = os.getenv(env_name, "")
         extra_flags.append(f"-D{define_name}={_format_define_value(value)}")
+
+    flags = config.get("flags") or {}
+    for flag_name, enabled in flags.items():
+        if not isinstance(flag_name, str) or not isinstance(enabled, bool):
+            raise SketchConfigError(
+                "build_config.toml flags keys must be strings and values must be booleans"
+            )
+        if enabled:
+            extra_flags.append(f"-D{flag_name}")
 
     if not extra_flags:
         return ()

@@ -138,6 +138,9 @@ The directories are numbered in the recommended reading and verification order.
   - Builds the sketch with host tools such as gcc and launches it as a host executable
   - Intended to connect from `--port=socket://localhost` to the TCP/IP endpoint opened by the host executable
   - Useful for simple pure-logic and serial-protocol checks, not a replacement for hardware tests or build tests with the real board profile
+- `10_build_flags`
+  - Demonstrates value-less compile-time defines with `[flags]` in `build_config.toml`
+  - Shows how a project can explicitly enable test flags such as `PYTEST_BUILD`
 
 ## Layout
 
@@ -199,6 +202,13 @@ examples/
       sketch.yaml
       host_smoke.ino
       test_host_smoke.py
+  10_build_flags/
+    README.md
+    build_flag_switch/
+      sketch.yaml
+      build_config.toml
+      build_flag_switch.ino
+      test_build_flag_switch.py
 ```
 
 This plugin treats the directory containing the selected test file as the sketch directory.

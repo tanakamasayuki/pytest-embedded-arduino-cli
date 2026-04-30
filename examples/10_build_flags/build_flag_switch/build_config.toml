@@ -1,0 +1,4 @@
+[flags]
+PYTEST_BUILD = true
+ENABLE_TEST_HOOKS = true
+DISABLED_FLAG = false

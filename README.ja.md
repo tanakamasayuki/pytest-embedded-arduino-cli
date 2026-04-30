@@ -160,10 +160,16 @@ compile-time define を渡したい場合は、sketch ディレクトリに `bui
 [defines]
 TEST_WIFI_SSID = "WIFI_SSID"
 TEST_WIFI_PASSWORD = "WIFI_PASSWORD"
+
+[flags]
+PYTEST_BUILD = true
+ENABLE_TEST_HOOKS = true
 ```
 
-左側は環境変数名、右側は C/C++ 側で使う define 名です。
+`[defines]` の左側は環境変数名、右側は C/C++ 側で使う define 名です。
 例えば `TEST_WIFI_SSID` は compile 時に `-DWIFI_SSID="..."` に変換されます。
+`[flags]` は値なし define 用です。
+`true` の項目だけが `-DPYTEST_BUILD` のように渡され、`false` の項目は渡されません。
 
 実行前に対応する環境変数を設定しておくと、plugin が `arduino-cli compile --build-property build.extra_flags=...` に変換して渡します。
 
@@ -175,6 +181,8 @@ uv run pytest tests/my_app --port=/dev/ttyACM0
 
 環境変数が未設定でも、その define には空文字が渡されます。
 未設定をどう扱うかは、テスト側または sketch 側で判断できます。
+`PYTEST_BUILD` のようなテスト用 flag は plugin が自動では付与しません。
+必要な project が `build_config.toml` の `[flags]` で明示してください。
 
 ## verbosity とログ
 
@@ -232,6 +240,9 @@ void loop() {}
   - host machine 上で Arduino sketch をビルド・実行する board core の利用例
   - `--port=socket://localhost` から host 実行ファイルの TCP/IP 接続先へ接続する想定
   - 純粋なロジックや serial protocol の簡易確認向けで、実機テストや実 board profile の build test の代替ではない
+- `examples/10_build_flags`
+  - `build_config.toml` の `[flags]` で値なし compile-time define を渡す例
+  - `PYTEST_BUILD` のようなテスト用 flag を project 側が明示する方法を示す
 
 `examples/` 配下の実行方法は [examples/README.ja.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.ja.md) にまとめています。
 
