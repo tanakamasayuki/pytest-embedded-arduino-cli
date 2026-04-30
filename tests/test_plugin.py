@@ -11,10 +11,15 @@ from pytest_embedded_arduino_cli.plugin import (
     _should_upload,
 )
 from pytest_embedded_arduino_cli.serial import (
+    complete_host_arduino_socket_url,
     ensure_default_embedded_services,
+    find_host_arduino_port,
+    is_socket_url,
     normalize_profile_name,
+    read_host_arduino_port,
     resolve_port,
     resolve_upload_port,
+    socket_url_needs_port_completion,
 )
 
 
@@ -107,6 +112,60 @@ def test_paths(arduino_cli_app):
     result = pytester.runpytest(
         str(test_dir / "test_sample.py"),
         "--run-mode=test",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(passed=1)
+
+
+def test_plugin_completes_host_arduino_socket_port(pytester: pytest.Pytester) -> None:
+    test_dir = pytester.path / "host_app"
+    test_dir.mkdir()
+    build_dir = test_dir / "build" / "host"
+    build_dir.mkdir(parents=True)
+    (test_dir / "host_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text(
+        "default_profile: host\nprofiles:\n  host: {}\n",
+        encoding="utf-8",
+    )
+    pytester.makeconftest(
+        """
+from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
+from pytest_embedded_arduino_cli.flasher import ArduinoCliUploadConfig
+
+
+def _fake_compile(self, *, check=True):
+    self.build_path.mkdir(parents=True, exist_ok=True)
+    return None
+
+
+def _fake_upload(self, *, check=True):
+    assert self.port is None
+    (self.build_path / "host_app.ino.out.host-arduino.json").write_text(
+        '{"pid": 21228, "port": 56789}',
+        encoding="utf-8",
+    )
+    return None
+
+
+ArduinoCliBuildConfig.compile = _fake_compile
+ArduinoCliUploadConfig.upload = _fake_upload
+"""
+    )
+    (test_dir / "test_sample.py").write_text(
+        """
+def test_port_was_completed(request):
+    assert request.config.option.port == "socket://localhost:56789"
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=test",
+        "--port=socket://localhost",
         "-p",
         "no:embedded-arduino-cli",
         "-p",
@@ -249,6 +308,22 @@ def test_resolve_upload_port_falls_back_to_common_env(monkeypatch: pytest.Monkey
     assert resolve_upload_port(config) == "/dev/ttyUSB0"
 
 
+def test_resolve_upload_port_omits_socket_runtime_port() -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.option.port = "socket://localhost"
+    config.option.flash_port = None
+
+    assert resolve_upload_port(config) is None
+
+
+def test_resolve_upload_port_prefers_flash_port_over_socket_runtime_port() -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.option.port = "socket://localhost"
+    config.option.flash_port = "/dev/ttyACM0"
+
+    assert resolve_upload_port(config) == "/dev/ttyACM0"
+
+
 def test_resolve_port_uses_explicit_profile_argument(monkeypatch: pytest.MonkeyPatch) -> None:
     config = DummyConfig(verbose=0, reporter=None)
     config.option.port = None
@@ -257,6 +332,45 @@ def test_resolve_port_uses_explicit_profile_argument(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("TEST_SERIAL_PORT_ESP32", "/dev/ttyUSB0")
 
     assert resolve_port(config, profile="esp32") == "/dev/ttyUSB0"
+
+
+def test_socket_url_helpers() -> None:
+    assert is_socket_url("socket://localhost") is True
+    assert is_socket_url("/dev/ttyUSB0") is False
+    assert socket_url_needs_port_completion("socket://localhost") is True
+    assert socket_url_needs_port_completion("socket://localhost:56789") is False
+
+
+def test_read_host_arduino_port(tmp_path: Path) -> None:
+    info_path = tmp_path / "host_app.ino.out.host-arduino.json"
+    info_path.write_text('{"pid": 21228, "port": 56789}', encoding="utf-8")
+
+    assert read_host_arduino_port(info_path) == 56789
+
+
+def test_find_host_arduino_port(tmp_path: Path) -> None:
+    build_path = tmp_path / "build" / "host"
+    build_path.mkdir(parents=True)
+    (build_path / "host_app.ino.out.host-arduino.json").write_text(
+        '{"pid": 21228, "port": 56789}',
+        encoding="utf-8",
+    )
+
+    assert find_host_arduino_port(build_path) == 56789
+
+
+def test_complete_host_arduino_socket_url(tmp_path: Path) -> None:
+    build_path = tmp_path / "build" / "host"
+    build_path.mkdir(parents=True)
+    (build_path / "host_app.ino.out.host-arduino.json").write_text(
+        '{"pid": 21228, "port": 56789}',
+        encoding="utf-8",
+    )
+
+    assert (
+        complete_host_arduino_socket_url("socket://127.0.0.1", build_path)
+        == "socket://127.0.0.1:56789"
+    )
 
 
 def test_set_optional_metadata_adds_profile_when_pytest_metadata_is_available(
