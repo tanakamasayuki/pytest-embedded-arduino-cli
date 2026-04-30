@@ -99,6 +99,9 @@
 3. シリアルポート経由で DUT に接続する
 4. `dut.expect(...)` など `pytest-embedded` の標準的なインターフェースでテストする
 
+host machine 上で sketch を実行する board core では、物理 serial port の代わりに TCP/IP socket 経由で DUT に接続できること。
+この場合も Python テスト側は `dut.expect(...)` や `dut.write(...)` を使い、実機 serial と近い形で簡易テストできること。
+
 ### 6.2 実行モード
 
 少なくとも次のモードを想定する。
@@ -198,7 +201,7 @@ examples/
 - テストファイル位置に基づく sketch ディレクトリ解決
 - build path 解決
 - `sketch.yaml` と profile に基づく compile 条件の保持
-- `build_config.toml` に基づく compile-time define 注入
+- `build_config.toml` に基づく compile-time define / flag 注入
 - compile command の生成
 - subprocess 実行の薄いラッパ
 - テストしやすいよう、コマンド生成と実行を分離
@@ -243,7 +246,7 @@ examples/
 - API endpoint
 - テスト用フラグ
 
-このファイルは、環境変数名と compile-time define 名の対応を定義するために使う。
+このファイルは、環境変数名と compile-time define 名の対応、および値なし compile-time flag を定義するために使う。
 
 想定例:
 
@@ -251,10 +254,23 @@ examples/
 [defines]
 TEST_WIFI_SSID = "WIFI_SSID"
 TEST_WIFI_PASSWORD = "WIFI_PASSWORD"
+
+[flags]
+PYTEST_BUILD = true
+ENABLE_TEST_HOOKS = true
 ```
 
-plugin は指定された環境変数を読み、`arduino-cli compile --build-property build.extra_flags=...` に変換して渡す。
+`[defines]` は、左辺を環境変数名、右辺を C/C++ 側の define 名として扱う。
+plugin は指定された環境変数を読み、`-D<define名>="<環境変数値>"` の形で `arduino-cli compile --build-property build.extra_flags=...` に変換して渡す。
 環境変数が未設定でも、その define には空文字を渡す。
+
+`[flags]` は、値なし define を明示するために使う。
+左辺を C/C++ 側の macro 名、右辺を boolean として扱い、`true` の項目だけ `-D<macro名>` に変換する。
+`false` の項目は出力しない。
+boolean 以外の値は設定不備としてエラーにする。
+
+`PYTEST_BUILD` のようなテスト用 flag は、plugin が自動付与しない。
+本番 code path と異なるものを暗黙にテストすることを避けるため、必要な project が `build_config.toml` の `[flags]` で明示する。
 
 `.env` ファイルの自動読込は本仕様には含めない。
 
@@ -289,6 +305,8 @@ plugin は指定された環境変数を読み、`arduino-cli compile --build-pr
 - build artifact の生成責務を持たない
 - upload だけに集中する
 - board 固有最適化を初期段階では入れない
+- `--port=socket://...` のような runtime 接続先は、`arduino-cli upload --port` には渡さない
+- upload 後に runtime 接続先の補完が必要な場合は、DUT / Serial 連携層で扱う
 
 ## 12. DUT / Serial 連携要件
 
@@ -308,8 +326,47 @@ plugin は指定された環境変数を読み、`arduino-cli compile --build-pr
 - generic serial で接続できる前提のボードでテスト可能
 - `pytest-embedded` 標準 DUT を使った `expect` ベースの基本テストが成立する
 - profile ごとに異なる serial port を環境変数から解決できる
+- host machine 上で動作する board core では、pyserial の `socket://` URL を使って TCP/IP 経由で DUT に接続できる
 
-### 12.4 skip の責務分担
+### 12.4 host Arduino core の socket 接続
+
+host machine 上で Arduino sketch を実行する board core では、`--port=socket://localhost` のような port 番号なし socket URL を指定できるものとする。
+
+この場合の流れ:
+
+1. `arduino-cli compile` で host 実行ファイルをビルドする
+2. `arduino-cli upload` で host 実行ファイルを起動する
+3. build 出力ディレクトリ配下の `*.host-arduino.json` を探索する
+4. JSON の `port` を読み取る
+5. `socket://localhost:<port>` のように runtime 接続先を補完する
+6. `pytest-embedded-serial` / pyserial の socket URL として DUT に接続する
+
+host-arduino 情報ファイルの想定 schema:
+
+```json
+{
+  "pid": 21228,
+  "port": 56789
+}
+```
+
+`port` は 1 以上 65535 以下の整数であること。
+`pid` は初期実装では必須利用しないが、将来の cleanup や診断用途で利用できる。
+
+`socket://localhost:56789` のように port 番号まで指定された場合は、JSON 探索による補完を行わず、その URL をそのまま runtime 接続先として使う。
+
+`--flash-port` が指定された場合は既存の port 優先順位に従い、upload 用 port として優先する。
+host Arduino core の socket 実行では、通常 `--flash-port` は使わず `--port=socket://...` を使う運用を想定する。
+
+upload の標準出力に `HOST_ARDUINO_PORT=...` が出る場合でも、plugin は stdout capture を必須にしない。
+既存の upload 表示挙動を変えないため、port 解決は build 出力ディレクトリの `*.host-arduino.json` を優先する。
+
+host 実行は純粋なロジックや serial protocol の簡易確認用であり、実機テストの代替ではない。
+OS、gcc などの toolchain version、host core の `Serial` class 実装差により結果が変わる可能性がある。
+peripheral、timing、割り込み、Flash/NVS、board 固有 API は実機で確認する。
+また、本番で使う board profile での build test は別途行うことを推奨する。
+
+### 12.5 skip の責務分担
 
 本プラグインは、profile 非対応による skip を build 前に判定できるべきである。
 
@@ -352,6 +409,7 @@ build 実行前に profile 対応可否を判定し、非対応 profile の sket
 
 本プラグイン固有の upload 関連 option は追加しない。
 upload に必要な port 指定は `pytest-embedded` 標準の `--flash-port` または `--port` を使う。
+ただし、`--port=socket://...` は runtime 接続先を表すため、`arduino-cli upload --port` には渡さない。
 
 ### 13.4 serial / DUT 関連
 
@@ -368,6 +426,10 @@ serial port は次の優先順で解決できるようにする。
 
 profile ごとの環境変数名は、例えば `TEST_SERIAL_PORT_ESP32S3` のように profile 名を正規化した形式とする。
 共通環境変数は `TEST_SERIAL_PORT` とする。
+
+`--port` または環境変数に `socket://localhost` のような socket URL が指定された場合は、runtime 接続先として扱う。
+port 番号なしの socket URL は、upload 後に build 出力ディレクトリの `*.host-arduino.json` から `port` を読み取って補完する。
+port 番号ありの socket URL は補完せず、そのまま使う。
 
 ### 13.5 pytest 標準 verbosity 連携
 
@@ -402,7 +464,11 @@ build 前 skip が発生した場合、`-v` 以上では非対応 profile によ
 - テストファイル位置からの sketch ディレクトリ解決
 - `-v` / `-vv` に応じたログ出力の切り替え
 - `build_config.toml` と環境変数からの define 生成
+- `build_config.toml` の `[flags]` からの値なし define 生成
 - profile ごとの serial port 解決
+- `socket://localhost` のような host 実行向け runtime port 補完
+- `*.host-arduino.json` からの port 読み取り
+- socket URL を upload port に渡さないこと
 - 非対応 profile 指定時の build 前 skip
 - `default_profile` と単一 profile 自動選択の解決
 
@@ -433,6 +499,13 @@ build 前 skip が発生した場合、`-v` 以上では非対応 profile によ
 - 必要なら `pytest.ini` または CLI 指定例
 
 目的は「最小の build / upload / serial expect のつながり」を示すこととする。
+
+host Arduino core 向けの example では、次を示すこと。
+
+- `lang-ship:host:host` のような host 実行 profile
+- `--port=socket://localhost` による TCP/IP 経由の DUT 接続
+- `*.host-arduino.json` の `port` を使った socket URL 補完
+- host 実行は純粋なロジックや serial protocol の簡易確認向けで、実機テストや本物の board profile による build test の代替ではないこと
 
 ## 16. README 要件
 
