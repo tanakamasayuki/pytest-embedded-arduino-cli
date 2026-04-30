@@ -14,7 +14,13 @@ from .app import (
     resolve_test_path,
 )
 from .flasher import ArduinoCliUploadConfig
-from .serial import ensure_default_embedded_services, resolve_port, resolve_upload_port
+from .serial import (
+    complete_host_arduino_socket_url,
+    ensure_default_embedded_services,
+    resolve_port,
+    resolve_upload_port,
+    socket_url_needs_port_completion,
+)
 
 
 def _should_build(run_mode: str) -> bool:
@@ -271,6 +277,13 @@ def arduino_cli_upload(
         },
     )
     arduino_cli_flasher.upload()
+
+    runtime_port = resolve_port(request.config, profile=arduino_cli_app.profile)
+    if socket_url_needs_port_completion(runtime_port):
+        request.config.option.port = complete_host_arduino_socket_url(
+            runtime_port,
+            arduino_cli_app.build_path,
+        )
 
 
 @pytest.fixture(autouse=True)
