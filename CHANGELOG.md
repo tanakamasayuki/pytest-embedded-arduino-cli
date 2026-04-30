@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Add `examples/09_host_arduino_core` for host-machine Arduino core smoke tests with socket port auto-completion.
+- (JA) host machine 上で Arduino core を実行する smoke test 例として、socket port の自動補完を含む `examples/09_host_arduino_core` を追加。
 - (EN) Add `[flags]` support in `build_config.toml` for value-less compile-time defines and add `examples/10_build_flags`.
 - (JA) `build_config.toml` の `[flags]` で値なし compile-time define を渡せるようにし、`examples/10_build_flags` を追加。
 
