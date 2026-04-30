@@ -20,6 +20,17 @@ plugin 側では、`--port=socket://localhost` のように port 番号なしの
 }
 ```
 
+## 位置づけ
+
+このサンプルは、純粋なロジックや serial protocol を実機なしで確認するための簡易テストです。
+CI や開発中の早い確認には便利ですが、実機テストの代替ではありません。
+
+host machine 上での実行結果は、OS、gcc などの toolchain version、host Arduino core が提供する `Serial` class などの platform 実装差に影響されます。
+実機の peripheral、timing、割り込み、メモリ配置、Flash/NVS、board 固有 API の確認には使えません。
+
+また、この profile で compile が通っても、本番で使う board core / board option で compile が通るとは限りません。
+実運用では、本物の board profile を使った build test と実機テストを別途行ってください。
+
 想定コマンド:
 
 ```bash

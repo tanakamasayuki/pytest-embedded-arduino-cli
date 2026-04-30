@@ -20,6 +20,17 @@ When `--port=socket://localhost` is specified without a port number, the plugin 
 }
 ```
 
+## Scope
+
+This sample is a lightweight test path for pure logic and serial protocol checks without physical hardware.
+It is useful in CI and during development, but it is not a replacement for real hardware testing.
+
+Host execution can vary with the host OS, gcc or other toolchain versions, and platform implementations such as the `Serial` class provided by the host Arduino core.
+It cannot validate real peripherals, timing, interrupts, memory layout, Flash/NVS, or board-specific APIs.
+
+Also, compile success with this profile does not guarantee compile success with the board core and board options used in production.
+For real projects, run build tests with the actual board profile and run hardware tests separately.
+
 Expected command:
 
 ```bash

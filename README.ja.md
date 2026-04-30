@@ -131,6 +131,11 @@ uv run pytest tests/my_app --profile host --port=socket://localhost
 }
 ```
 
+host 上の実行は、実機なしで純粋なロジックや serial protocol の簡易的な確認を行うための前段テストです。
+実行結果は host machine の OS、gcc などの toolchain version、host Arduino core の `Serial` class 実装に影響されるため、実機上の動作を保証するものではありません。
+実機依存の peripheral、timing、割り込み、メモリ配置、Flash/NVS、board 固有 API は実機で確認してください。
+また、compile が通るかどうかも board core や platform ごとに差が出るため、本番で使う board profile での build test は別途実行することを推奨します。
+
 例:
 
 ```bash
@@ -226,6 +231,7 @@ void loop() {}
 - `examples/09_host_arduino_core`
   - host machine 上で Arduino sketch をビルド・実行する board core の利用例
   - `--port=socket://localhost` から host 実行ファイルの TCP/IP 接続先へ接続する想定
+  - 純粋なロジックや serial protocol の簡易確認向けで、実機テストや実 board profile の build test の代替ではない
 
 `examples/` 配下の実行方法は [examples/README.ja.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.ja.md) にまとめています。
 
