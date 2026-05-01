@@ -51,6 +51,8 @@ def test_ardutest_session_runs_protocol_by_name() -> None:
             "AT < HELLO 1 ArduTest 0.1.0",
             "AT < TEST test_true_passes",
             "AT < TEST test_metric_and_artifact",
+            "AT < REQUIRE test_metric_and_artifact measurement.current",
+            "AT < REQUIRE_CONFIG test_metric_and_artifact sample_rate",
             "AT < END_LIST",
             "AT < RUNNING test_metric_and_artifact",
             "AT < METRIC test_metric_and_artifact example_value 42",
@@ -67,6 +69,26 @@ def test_ardutest_session_runs_protocol_by_name() -> None:
     ]
     assert [result.name for result in results] == ["test_metric_and_artifact"]
     assert results[0].metrics == {"example_value": [42]}
+
+
+def test_ardutest_session_lists_metadata() -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_true_passes",
+            "AT < TEST test_metric_and_artifact",
+            "AT < REQUIRE test_metric_and_artifact measurement.current",
+            "AT < REQUIRE_CONFIG test_metric_and_artifact sample_rate",
+            "AT < END_LIST",
+        ]
+    )
+
+    tests = ArduTestSession(dut).list_tests()
+
+    assert tests[0].name == "test_true_passes"
+    assert tests[1].name == "test_metric_and_artifact"
+    assert tests[1].requirements == ("measurement.current",)
+    assert tests[1].required_configs == ("sample_rate",)
 
 
 def test_ardutest_session_resends_hello_after_ready() -> None:

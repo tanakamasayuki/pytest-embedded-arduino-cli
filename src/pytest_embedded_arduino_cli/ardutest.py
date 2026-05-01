@@ -19,6 +19,13 @@ class ArduTestEvent:
     message: str
 
 
+@dataclass(frozen=True)
+class ArduTestCase:
+    name: str
+    requirements: tuple[str, ...] = ()
+    required_configs: tuple[str, ...] = ()
+
+
 @dataclass
 class ArduTestResult:
     name: str
@@ -78,32 +85,57 @@ class ArduTestSession:
     def run(self, name: str | None = None) -> list[ArduTestResult]:
         return self._run_protocol(name)
 
-    def list_tests(self) -> list[str]:
+    def list_tests(self) -> list[ArduTestCase]:
         self._sync_hello()
         return self._list_tests_after_hello()
 
-    def _list_tests_after_hello(self) -> list[str]:
+    def _list_tests_after_hello(self) -> list[ArduTestCase]:
         self._send_command("AT > LIST")
 
-        tests: list[str] = []
+        tests: list[ArduTestCase] = []
+        by_name: dict[str, ArduTestCase] = {}
         while True:
             parsed = self._read_protocol_line()
             if parsed.kind in {"READY", "HELLO"}:
                 continue
             if parsed.kind == "END_LIST":
                 return tests
-            if parsed.kind != "TEST":
-                raise ArduTestError(f"expected ArduTest protocol TEST, got: AT < {parsed.kind} {parsed.fields}")
-            tests.append(parsed.fields)
+            if parsed.kind == "TEST":
+                test = ArduTestCase(name=parsed.fields)
+                tests.append(test)
+                by_name[test.name] = test
+                continue
+            if parsed.kind in {"REQUIRE", "REQUIRE_CONFIG"}:
+                test_name, value = self._parse_event_fields(parsed.fields)
+                if test_name is None or test_name not in by_name:
+                    raise ArduTestError(f"unknown ArduTest metadata target: AT < {parsed.kind} {parsed.fields}")
+                current = by_name[test_name]
+                if parsed.kind == "REQUIRE":
+                    updated = ArduTestCase(
+                        name=current.name,
+                        requirements=(*current.requirements, value),
+                        required_configs=current.required_configs,
+                    )
+                else:
+                    updated = ArduTestCase(
+                        name=current.name,
+                        requirements=current.requirements,
+                        required_configs=(*current.required_configs, value),
+                    )
+                by_name[test_name] = updated
+                tests[tests.index(current)] = updated
+                continue
+            raise ArduTestError(f"expected ArduTest protocol metadata, got: AT < {parsed.kind} {parsed.fields}")
 
     def _run_protocol(self, name: str | None = None) -> list[ArduTestResult]:
         tests = self.list_tests()
         return self._run_protocol_tests(tests, name)
 
-    def _run_protocol_tests(self, tests: list[str], name: str | None = None) -> list[ArduTestResult]:
-        selected_names = tests if name is None else [name]
-        if name is not None and name not in tests:
-            available = ", ".join(tests) or "(none)"
+    def _run_protocol_tests(self, tests: list[ArduTestCase], name: str | None = None) -> list[ArduTestResult]:
+        test_names = [test.name for test in tests]
+        selected_names = test_names if name is None else [name]
+        if name is not None and name not in test_names:
+            available = ", ".join(test_names) or "(none)"
             raise ArduTestError(f"unknown ArduTest test: {name}. Available tests: {available}")
 
         self.results = []
