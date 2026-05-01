@@ -8,6 +8,7 @@ ArduTest は Arduino 側ライブラリです。sketch は `sketch.yaml` の `li
 
 - `ardutest_basic`
   - 最小の `TEST_CASE` と `arduino_test.run()` の例
+  - ArduTest 側が failed または error を返した場合、`arduino_test.run()` が pytest の失敗として扱います
 - `ardutest_metadata`
   - requirement metadata、required config、log、metric、text artifact の例
 

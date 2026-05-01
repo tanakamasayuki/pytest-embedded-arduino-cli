@@ -234,6 +234,9 @@ def test_board(arduino_test):
     arduino_test.run()
 ```
 
+ArduTest 側が failed または error の結果を返した場合、`arduino_test.run()` が pytest の失敗として扱います。
+収集した log、metric、artifact、metadata まで確認したい場合だけ、追加の assert を書きます。
+
 現在の fixture は ArduTest protocol version `1` を使います。
 
 ## 例
