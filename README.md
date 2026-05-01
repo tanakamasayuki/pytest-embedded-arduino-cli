@@ -112,8 +112,8 @@ For profile-specific serial ports, the plugin resolves ports in this order:
 5. `profiles.<PROFILE>.port` in `sketch.yaml`, only when it is a `socket://...` URL
 
 Because of how `pytest` parses arguments, options that take path-like values such as `--port` and `--flash-port` are safer when written with `=`, for example `--port=/dev/ttyUSB0`.
-Depending on the environment, `uv run pytest --port=/dev/ttyUSB0` may cause that path to be interpreted as another base path.
-If needed, `uv run pytest --rootdir . --port=/dev/ttyUSB0` is also a valid workaround.
+Depending on the environment, `uv run pytest --port /dev/ttyUSB0` may cause that path to be interpreted as another base path.
+If needed, `uv run pytest --rootdir . --port /dev/ttyUSB0` is also a valid workaround.
 
 For targets that run on the host machine and expose the DUT over TCP/IP, use the URL format supported by `pytest-embedded-serial` / pyserial.
 If the selected `sketch.yaml` profile defines `port: socket://localhost`, `--port=socket://localhost` can be omitted.
