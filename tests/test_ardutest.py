@@ -5,30 +5,31 @@ import re
 import pytest
 
 from pytest_embedded_arduino_cli.ardutest import (
-    ARDUTEST_LINE_RE,
+    ARDUTEST_PROTOCOL_LINE_RE,
     ArduTestSession,
     parse_ardutest_line,
 )
 
 
 class FakeMatch:
-    def __init__(self, value: bytes) -> None:
-        self.value = value
+    def __init__(self, *values: bytes) -> None:
+        self.values = values
 
     def group(self, index: int) -> bytes:
-        assert index == 1
-        return self.value
+        return self.values[index - 1]
 
 
-class FakeDut:
+class ProtocolFakeDut:
     def __init__(self, lines: list[str]) -> None:
         self.lines = [f"{line}\n".encode() for line in lines]
-        self.patterns: list[re.Pattern[bytes]] = []
+        self.writes: list[str] = []
+
+    def write(self, value: str) -> None:
+        self.writes.append(value)
 
     def expect(self, pattern: re.Pattern[bytes], timeout: float):
-        assert pattern == ARDUTEST_LINE_RE
+        assert pattern == ARDUTEST_PROTOCOL_LINE_RE
         assert timeout == 30.0
-        self.patterns.append(pattern)
         if not self.lines:
             raise AssertionError("unexpected expect call")
         line = self.lines.pop(0)
@@ -44,60 +45,77 @@ def test_parse_ardutest_line_splits_kind_and_fields() -> None:
     assert parsed.fields == "test_example passed"
 
 
-def test_ardutest_session_collects_passing_results() -> None:
-    dut = FakeDut(
+def test_ardutest_session_runs_protocol_by_name() -> None:
+    dut = ProtocolFakeDut(
         [
-            "ARDUTEST BEGIN 0.1.0",
-            "ARDUTEST TESTS 2",
-            "ARDUTEST RUN test_true_passes",
-            "ARDUTEST LOG test_true_passes running test_true_passes",
-            "ARDUTEST RESULT test_true_passes passed",
-            "ARDUTEST RUN test_metric_and_artifact",
-            "ARDUTEST METRIC test_metric_and_artifact example_value 42",
-            "ARDUTEST ARTIFACT_TEXT test_metric_and_artifact note.txt hello from ArduTest",
-            "ARDUTEST RESULT test_metric_and_artifact passed",
-        ]
-    )
-
-    results = ArduTestSession(dut).run()
-
-    assert [result.name for result in results] == [
-        "test_true_passes",
-        "test_metric_and_artifact",
-    ]
-    assert [result.status for result in results] == ["passed", "passed"]
-    assert results[1].events[0].kind == "METRIC"
-    assert results[0].logs == ["running test_true_passes"]
-    assert results[1].metrics == {"example_value": [42]}
-    assert results[1].artifacts == {"note.txt": "hello from ArduTest"}
-
-
-def test_ardutest_session_can_select_one_result_by_name() -> None:
-    dut = FakeDut(
-        [
-            "ARDUTEST BEGIN 0.1.0",
-            "ARDUTEST TESTS 2",
-            "ARDUTEST RUN test_true_passes",
-            "ARDUTEST RESULT test_true_passes passed",
-            "ARDUTEST RUN test_metric_and_artifact",
-            "ARDUTEST METRIC test_metric_and_artifact example_value 42",
-            "ARDUTEST RESULT test_metric_and_artifact passed",
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_true_passes",
+            "AT < TEST test_metric_and_artifact",
+            "AT < END_LIST",
+            "AT < RUNNING test_metric_and_artifact",
+            "AT < METRIC test_metric_and_artifact example_value 42",
+            "AT < RESULT test_metric_and_artifact passed",
         ]
     )
 
     results = ArduTestSession(dut).run("test_metric_and_artifact")
 
+    assert dut.writes == [
+        "AT > HELLO 1\n",
+        "AT > LIST\n",
+        "AT > RUN test_metric_and_artifact\n",
+    ]
     assert [result.name for result in results] == ["test_metric_and_artifact"]
     assert results[0].metrics == {"example_value": [42]}
 
 
-def test_ardutest_session_errors_on_unknown_selected_name() -> None:
-    dut = FakeDut(
+def test_ardutest_session_resends_hello_after_ready() -> None:
+    dut = ProtocolFakeDut(
         [
-            "ARDUTEST BEGIN 0.1.0",
-            "ARDUTEST TESTS 1",
-            "ARDUTEST RUN test_true_passes",
-            "ARDUTEST RESULT test_true_passes passed",
+            "AT < READY",
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_true_passes",
+            "AT < END_LIST",
+            "AT < RUNNING test_true_passes",
+            "AT < RESULT test_true_passes passed",
+        ]
+    )
+
+    results = ArduTestSession(dut).run()
+
+    assert dut.writes == [
+        "AT > HELLO 1\n",
+        "AT > HELLO 1\n",
+        "AT > LIST\n",
+        "AT > RUN test_true_passes\n",
+    ]
+    assert [result.name for result in results] == ["test_true_passes"]
+
+
+def test_ardutest_session_ignores_duplicate_hello_before_list_items() -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < READY",
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_true_passes",
+            "AT < END_LIST",
+            "AT < RUNNING test_true_passes",
+            "AT < RESULT test_true_passes passed",
+        ]
+    )
+
+    results = ArduTestSession(dut).run()
+
+    assert [result.name for result in results] == ["test_true_passes"]
+
+
+def test_ardutest_session_errors_on_unknown_selected_name() -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_true_passes",
+            "AT < END_LIST",
         ]
     )
 
@@ -106,13 +124,14 @@ def test_ardutest_session_errors_on_unknown_selected_name() -> None:
 
 
 def test_ardutest_session_fails_pytest_on_failed_result() -> None:
-    dut = FakeDut(
+    dut = ProtocolFakeDut(
         [
-            "ARDUTEST BEGIN 0.1.0",
-            "ARDUTEST TESTS 1",
-            "ARDUTEST RUN test_fails",
-            "ARDUTEST FAIL test_fails sketch.ino:10 false",
-            "ARDUTEST RESULT test_fails failed",
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_fails",
+            "AT < END_LIST",
+            "AT < RUNNING test_fails",
+            "AT < FAIL test_fails sketch.ino:10 false",
+            "AT < RESULT test_fails failed",
         ]
     )
 
