@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import os
+import time
 from urllib.parse import urlparse
 
 from _pytest.config import Config
@@ -145,3 +146,14 @@ def complete_host_arduino_socket_url(port: str, build_path: str | Path) -> str:
         )
 
     return complete_socket_url(port, runtime_port)
+
+
+def wait_for_socket_url(port: str, timeout: float = 0.3, interval: float = 0.05) -> None:
+    if not socket_url_has_port(port):
+        return
+
+    # host-arduino writes the runtime port file before pytest-embedded opens
+    # the serial socket. A short passive delay avoids racing the listener
+    # without consuming the single socket connection with a readiness probe.
+    del interval
+    time.sleep(max(timeout, 0.0))

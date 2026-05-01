@@ -20,6 +20,7 @@ from pytest_embedded_arduino_cli.serial import (
     resolve_port,
     resolve_upload_port,
     socket_url_needs_port_completion,
+    wait_for_socket_url,
 )
 
 
@@ -173,6 +174,10 @@ def test_port_was_completed(request):
         "pytest_embedded_arduino_cli.plugin",
     )
     result.assert_outcomes(passed=1)
+
+
+def test_wait_for_socket_url_ignores_incomplete_socket_url() -> None:
+    wait_for_socket_url("socket://localhost", timeout=0.01)
 
 
 def test_plugin_uses_socket_profile_port_from_sketch_yaml(pytester: pytest.Pytester) -> None:
