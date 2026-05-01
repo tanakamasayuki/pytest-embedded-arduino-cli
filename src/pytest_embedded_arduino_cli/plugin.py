@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from .ardutest import ArduTestSession
 from .app import (
     ArduinoCliBuildConfig,
     SketchConfigError,
@@ -45,6 +46,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--profile",
         action="store",
         help="Arduino CLI sketch profile name from sketch.yaml.",
+    )
+    group.addoption(
+        "--arduino-test-timeout",
+        action="store",
+        type=float,
+        default=30.0,
+        help="Timeout in seconds while waiting for ArduTest serial output.",
     )
 
 
@@ -197,6 +205,14 @@ def arduino_cli_flasher(
     return ArduinoCliUploadConfig.from_build_config(
         arduino_cli_app,
         port=resolve_upload_port(request.config, profile=arduino_cli_app.profile),
+    )
+
+
+@pytest.fixture
+def arduino_test(request: pytest.FixtureRequest, dut: Any) -> ArduTestSession:
+    return ArduTestSession(
+        dut,
+        timeout=request.config.getoption("arduino_test_timeout"),
     )
 
 

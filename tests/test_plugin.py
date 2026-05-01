@@ -69,6 +69,7 @@ def test_plugin_help_lists_options(pytester: pytest.Pytester) -> None:
     stdout = result.stdout.str()
     assert "--run-mode={all,build,test}" in stdout
     assert "--profile=PROFILE" in stdout
+    assert "--arduino-test-timeout=ARDUINO_TEST_TIMEOUT" in stdout
     assert "--arduino-cli-build-path" not in stdout
     assert "--arduino-cli-upload-port" not in stdout
 
