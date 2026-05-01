@@ -74,6 +74,12 @@ Build only:
 uv run pytest tests/my_app --run-mode=build
 ```
 
+Force a clean Arduino CLI compile:
+
+```bash
+uv run pytest tests/my_app --clean
+```
+
 Upload and test against an already-built image:
 
 ```bash
@@ -92,6 +98,11 @@ uv run pytest
 
 - `--run-mode=all|build|test`
 - `--profile`
+- `--clean`
+- `--arduino-test-timeout=SECONDS`
+
+`--clean` passes `--clean` to `arduino-cli compile`.
+It is useful when Arduino CLI's incremental build cache should be ignored.
 
 Use `pytest-embedded` standard options for runtime control, such as:
 
@@ -137,6 +148,7 @@ Host execution is an early, lightweight test path for pure logic and serial prot
 Results may differ depending on the host OS, gcc or other toolchain versions, and the `Serial` class implementation provided by the host Arduino core, so this does not guarantee behavior on real hardware.
 Use real hardware for peripherals, timing, interrupts, memory layout, Flash/NVS, and board-specific APIs.
 Build success can also differ by board core and platform, so running build tests with the production board profile is still recommended.
+For `socket://...` ports, this plugin batches serial reads to avoid the very slow one-byte-at-a-time redirect behavior that can otherwise appear with host Arduino cores.
 
 Example:
 
@@ -190,6 +202,31 @@ For command visibility, follow pytest's standard verbosity:
 
 - `-v` shows the `arduino-cli compile` / `arduino-cli upload` command line
 - `-vv` also shows execution context such as `cwd`, `sketch_dir`, `build_path`, `profile`, and `port`
+
+## ArduTest Fixture
+
+This package also includes an experimental `arduino_test` fixture for sketches that use the bundled `env/ArduTest` Arduino library.
+The fixture speaks the ArduTest line protocol over the existing `dut` serial connection.
+
+```python
+def test_board(arduino_test):
+    arduino_test.run()
+```
+
+Current supported features include:
+
+- protocol synchronization and test listing
+- single-test or all-test execution
+- host-side skip decisions from requirements and required config
+- config delivery through `SET_CONFIG`
+- collection of logs, metrics, text artifacts, assertion failures, and final results
+
+Initial environment sources are:
+
+- `ARDUINO_TEST_CAP_<NAME>` for requirements
+- `ARDUINO_TEST_CONFIG_<NAME>` for config values
+
+Characters other than letters and digits in `<NAME>` are normalized to `_` and names are uppercased.
 
 ## Example
 

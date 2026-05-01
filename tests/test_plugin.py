@@ -71,6 +71,7 @@ def test_plugin_help_lists_options(pytester: pytest.Pytester) -> None:
     assert "--run-mode={all,build,test}" in stdout
     assert "--profile=PROFILE" in stdout
     assert "--arduino-test-timeout=ARDUINO_TEST_TIMEOUT" in stdout
+    assert "--clean" in stdout
     assert "--arduino-cli-build-path" not in stdout
     assert "--arduino-cli-upload-port" not in stdout
 
@@ -114,6 +115,54 @@ def test_paths(arduino_cli_app):
     result = pytester.runpytest(
         str(test_dir / "test_sample.py"),
         "--run-mode=test",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(passed=1)
+
+
+def test_plugin_passes_clean_to_build_config(pytester: pytest.Pytester) -> None:
+    test_dir = pytester.path / "sample_app"
+    test_dir.mkdir()
+    (test_dir / "build" / "uno").mkdir(parents=True)
+    (test_dir / "sample_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text(
+        "default_profile: uno\nprofiles:\n  uno: {}\n",
+        encoding="utf-8",
+    )
+    pytester.makeconftest(
+        """
+from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
+from pytest_embedded_arduino_cli.flasher import ArduinoCliUploadConfig
+
+
+def _fake_compile(self, *, check=True):
+    assert self.clean is True
+    assert "--clean" in self.build_command()
+    return None
+
+
+def _fake_upload(self, *, check=True):
+    return None
+
+
+ArduinoCliBuildConfig.compile = _fake_compile
+ArduinoCliUploadConfig.upload = _fake_upload
+"""
+    )
+    (test_dir / "test_sample.py").write_text(
+        """
+def test_clean_option(arduino_cli_app):
+    assert arduino_cli_app.clean is True
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--clean",
         "-p",
         "no:embedded-arduino-cli",
         "-p",
