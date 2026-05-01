@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
+import multiprocessing
 from pathlib import Path
 import json
 import os
+import queue
+import threading
 import time
+from typing import Any
 from urllib.parse import urlparse
 
 from _pytest.config import Config
@@ -13,8 +18,118 @@ class HostArduinoPortError(RuntimeError):
     """Raised when a host Arduino socket URL cannot be completed."""
 
 
+class FastSocketSerialRedirectThread(threading.Thread):
+    """Batch socket:// reads so host Arduino tests do not run at one byte per tick."""
+
+    def __init__(self, msg_queue: Any, serial_proc: Any) -> None:
+        self._q = msg_queue
+        self._event_q = multiprocessing.Queue()
+        self._s = serial_proc
+        self._block_reading = False
+        threading.Thread.__init__(self, target=self._event_loop, daemon=True)
+
+    @property
+    def _is_socket(self) -> bool:
+        return is_socket_url(getattr(self._s, "port", None))
+
+    def _read_available(self) -> bytes:
+        if self._is_socket:
+            return self._s.read(4096)
+        return self._s.read_all()
+
+    def _event_loop(self) -> None:
+        while True:
+            try:
+                event = self._event_q.get_nowait()
+            except queue.Empty:
+                event = "read"
+            except OSError:
+                return
+
+            if event == "read":
+                if self._block_reading:
+                    time.sleep(0.05)
+                    continue
+
+                try:
+                    data = self._read_available()
+                except OSError as e:
+                    logging.error("OSError detected: %s. Serial connection may be lost.", e)
+                    return
+                except Exception as e:
+                    logging.warning(
+                        "unknown error: %s.\nRecommend to close the serial process by `dut.serial.close()`",
+                        str(e),
+                    )
+                    return
+
+                try:
+                    self._q.put(data)
+                except OSError as e:
+                    logging.warning("OSError. Error msg: %s", e)
+                    return
+                except Exception as e:
+                    logging.warning(
+                        "unknown error: %s.\nRecommend to close the serial process by `dut.serial.close()`",
+                        str(e),
+                    )
+                    return
+
+                if self._is_socket and not data:
+                    time.sleep(0.005)
+
+            elif event == "stop":
+                self._block_reading = True
+            elif event == "start":
+                self._block_reading = False
+            elif event == "end":
+                return
+
+            if not self._is_socket:
+                time.sleep(0.05)
+
+    def stop_reading(self) -> None:
+        self._event_q.put("stop")
+
+    def start_reading(self) -> None:
+        self._event_q.put("start")
+
+    def terminate(self) -> None:
+        self._event_q.put("end")
+        self.join()
+
+
 def normalize_profile_name(profile: str) -> str:
     return profile.upper().replace("-", "_")
+
+
+def install_fast_socket_redirect_thread() -> None:
+    try:
+        import pytest_embedded_serial.serial as embedded_serial
+    except ImportError:
+        return
+
+    if getattr(embedded_serial, "_arduino_cli_fast_socket_redirect", False):
+        return
+
+    original_thread = embedded_serial._SerialRedirectThread
+
+    class PatchedSerialRedirectThread(FastSocketSerialRedirectThread, original_thread):  # type: ignore[misc, valid-type]
+        def __init__(self, msg_queue: Any, serial_proc: Any) -> None:
+            self._arduino_cli_fast_socket = is_socket_url(getattr(serial_proc, "port", None))
+            if self._arduino_cli_fast_socket:
+                FastSocketSerialRedirectThread.__init__(self, msg_queue, serial_proc)
+            else:
+                original_thread.__init__(self, msg_queue, serial_proc)
+
+        def _event_loop(self) -> None:
+            if getattr(self, "_arduino_cli_fast_socket", False):
+                FastSocketSerialRedirectThread._event_loop(self)
+            else:
+                original_thread._event_loop(self)
+
+    embedded_serial._SerialRedirectThread = PatchedSerialRedirectThread
+    embedded_serial._arduino_cli_fast_socket_redirect = True
 
 
 def ensure_default_embedded_services(config: Config) -> None:

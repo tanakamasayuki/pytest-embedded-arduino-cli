@@ -18,6 +18,7 @@ from .flasher import ArduinoCliUploadConfig
 from .serial import (
     complete_host_arduino_socket_url,
     ensure_default_embedded_services,
+    install_fast_socket_redirect_thread,
     is_socket_url,
     resolve_port,
     resolve_upload_port,
@@ -65,6 +66,7 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    install_fast_socket_redirect_thread()
     _remember_initial_ports(config)
     ensure_default_embedded_services(config)
     _set_optional_metadata(config)
