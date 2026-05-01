@@ -71,6 +71,8 @@ def test_ardutest_session_runs_protocol_by_name() -> None:
     assert dut.writes == [
         "AT > HELLO 1\n",
         "AT > LIST\n",
+        "AT > CLEAR_CONFIG\n",
+        "AT > SET_CONFIG sample_rate 4\n1000",
         "AT > RUN test_metric_and_artifact\n",
     ]
     assert [result.name for result in results] == ["test_metric_and_artifact"]
@@ -137,6 +139,34 @@ def test_ardutest_session_lists_metadata() -> None:
     assert tests[1].required_configs == ("sample_rate",)
 
 
+def test_ardutest_session_reuses_listed_metadata_for_run() -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_metric_and_artifact",
+            "AT < REQUIRE_CONFIG test_metric_and_artifact sample_rate",
+            "AT < END_LIST",
+            "AT < RUNNING test_metric_and_artifact",
+            "AT < METRIC test_metric_and_artifact sample_rate 1000",
+            "AT < RESULT test_metric_and_artifact passed",
+        ]
+    )
+    session = ArduTestSession(dut, environ={"ARDUINO_TEST_CONFIG_SAMPLE_RATE": "1000"})
+
+    assert [test.name for test in session.list_tests()] == ["test_metric_and_artifact"]
+    results = session.run("test_metric_and_artifact")
+
+    assert dut.writes == [
+        "AT > HELLO 1\n",
+        "AT > LIST\n",
+        "AT > CLEAR_CONFIG\n",
+        "AT > SET_CONFIG sample_rate 4\n1000",
+        "AT > RUN test_metric_and_artifact\n",
+    ]
+    assert results[0].metrics == {"sample_rate": [1000]}
+    assert session.metrics == {"test_metric_and_artifact": {"sample_rate": [1000]}}
+
+
 def test_ardutest_session_resends_hello_after_ready() -> None:
     dut = ProtocolFakeDut(
         [
@@ -152,6 +182,7 @@ def test_ardutest_session_resends_hello_after_ready() -> None:
     results = ArduTestSession(dut).run()
 
     assert dut.writes == [
+        "AT > HELLO 1\n",
         "AT > HELLO 1\n",
         "AT > HELLO 1\n",
         "AT > LIST\n",
