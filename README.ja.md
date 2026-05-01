@@ -193,6 +193,13 @@ export TEST_WIFI_PASSWORD=my-password
 uv run pytest tests/my_app --port=/dev/ttyACM0
 ```
 
+これらの値は `uv run` の dotenv 読み込みでも渡せます。
+`--env-file` は pytest ではなく `uv` の option なので、`pytest` より前に書きます。
+
+```bash
+uv run --env-file .env pytest tests/my_app --port=/dev/ttyACM0
+```
+
 環境変数が未設定でも、その define には空文字が渡されます。
 未設定をどう扱うかは、テスト側または sketch 側で判断できます。
 `PYTEST_BUILD` のようなテスト用 flag は plugin が自動では付与しません。
