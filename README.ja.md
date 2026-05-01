@@ -216,28 +216,16 @@ uv run --env-file .env pytest tests/my_app --port=/dev/ttyACM0
 
 ## ArduTest fixture
 
-この package には、同梱の `env/ArduTest` Arduino ライブラリを使う sketch 向けの実験的な `arduino_test` fixture も含まれます。
-fixture は既存の `dut` serial 接続上で ArduTest line protocol を使って通信します。
+この package には、別管理の Arduino 側 ArduTest ライブラリを使う sketch 向けの実験的な `arduino_test` fixture も含まれます。
+ArduTest は sketch の `sketch.yaml` で宣言し、再現性のあるテストにするために library version もそこで固定する想定です。
+細かい使い方は API と protocol が固まってから `examples/` に追加します。
 
 ```python
 def test_board(arduino_test):
     arduino_test.run()
 ```
 
-現時点で対応している主な機能:
-
-- protocol sync と test 一覧取得
-- 単一 test または全 test の実行
-- requirement と required config に基づく host 側 skip 判定
-- `SET_CONFIG` による config 配布
-- log、metric、text artifact、assertion failure、最終 result の収集
-
-初期実装で使う環境変数:
-
-- `ARDUINO_TEST_CAP_<NAME>`: requirement の有無
-- `ARDUINO_TEST_CONFIG_<NAME>`: config 値
-
-`<NAME>` 内の英数字以外は `_` に正規化され、大文字化されます。
+現在の fixture は ArduTest protocol version `1` を使います。
 
 ## 例
 
