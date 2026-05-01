@@ -88,6 +88,22 @@ def resolve_profile_name(sketch_data: dict[str, Any], profile: str | None) -> st
     return None
 
 
+def resolve_profile_port(sketch_data: dict[str, Any], profile: str | None) -> str | None:
+    if profile is None:
+        return None
+
+    profiles = sketch_data.get("profiles") or {}
+    profile_data = profiles.get(profile)
+    if not isinstance(profile_data, dict):
+        return None
+
+    port = profile_data.get("port")
+    if not isinstance(port, str):
+        return None
+
+    return port
+
+
 def resolve_build_path(sketch_dir: str | Path, profile: str | None, build_path: str | Path | None = None) -> Path:
     if build_path:
         return Path(build_path).resolve()
@@ -159,6 +175,7 @@ class ArduinoCliBuildConfig:
     sketch_yaml: Path
     build_path: Path
     profile: str | None = None
+    profile_port: str | None = None
     build_properties: tuple[str, ...] = field(default_factory=tuple)
     extra_args: tuple[str, ...] = field(default_factory=tuple)
     clean: bool = False
@@ -181,6 +198,7 @@ class ArduinoCliBuildConfig:
         sketch_data = load_sketch_yaml(sketch_yaml)
         build_config = load_build_config(sketch_dir)
         resolved_profile = resolve_profile_name(sketch_data, profile)
+        resolved_profile_port = resolve_profile_port(sketch_data, resolved_profile)
         resolved_build_path = resolve_build_path(sketch_dir, resolved_profile, build_path)
         resolved_build_properties = tuple(build_properties) + resolve_build_properties(sketch_dir, build_config)
         return cls(
@@ -188,6 +206,7 @@ class ArduinoCliBuildConfig:
             sketch_yaml=sketch_yaml,
             build_path=resolved_build_path,
             profile=resolved_profile,
+            profile_port=resolved_profile_port,
             build_properties=resolved_build_properties,
             extra_args=tuple(extra_args),
             clean=clean,

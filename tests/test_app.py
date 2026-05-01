@@ -11,6 +11,7 @@ from pytest_embedded_arduino_cli.app import (
     resolve_build_properties,
     resolve_build_path,
     resolve_profile_name,
+    resolve_profile_port,
     resolve_sketch_dir,
 )
 
@@ -55,6 +56,23 @@ def test_resolve_profile_name_rejects_ambiguous_profiles() -> None:
 
     with pytest.raises(SketchConfigError):
         resolve_profile_name(sketch_data, None)
+
+
+def test_resolve_profile_port_reads_selected_profile_port() -> None:
+    sketch_data = {
+        "profiles": {
+            "host": {"port": "socket://localhost"},
+            "esp32": {"port": "/dev/ttyUSB0"},
+        }
+    }
+
+    assert resolve_profile_port(sketch_data, "host") == "socket://localhost"
+
+
+def test_resolve_profile_port_ignores_missing_or_non_string_port() -> None:
+    assert resolve_profile_port({"profiles": {"host": {}}}, "host") is None
+    assert resolve_profile_port({"profiles": {"host": {"port": 1234}}}, "host") is None
+    assert resolve_profile_port({"profiles": {"host": {"port": "socket://localhost"}}}, None) is None
 
 
 def test_default_build_path_uses_profile_name(tmp_path: Path) -> None:

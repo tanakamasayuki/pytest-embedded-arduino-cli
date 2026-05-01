@@ -73,15 +73,17 @@ Port resolution uses this priority:
 2. `--port`
 3. `TEST_SERIAL_PORT_<PROFILE>`
 4. `TEST_SERIAL_PORT`
+5. `profiles.<PROFILE>.port` in `sketch.yaml`, only when it is a `socket://...` URL
 
 Because of how `pytest` parses arguments, options that take path-like values such as `--port` and `--flash-port` are safer when written with `=`, for example `--port=/dev/ttyUSB0`.
-Depending on the environment, `uv run pytest --port /dev/ttyUSB0` may cause that path to be interpreted as another base path.
-If needed, `uv run pytest --rootdir . --port /dev/ttyUSB0` is also a valid workaround.
+Depending on the environment, `uv run pytest --port=/dev/ttyUSB0` may cause that path to be interpreted as another base path.
+If needed, `uv run pytest --rootdir . --port=/dev/ttyUSB0` is also a valid workaround.
 
 For board cores that run the Arduino sketch on the host machine, use a pyserial socket URL instead of a serial device path.
+If the selected profile defines `port: socket://localhost`, `--port=socket://localhost` can be omitted.
 
 ```bash
-uv run pytest examples/09_host_arduino_core --profile host --port=socket://localhost
+uv run pytest examples/09_host_arduino_core --profile host
 ```
 
 When the port number is omitted, such as `socket://localhost`, the plugin is expected to read `port` from `*.host-arduino.json` generated under the build output directory and complete the actual connection URL.
@@ -136,7 +138,7 @@ The directories are numbered in the recommended reading and verification order.
   - Demonstrates thin wrapper `#include` files for code that cannot be separated as a library
 - `09_host_arduino_core`
   - Builds the sketch with host tools such as gcc and launches it as a host executable
-  - Intended to connect from `--port=socket://localhost` to the TCP/IP endpoint opened by the host executable
+  - Uses `port: socket://localhost` in `sketch.yaml` to connect to the TCP/IP endpoint opened by the host executable
   - Useful for simple pure-logic and serial-protocol checks, not a replacement for hardware tests or build tests with the real board profile
 - `10_build_flags`
   - Demonstrates value-less compile-time defines with `[flags]` in `build_config.toml`

@@ -1,6 +1,10 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Reset internally completed host socket ports for each sketch so multi-sketch runs do not reuse the previous runtime port.
+- (JA) 複数 sketch の実行で前の runtime port を再利用しないよう、内部補完した host socket port を sketch ごとにリセットするように修正。
+- (EN) Auto-resolve host socket ports from `profiles.<profile>.port` in `sketch.yaml` when no CLI or environment port is specified.
+- (JA) CLI または環境変数で port が未指定の場合に、`sketch.yaml` の `profiles.<profile>.port` から host socket port を自動解決するように変更。
 - (EN) Add `examples/09_host_arduino_core` for host-machine Arduino core smoke tests with socket port auto-completion.
 - (JA) host machine 上で Arduino core を実行する smoke test 例として、socket port の自動補完を含む `examples/09_host_arduino_core` を追加。
 - (EN) Add `[flags]` support in `build_config.toml` for value-less compile-time defines and add `examples/10_build_flags`.

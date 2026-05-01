@@ -174,6 +174,233 @@ def test_port_was_completed(request):
     result.assert_outcomes(passed=1)
 
 
+def test_plugin_uses_socket_profile_port_from_sketch_yaml(pytester: pytest.Pytester) -> None:
+    test_dir = pytester.path / "host_app"
+    test_dir.mkdir()
+    build_dir = test_dir / "build" / "host"
+    build_dir.mkdir(parents=True)
+    (test_dir / "host_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text(
+        "default_profile: host\nprofiles:\n  host:\n    port: socket://localhost\n",
+        encoding="utf-8",
+    )
+    pytester.makeconftest(
+        """
+from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
+from pytest_embedded_arduino_cli.flasher import ArduinoCliUploadConfig
+
+
+def _fake_compile(self, *, check=True):
+    self.build_path.mkdir(parents=True, exist_ok=True)
+    return None
+
+
+def _fake_upload(self, *, check=True):
+    assert self.port is None
+    (self.build_path / "host_app.ino.out.host-arduino.json").write_text(
+        '{"pid": 21228, "port": 56789}',
+        encoding="utf-8",
+    )
+    return None
+
+
+ArduinoCliBuildConfig.compile = _fake_compile
+ArduinoCliUploadConfig.upload = _fake_upload
+"""
+    )
+    (test_dir / "test_sample.py").write_text(
+        """
+def test_port_was_completed_from_sketch_yaml(request):
+    assert request.config.option.port == "socket://localhost:56789"
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=test",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(passed=1)
+
+
+def test_plugin_ignores_non_socket_profile_port(pytester: pytest.Pytester) -> None:
+    test_dir = pytester.path / "host_app"
+    test_dir.mkdir()
+    build_dir = test_dir / "build" / "host"
+    build_dir.mkdir(parents=True)
+    (test_dir / "host_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text(
+        "default_profile: host\nprofiles:\n  host:\n    port: /dev/ttyUSB0\n",
+        encoding="utf-8",
+    )
+    pytester.makeconftest(
+        """
+from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
+from pytest_embedded_arduino_cli.flasher import ArduinoCliUploadConfig
+
+
+def _fake_compile(self, *, check=True):
+    self.build_path.mkdir(parents=True, exist_ok=True)
+    return None
+
+
+def _fake_upload(self, *, check=True):
+    assert self.port is None
+    return None
+
+
+ArduinoCliBuildConfig.compile = _fake_compile
+ArduinoCliUploadConfig.upload = _fake_upload
+"""
+    )
+    (test_dir / "test_sample.py").write_text(
+        """
+def test_port_was_not_read_from_sketch_yaml(request):
+    assert request.config.option.port is None
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=test",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(passed=1)
+
+
+def test_plugin_prefers_env_port_over_sketch_yaml(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_dir = pytester.path / "host_app"
+    test_dir.mkdir()
+    build_dir = test_dir / "build" / "host"
+    build_dir.mkdir(parents=True)
+    (test_dir / "host_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text(
+        "default_profile: host\nprofiles:\n  host:\n    port: socket://localhost\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TEST_SERIAL_PORT_HOST", "socket://127.0.0.1")
+    pytester.makeconftest(
+        """
+from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
+from pytest_embedded_arduino_cli.flasher import ArduinoCliUploadConfig
+
+
+def _fake_compile(self, *, check=True):
+    self.build_path.mkdir(parents=True, exist_ok=True)
+    return None
+
+
+def _fake_upload(self, *, check=True):
+    assert self.port is None
+    (self.build_path / "host_app.ino.out.host-arduino.json").write_text(
+        '{"pid": 21228, "port": 56789}',
+        encoding="utf-8",
+    )
+    return None
+
+
+ArduinoCliBuildConfig.compile = _fake_compile
+ArduinoCliUploadConfig.upload = _fake_upload
+"""
+    )
+    (test_dir / "test_sample.py").write_text(
+        """
+def test_env_port_was_completed(request):
+    assert request.config.option.port == "socket://127.0.0.1:56789"
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=test",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(passed=1)
+
+
+def test_plugin_resets_completed_socket_port_for_each_sketch(pytester: pytest.Pytester) -> None:
+    root = pytester.path / "examples"
+    app09 = root / "09_host_arduino_core" / "host_smoke"
+    app10 = root / "10_build_flags" / "build_flag_switch"
+    app09.mkdir(parents=True)
+    app10.mkdir(parents=True)
+
+    for sketch_dir in (app09, app10):
+        (sketch_dir / f"{sketch_dir.name}.ino").write_text(
+            "void setup() {}\nvoid loop() {}\n",
+            encoding="utf-8",
+        )
+        (sketch_dir / "sketch.yaml").write_text(
+            "default_profile: host\nprofiles:\n  host:\n    port: socket://localhost\n",
+            encoding="utf-8",
+        )
+
+    pytester.makeconftest(
+        """
+from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
+from pytest_embedded_arduino_cli.flasher import ArduinoCliUploadConfig
+
+
+def _fake_compile(self, *, check=True):
+    self.build_path.mkdir(parents=True, exist_ok=True)
+    return None
+
+
+def _fake_upload(self, *, check=True):
+    assert self.port is None
+    runtime_port = 11111 if self.sketch_dir.name == "host_smoke" else 22222
+    (self.build_path / f"{self.sketch_dir.name}.ino.out.host-arduino.json").write_text(
+        f'{{"pid": 21228, "port": {runtime_port}}}',
+        encoding="utf-8",
+    )
+    return None
+
+
+ArduinoCliBuildConfig.compile = _fake_compile
+ArduinoCliUploadConfig.upload = _fake_upload
+"""
+    )
+    (app09 / "test_host_smoke.py").write_text(
+        """
+def test_first_sketch_port(request):
+    assert request.config.option.port == "socket://localhost:11111"
+""",
+        encoding="utf-8",
+    )
+    (app10 / "test_build_flag_switch.py").write_text(
+        """
+def test_second_sketch_port(request):
+    assert request.config.option.port == "socket://localhost:22222"
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(root),
+        "--profile=host",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(passed=2)
+
+
 def test_plugin_skips_unsupported_profile_before_build(pytester: pytest.Pytester) -> None:
     test_dir = pytester.path / "sample_app"
     test_dir.mkdir()
