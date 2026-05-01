@@ -21,20 +21,24 @@ class FakeMatch:
 
 class ProtocolFakeDut:
     def __init__(self, lines: list[str]) -> None:
-        self.lines = [f"{line}\n".encode() for line in lines]
+        self.buffer = bytearray()
+        for line in lines:
+            if "\n" in line:
+                self.buffer.extend(line.encode())
+            else:
+                self.buffer.extend(f"{line}\n".encode())
         self.writes: list[str] = []
 
     def write(self, value: str) -> None:
         self.writes.append(value)
 
     def expect(self, pattern: re.Pattern[bytes], timeout: float):
-        assert pattern == ARDUTEST_PROTOCOL_LINE_RE
         assert timeout == 30.0
-        if not self.lines:
+        if not self.buffer:
             raise AssertionError("unexpected expect call")
-        line = self.lines.pop(0)
-        match = pattern.search(line)
+        match = pattern.search(bytes(self.buffer))
         assert match is not None
+        del self.buffer[: match.end()]
         return FakeMatch(match.group(1))
 
 
@@ -56,6 +60,8 @@ def test_ardutest_session_runs_protocol_by_name() -> None:
             "AT < END_LIST",
             "AT < RUNNING test_metric_and_artifact",
             "AT < METRIC test_metric_and_artifact example_value 42",
+            "AT < LOG test_metric_and_artifact 11\nhello world",
+            "AT < ARTIFACT_TEXT test_metric_and_artifact note.txt text/plain 19\nhello from ArduTest",
             "AT < RESULT test_metric_and_artifact passed",
         ]
     )
@@ -77,6 +83,8 @@ def test_ardutest_session_runs_protocol_by_name() -> None:
     ]
     assert [result.name for result in results] == ["test_metric_and_artifact"]
     assert results[0].metrics == {"example_value": [42]}
+    assert results[0].logs == ["hello world"]
+    assert results[0].artifacts == {"note.txt": "hello from ArduTest"}
 
 
 def test_ardutest_session_skips_missing_capability_without_running() -> None:
@@ -229,7 +237,7 @@ def test_ardutest_session_fails_pytest_on_failed_result() -> None:
             "AT < TEST test_fails",
             "AT < END_LIST",
             "AT < RUNNING test_fails",
-            "AT < FAIL test_fails sketch.ino:10 false",
+            "AT < FAIL test_fails sketch.ino 10 5\nfalse",
             "AT < RESULT test_fails failed",
         ]
     )
