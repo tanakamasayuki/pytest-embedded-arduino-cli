@@ -67,6 +67,42 @@ def test_ardutest_session_collects_passing_results() -> None:
     ]
     assert [result.status for result in results] == ["passed", "passed"]
     assert results[1].events[0].kind == "METRIC"
+    assert results[0].logs == ["running test_true_passes"]
+    assert results[1].metrics == {"example_value": [42]}
+    assert results[1].artifacts == {"note.txt": "hello from ArduTest"}
+
+
+def test_ardutest_session_can_select_one_result_by_name() -> None:
+    dut = FakeDut(
+        [
+            "ARDUTEST BEGIN 0.1.0",
+            "ARDUTEST TESTS 2",
+            "ARDUTEST RUN test_true_passes",
+            "ARDUTEST RESULT test_true_passes passed",
+            "ARDUTEST RUN test_metric_and_artifact",
+            "ARDUTEST METRIC test_metric_and_artifact example_value 42",
+            "ARDUTEST RESULT test_metric_and_artifact passed",
+        ]
+    )
+
+    results = ArduTestSession(dut).run("test_metric_and_artifact")
+
+    assert [result.name for result in results] == ["test_metric_and_artifact"]
+    assert results[0].metrics == {"example_value": [42]}
+
+
+def test_ardutest_session_errors_on_unknown_selected_name() -> None:
+    dut = FakeDut(
+        [
+            "ARDUTEST BEGIN 0.1.0",
+            "ARDUTEST TESTS 1",
+            "ARDUTEST RUN test_true_passes",
+            "ARDUTEST RESULT test_true_passes passed",
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="unknown ArduTest test: missing"):
+        ArduTestSession(dut).run("missing")
 
 
 def test_ardutest_session_fails_pytest_on_failed_result() -> None:
