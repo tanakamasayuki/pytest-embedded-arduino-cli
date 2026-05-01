@@ -56,7 +56,7 @@ class ParsedArduTestLine:
     fields: str
 
 
-ARDUTEST_LINE_RE = re.compile(rb"ARDUTEST ([^\r\n]+)\r?\n")
+ARDUTEST_PROTOCOL_LINE_RE = re.compile(rb"AT < ([^\r\n]+)\r?\n")
 
 
 def parse_ardutest_line(line: str) -> ParsedArduTestLine:
@@ -68,12 +68,7 @@ def parse_ardutest_line(line: str) -> ParsedArduTestLine:
 
 
 class ArduTestSession:
-    """Collects the current ArduTest smoke-test serial output.
-
-    This intentionally supports the temporary line format emitted by the
-    in-progress Arduino library. The protocol-spec implementation can replace
-    this reader without changing the public fixture shape.
-    """
+    """Controls ArduTest over the line-based protocol."""
 
     def __init__(self, dut: Any, *, timeout: float = 30.0) -> None:
         self.dut = dut
@@ -81,56 +76,55 @@ class ArduTestSession:
         self.results: list[ArduTestResult] = []
 
     def run(self, name: str | None = None) -> list[ArduTestResult]:
-        self.results = []
-        version = self._expect_begin()
-        test_count = self._expect_test_count()
+        return self._run_protocol(name)
 
-        for _ in range(test_count):
-            self.results.append(self._collect_one_result())
+    def list_tests(self) -> list[str]:
+        self._sync_hello()
+        return self._list_tests_after_hello()
 
-        selected_results = self.results
-        if name is not None:
-            selected_results = [result for result in self.results if result.name == name]
-            if not selected_results:
-                available = ", ".join(result.name for result in self.results) or "(none)"
-                raise ArduTestError(f"unknown ArduTest test: {name}. Available tests: {available}")
+    def _list_tests_after_hello(self) -> list[str]:
+        self._send_command("AT > LIST")
 
-        failed = [result for result in selected_results if result.status != "passed"]
-        if failed:
-            raise AssertionError(self._format_failure(version, failed))
-
-        return selected_results
-
-    def _expect_begin(self) -> str:
-        line = self._read_line()
-        parsed = parse_ardutest_line(line)
-        if parsed.kind != "BEGIN":
-            raise ArduTestError(f"expected ArduTest BEGIN, got: ARDUTEST {line}")
-        if not parsed.fields:
-            raise ArduTestError("ArduTest BEGIN did not include a version")
-        return parsed.fields
-
-    def _expect_test_count(self) -> int:
-        line = self._read_line()
-        parsed = parse_ardutest_line(line)
-        if parsed.kind != "TESTS":
-            raise ArduTestError(f"expected ArduTest TESTS, got: ARDUTEST {line}")
-        try:
-            return int(parsed.fields)
-        except ValueError as e:
-            raise ArduTestError(f"invalid ArduTest test count: {parsed.fields}") from e
-
-    def _collect_one_result(self) -> ArduTestResult:
-        line = self._read_line()
-        parsed = parse_ardutest_line(line)
-        if parsed.kind != "RUN":
-            raise ArduTestError(f"expected ArduTest RUN, got: ARDUTEST {line}")
-        test_name = parsed.fields
-        events: list[ArduTestEvent] = []
-
+        tests: list[str] = []
         while True:
-            line = self._read_line()
-            parsed = parse_ardutest_line(line)
+            parsed = self._read_protocol_line()
+            if parsed.kind in {"READY", "HELLO"}:
+                continue
+            if parsed.kind == "END_LIST":
+                return tests
+            if parsed.kind != "TEST":
+                raise ArduTestError(f"expected ArduTest protocol TEST, got: AT < {parsed.kind} {parsed.fields}")
+            tests.append(parsed.fields)
+
+    def _run_protocol(self, name: str | None = None) -> list[ArduTestResult]:
+        tests = self.list_tests()
+        return self._run_protocol_tests(tests, name)
+
+    def _run_protocol_tests(self, tests: list[str], name: str | None = None) -> list[ArduTestResult]:
+        selected_names = tests if name is None else [name]
+        if name is not None and name not in tests:
+            available = ", ".join(tests) or "(none)"
+            raise ArduTestError(f"unknown ArduTest test: {name}. Available tests: {available}")
+
+        self.results = []
+        for test_name in selected_names:
+            self._send_command(f"AT > RUN {test_name}")
+            self.results.append(self._collect_one_protocol_result(test_name))
+
+        failed = [result for result in self.results if result.status != "passed"]
+        if failed:
+            raise AssertionError(self._format_failure("protocol", failed))
+
+        return self.results
+
+    def _collect_one_protocol_result(self, test_name: str) -> ArduTestResult:
+        running = self._read_protocol_line()
+        if running.kind != "RUNNING" or running.fields != test_name:
+            raise ArduTestError(f"expected AT < RUNNING {test_name}, got: AT < {running.kind} {running.fields}")
+
+        events: list[ArduTestEvent] = []
+        while True:
+            parsed = self._read_protocol_line()
             if parsed.kind == "RESULT":
                 result_name, status = self._parse_result_fields(parsed.fields)
                 if result_name != test_name:
@@ -140,16 +134,40 @@ class ArduTestSession:
                 if status not in ("passed", "failed", "error"):
                     raise ArduTestError(f"invalid ArduTest status for {result_name}: {status}")
                 return ArduTestResult(name=test_name, status=status, events=events)
+            if parsed.kind == "ERROR":
+                raise ArduTestError(f"ArduTest protocol error: {parsed.fields}")
 
             event_name, message = self._parse_event_fields(parsed.fields)
             events.append(ArduTestEvent(kind=parsed.kind, test_name=event_name, message=message))
 
-    def _read_line(self) -> str:
-        match = self.dut.expect(ARDUTEST_LINE_RE, timeout=self.timeout)
+    def _read_protocol_line(self) -> ParsedArduTestLine:
+        match = self.dut.expect(ARDUTEST_PROTOCOL_LINE_RE, timeout=self.timeout)
         value = match.group(1)
         if isinstance(value, bytes):
-            return value.decode("utf-8", errors="replace")
-        return str(value)
+            line = value.decode("utf-8", errors="replace")
+        else:
+            line = str(value)
+        return parse_ardutest_line(line)
+
+    def _expect_protocol_kind(self, kind: str) -> ParsedArduTestLine:
+        parsed = self._read_protocol_line()
+        if parsed.kind != kind:
+            raise ArduTestError(f"expected ArduTest protocol {kind}, got: AT < {parsed.kind} {parsed.fields}")
+        return parsed
+
+    def _sync_hello(self) -> ParsedArduTestLine:
+        self._send_command("AT > HELLO 1")
+        while True:
+            parsed = self._read_protocol_line()
+            if parsed.kind == "HELLO":
+                return parsed
+            if parsed.kind == "READY":
+                self._send_command("AT > HELLO 1")
+                continue
+            raise ArduTestError(f"expected ArduTest protocol HELLO, got: AT < {parsed.kind} {parsed.fields}")
+
+    def _send_command(self, command: str) -> None:
+        self.dut.write(f"{command}\n")
 
     @staticmethod
     def _parse_result_fields(fields: str) -> tuple[str, str]:
