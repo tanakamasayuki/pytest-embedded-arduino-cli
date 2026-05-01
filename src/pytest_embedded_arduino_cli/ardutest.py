@@ -25,6 +25,30 @@ class ArduTestResult:
     status: ArduTestStatus
     events: list[ArduTestEvent] = field(default_factory=list)
 
+    @property
+    def logs(self) -> list[str]:
+        return [event.message for event in self.events if event.kind == "LOG"]
+
+    @property
+    def metrics(self) -> dict[str, list[int | float | str]]:
+        values: dict[str, list[int | float | str]] = {}
+        for event in self.events:
+            if event.kind != "METRIC":
+                continue
+            name, value = _split_name_value(event.message)
+            values.setdefault(name, []).append(_parse_metric_value(value))
+        return values
+
+    @property
+    def artifacts(self) -> dict[str, str]:
+        values: dict[str, str] = {}
+        for event in self.events:
+            if event.kind != "ARTIFACT_TEXT":
+                continue
+            name, value = _split_name_value(event.message)
+            values[name] = value
+        return values
+
 
 @dataclass(frozen=True)
 class ParsedArduTestLine:
@@ -57,9 +81,6 @@ class ArduTestSession:
         self.results: list[ArduTestResult] = []
 
     def run(self, name: str | None = None) -> list[ArduTestResult]:
-        if name is not None:
-            raise NotImplementedError("arduino_test.run(name) is not implemented for the smoke-test protocol yet")
-
         self.results = []
         version = self._expect_begin()
         test_count = self._expect_test_count()
@@ -67,11 +88,18 @@ class ArduTestSession:
         for _ in range(test_count):
             self.results.append(self._collect_one_result())
 
-        failed = [result for result in self.results if result.status != "passed"]
+        selected_results = self.results
+        if name is not None:
+            selected_results = [result for result in self.results if result.name == name]
+            if not selected_results:
+                available = ", ".join(result.name for result in self.results) or "(none)"
+                raise ArduTestError(f"unknown ArduTest test: {name}. Available tests: {available}")
+
+        failed = [result for result in selected_results if result.status != "passed"]
         if failed:
             raise AssertionError(self._format_failure(version, failed))
 
-        return self.results
+        return selected_results
 
     def _expect_begin(self) -> str:
         line = self._read_line()
@@ -146,3 +174,21 @@ class ArduTestSession:
                 if event.kind in {"FAIL", "FAIL_EQ", "ERROR"}:
                     lines.append(f"  {event.kind}: {event.message}")
         return "\n".join(lines)
+
+
+def _split_name_value(message: str) -> tuple[str, str]:
+    parts = message.split(" ", 1)
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], parts[1]
+
+
+def _parse_metric_value(value: str) -> int | float | str:
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
