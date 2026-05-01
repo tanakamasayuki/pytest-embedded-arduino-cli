@@ -22,6 +22,7 @@ from .serial import (
     resolve_port,
     resolve_upload_port,
     socket_url_needs_port_completion,
+    wait_for_socket_url,
 )
 
 
@@ -316,6 +317,7 @@ def arduino_cli_upload(
             runtime_port,
             arduino_cli_app.build_path,
         )
+        wait_for_socket_url(request.config.option.port)
 
 
 @pytest.fixture(autouse=True)
