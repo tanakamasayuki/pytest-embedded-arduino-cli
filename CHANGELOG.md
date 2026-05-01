@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.1.1
 - (EN) Add pytest `--clean` option and pass it through to `arduino-cli compile --clean`.
 - (JA) pytest の `--clean` option を追加し、`arduino-cli compile --clean` として渡すように変更。
 - (EN) Add experimental `arduino_test` fixture support for sketches that declare the separate ArduTest Arduino library in `sketch.yaml`, including test listing, requirement/config handling, logs, metrics, text artifacts, and assertion failure collection.
