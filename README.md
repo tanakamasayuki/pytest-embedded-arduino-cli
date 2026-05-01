@@ -212,28 +212,16 @@ For command visibility, follow pytest's standard verbosity:
 
 ## ArduTest Fixture
 
-This package also includes an experimental `arduino_test` fixture for sketches that use the bundled `env/ArduTest` Arduino library.
-The fixture speaks the ArduTest line protocol over the existing `dut` serial connection.
+This package includes an experimental `arduino_test` fixture for sketches that use the separate Arduino-side ArduTest library.
+ArduTest is expected to be declared by the sketch's `sketch.yaml`, with the library version pinned there for reproducible tests.
+Detailed usage examples will be added under `examples/` after the API and protocol settle.
 
 ```python
 def test_board(arduino_test):
     arduino_test.run()
 ```
 
-Current supported features include:
-
-- protocol synchronization and test listing
-- single-test or all-test execution
-- host-side skip decisions from requirements and required config
-- config delivery through `SET_CONFIG`
-- collection of logs, metrics, text artifacts, assertion failures, and final results
-
-Initial environment sources are:
-
-- `ARDUINO_TEST_CAP_<NAME>` for requirements
-- `ARDUINO_TEST_CONFIG_<NAME>` for config values
-
-Characters other than letters and digits in `<NAME>` are normalized to `_` and names are uppercased.
+The current fixture speaks ArduTest protocol version `1`.
 
 ## Example
 

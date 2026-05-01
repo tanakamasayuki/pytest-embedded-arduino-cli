@@ -3,8 +3,8 @@
 ## Unreleased
 - (EN) Add pytest `--clean` option and pass it through to `arduino-cli compile --clean`.
 - (JA) pytest の `--clean` option を追加し、`arduino-cli compile --clean` として渡すように変更。
-- (EN) Add experimental `arduino_test` fixture support for the bundled ArduTest protocol, including test listing, requirement/config handling, logs, metrics, text artifacts, and assertion failure collection.
-- (JA) 同梱 ArduTest protocol 向けの実験的な `arduino_test` fixture を追加し、test 一覧取得、requirement/config 処理、log、metric、text artifact、assertion failure の収集に対応。
+- (EN) Add experimental `arduino_test` fixture support for sketches that declare the separate ArduTest Arduino library in `sketch.yaml`, including test listing, requirement/config handling, logs, metrics, text artifacts, and assertion failure collection.
+- (JA) `sketch.yaml` で別管理の ArduTest Arduino ライブラリを宣言する sketch 向けに、実験的な `arduino_test` fixture を追加し、test 一覧取得、requirement/config 処理、log、metric、text artifact、assertion failure の収集に対応。
 - (EN) Update ArduTest protocol handling to use length-prefixed payloads for logs, text artifacts, failures, and protocol errors.
 - (JA) ArduTest protocol の log、text artifact、failure、protocol error を length-prefixed payload 形式で扱うように更新。
 - (EN) Batch `socket://` serial reads for host Arduino core runs to avoid very slow one-byte-at-a-time redirect behavior.
