@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 import re
 from typing import Any, Literal
 
 
-ArduTestStatus = Literal["passed", "failed", "error"]
+ArduTestStatus = Literal["passed", "failed", "skipped", "error"]
 
 
 class ArduTestError(RuntimeError):
@@ -31,6 +32,7 @@ class ArduTestResult:
     name: str
     status: ArduTestStatus
     events: list[ArduTestEvent] = field(default_factory=list)
+    skip_reason: str | None = None
 
     @property
     def logs(self) -> list[str]:
@@ -77,9 +79,10 @@ def parse_ardutest_line(line: str) -> ParsedArduTestLine:
 class ArduTestSession:
     """Controls ArduTest over the line-based protocol."""
 
-    def __init__(self, dut: Any, *, timeout: float = 30.0) -> None:
+    def __init__(self, dut: Any, *, timeout: float = 30.0, environ: dict[str, str] | None = None) -> None:
         self.dut = dut
         self.timeout = timeout
+        self.environ = environ if environ is not None else os.environ
         self.results: list[ArduTestResult] = []
 
     def run(self, name: str | None = None) -> list[ArduTestResult]:
@@ -139,15 +142,46 @@ class ArduTestSession:
             raise ArduTestError(f"unknown ArduTest test: {name}. Available tests: {available}")
 
         self.results = []
+        by_name = {test.name: test for test in tests}
         for test_name in selected_names:
+            test = by_name[test_name]
+            skip_reason = self._skip_reason(test)
+            if skip_reason:
+                self.results.append(ArduTestResult(name=test_name, status="skipped", skip_reason=skip_reason))
+                continue
             self._send_command(f"AT > RUN {test_name}")
             self.results.append(self._collect_one_protocol_result(test_name))
 
-        failed = [result for result in self.results if result.status != "passed"]
+        failed = [result for result in self.results if result.status not in ("passed", "skipped")]
         if failed:
             raise AssertionError(self._format_failure("protocol", failed))
 
         return self.results
+
+    def _skip_reason(self, test: ArduTestCase) -> str | None:
+        missing_requirements = [name for name in test.requirements if not self._capability_enabled(name)]
+        if missing_requirements:
+            return "missing capability: " + ", ".join(missing_requirements)
+
+        missing_configs = [name for name in test.required_configs if self._config_value(name) is None]
+        if missing_configs:
+            return "missing config: " + ", ".join(missing_configs)
+
+        return None
+
+    def _capability_enabled(self, name: str) -> bool:
+        value = self.environ.get("ARDUINO_TEST_CAP_" + _env_name(name))
+        if value is None:
+            return False
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+        raise ArduTestError(f"invalid capability value for {name}: {value}")
+
+    def _config_value(self, name: str) -> str | None:
+        return self.environ.get("ARDUINO_TEST_CONFIG_" + _env_name(name))
 
     def _collect_one_protocol_result(self, test_name: str) -> ArduTestResult:
         running = self._read_protocol_line()
@@ -242,3 +276,7 @@ def _parse_metric_value(value: str) -> int | float | str:
         return float(value)
     except ValueError:
         return value
+
+
+def _env_name(name: str) -> str:
+    return "".join(ch if ch.isalnum() else "_" for ch in name).upper()

@@ -60,7 +60,13 @@ def test_ardutest_session_runs_protocol_by_name() -> None:
         ]
     )
 
-    results = ArduTestSession(dut).run("test_metric_and_artifact")
+    results = ArduTestSession(
+        dut,
+        environ={
+            "ARDUINO_TEST_CAP_MEASUREMENT_CURRENT": "true",
+            "ARDUINO_TEST_CONFIG_SAMPLE_RATE": "1000",
+        },
+    ).run("test_metric_and_artifact")
 
     assert dut.writes == [
         "AT > HELLO 1\n",
@@ -69,6 +75,46 @@ def test_ardutest_session_runs_protocol_by_name() -> None:
     ]
     assert [result.name for result in results] == ["test_metric_and_artifact"]
     assert results[0].metrics == {"example_value": [42]}
+
+
+def test_ardutest_session_skips_missing_capability_without_running() -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_metric_and_artifact",
+            "AT < REQUIRE test_metric_and_artifact measurement.current",
+            "AT < END_LIST",
+        ]
+    )
+
+    results = ArduTestSession(dut, environ={}).run()
+
+    assert dut.writes == [
+        "AT > HELLO 1\n",
+        "AT > LIST\n",
+    ]
+    assert results[0].status == "skipped"
+    assert results[0].skip_reason == "missing capability: measurement.current"
+
+
+def test_ardutest_session_skips_missing_config_without_running() -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_metric_and_artifact",
+            "AT < REQUIRE_CONFIG test_metric_and_artifact sample_rate",
+            "AT < END_LIST",
+        ]
+    )
+
+    results = ArduTestSession(dut, environ={}).run()
+
+    assert dut.writes == [
+        "AT > HELLO 1\n",
+        "AT > LIST\n",
+    ]
+    assert results[0].status == "skipped"
+    assert results[0].skip_reason == "missing config: sample_rate"
 
 
 def test_ardutest_session_lists_metadata() -> None:
