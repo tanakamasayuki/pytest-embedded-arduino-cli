@@ -8,10 +8,8 @@ def test_ardutest_metadata(monkeypatch, arduino_test):
     assert tests[0].requirements == ("measurement.current",)
     assert tests[0].required_configs == ("sample_rate",)
 
-    results = arduino_test.run()
+    result = arduino_test.run("test_sample_rate")[0]
 
-    assert [result.name for result in results] == ["test_sample_rate"]
-    assert results[0].status == "passed"
-    assert results[0].logs == ["received sample_rate"]
-    assert results[0].metrics == {"sample_rate": [1000]}
-    assert results[0].artifacts == {"sample_rate.txt": "1000"}
+    assert result.logs == ["received sample_rate"]
+    assert result.metrics == {"sample_rate": [1000]}
+    assert result.artifacts == {"sample_rate.txt": "1000"}

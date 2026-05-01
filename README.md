@@ -230,6 +230,9 @@ def test_board(arduino_test):
     arduino_test.run()
 ```
 
+`arduino_test.run()` fails the pytest test automatically when ArduTest reports a failed or error result.
+Use additional assertions only when you want to check collected logs, metrics, artifacts, or metadata.
+
 The current fixture speaks ArduTest protocol version `1`.
 
 ## Example

@@ -8,6 +8,7 @@ This directory is split into two sketches:
 
 - `ardutest_basic`
   - Minimal `TEST_CASE` usage with `arduino_test.run()`
+  - `arduino_test.run()` fails the pytest test automatically when ArduTest reports a failed or error result
 - `ardutest_metadata`
   - Requirement metadata, required config, logs, metrics, and text artifacts
 
