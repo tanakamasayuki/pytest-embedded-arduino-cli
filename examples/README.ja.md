@@ -73,15 +73,17 @@ serial port は次の優先順位で解決されます。
 2. `--port`
 3. `TEST_SERIAL_PORT_<PROFILE>`
 4. `TEST_SERIAL_PORT`
+5. `sketch.yaml` の `profiles.<PROFILE>.port`。ただし `socket://...` URL の場合のみ
 
 `pytest` の引数解釈の都合で、`--port` や `--flash-port` のように path を受け取る option は、`--port=/dev/ttyUSB0` のように `=` 付きで書く方が安全です。
-環境によっては `uv run pytest --port /dev/ttyUSB0` の形だと、その path を別の基準パスとして解釈してしまうことがあります。
-必要なら `uv run pytest --rootdir . --port /dev/ttyUSB0` のように `--rootdir .` を明示しても構いません。
+環境によっては `uv run pytest --port=/dev/ttyUSB0` の形だと、その path を別の基準パスとして解釈してしまうことがあります。
+必要なら `uv run pytest --rootdir . --port=/dev/ttyUSB0` のように `--rootdir .` を明示しても構いません。
 
 host 上で Arduino sketch を実行する board core では、serial device path ではなく pyserial の socket URL を使う方針です。
+選択された profile に `port: socket://localhost` が定義されている場合は、`--port=socket://localhost` を省略できます。
 
 ```bash
-uv run pytest examples/09_host_arduino_core --profile host --port=socket://localhost
+uv run pytest examples/09_host_arduino_core --profile host
 ```
 
 `socket://localhost` のように port 番号を省略した場合は、build 出力ディレクトリに生成される `*.host-arduino.json` から `port` を読み取り、実際の接続先を補完する想定です。
@@ -136,7 +138,7 @@ plugin が何をしているか確認したい場合は verbosity を使いま�
   - ライブラリ分離できないコードを、薄い wrapper `#include` で test runner から参照する例です
 - `09_host_arduino_core`
   - host machine の gcc などで sketch をビルドし、host 上の実行ファイルとして起動する例
-  - `--port=socket://localhost` から host 実行ファイルの TCP/IP 接続先へ接続する想定です
+  - `sketch.yaml` の `port: socket://localhost` で、host 実行ファイルの TCP/IP 接続先へ接続する想定です
   - 純粋なロジックや serial protocol の簡易確認向けで、実機テストや実 board profile の build test の代替ではありません
 - `10_build_flags`
   - `build_config.toml` の `[flags]` で値なし compile-time define を渡す例

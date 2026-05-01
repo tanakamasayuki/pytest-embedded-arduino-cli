@@ -11,7 +11,8 @@
 `arduino-cli upload` はその実行ファイルを host 上で起動します。
 
 host 実行ファイルは TCP/IP 接続用の port を出力または情報ファイルへ保存します。
-plugin 側では、`--port=socket://localhost` のように port 番号なしの socket URL が指定された場合に、build 出力ディレクトリの `*.host-arduino.json` から `port` を読み取り、実際の接続先へ補完する方針です。
+このサンプルの `sketch.yaml` には `port: socket://localhost` を設定しているため、pytest コマンドでは `--port` を省略できます。
+plugin 側では、build 出力ディレクトリの `*.host-arduino.json` から runtime の `port` を読み取り、実際の接続先へ補完します。
 
 ```json
 {
@@ -34,7 +35,7 @@ host machine 上での実行結果は、OS、gcc などの toolchain version、h
 想定コマンド:
 
 ```bash
-uv run pytest examples/09_host_arduino_core --profile host --port=socket://localhost
+uv run pytest examples/09_host_arduino_core --profile host
 ```
 
 port 番号が分かっている場合は、明示して実行できます。

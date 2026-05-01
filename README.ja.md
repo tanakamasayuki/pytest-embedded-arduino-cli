@@ -109,15 +109,17 @@ profile ごとの serial port は次の順で解決します。
 2. `--port`
 3. `TEST_SERIAL_PORT_<PROFILE>`
 4. `TEST_SERIAL_PORT`
+5. `sketch.yaml` の `profiles.<PROFILE>.port`。ただし `socket://...` URL の場合のみ
 
 `pytest` の引数解釈の都合で、`--port` や `--flash-port` のように path を受け取る option は、`--port=/dev/ttyUSB0` のように `=` 付きで書く方が安全です。
-環境によっては `uv run pytest --port /dev/ttyUSB0` の形だと、その path を別の基準パスとして解釈してしまうことがあります。
-必要なら `uv run pytest --rootdir . --port /dev/ttyUSB0` のように `--rootdir .` を明示しても構いません。
+環境によっては `uv run pytest --port=/dev/ttyUSB0` の形だと、その path を別の基準パスとして解釈してしまうことがあります。
+必要なら `uv run pytest --rootdir . --port=/dev/ttyUSB0` のように `--rootdir .` を明示しても構いません。
 
 host 上で動く Arduino core など、TCP/IP 経由で DUT に接続する target では、`pytest-embedded-serial` / pyserial の URL 形式を使う方針です。
+選択された `sketch.yaml` profile に `port: socket://localhost` が定義されている場合は、`--port=socket://localhost` を省略できます。
 
 ```bash
-uv run pytest tests/my_app --profile host --port=socket://localhost
+uv run pytest tests/my_app --profile host
 ```
 
 `socket://localhost:56789` のように port 番号まで指定した場合は、その socket に直接接続します。
@@ -238,7 +240,7 @@ void loop() {}
   - ライブラリ分離できないコードを薄い wrapper `#include` で runner から参照する例
 - `examples/09_host_arduino_core`
   - host machine 上で Arduino sketch をビルド・実行する board core の利用例
-  - `--port=socket://localhost` から host 実行ファイルの TCP/IP 接続先へ接続する想定
+  - `sketch.yaml` の `port: socket://localhost` で、host 実行ファイルの TCP/IP 接続先へ接続する想定
   - 純粋なロジックや serial protocol の簡易確認向けで、実機テストや実 board profile の build test の代替ではない
 - `examples/10_build_flags`
   - `build_config.toml` の `[flags]` で値なし compile-time define を渡す例

@@ -17,6 +17,7 @@ from .flasher import ArduinoCliUploadConfig
 from .serial import (
     complete_host_arduino_socket_url,
     ensure_default_embedded_services,
+    is_socket_url,
     resolve_port,
     resolve_upload_port,
     socket_url_needs_port_completion,
@@ -55,8 +56,19 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    _remember_initial_ports(config)
     ensure_default_embedded_services(config)
     _set_optional_metadata(config)
+
+
+def _remember_initial_ports(config: pytest.Config) -> None:
+    config._arduino_cli_initial_port = getattr(config.option, "port", None)
+    config._arduino_cli_initial_flash_port = getattr(config.option, "flash_port", None)
+
+
+def _reset_runtime_ports(config: pytest.Config) -> None:
+    config.option.port = getattr(config, "_arduino_cli_initial_port", None)
+    config.option.flash_port = getattr(config, "_arduino_cli_initial_flash_port", None)
 
 
 def _set_optional_metadata(config: pytest.Config) -> None:
@@ -198,12 +210,16 @@ def arduino_cli_resolved_port(request: pytest.FixtureRequest) -> None:
     if arduino_cli_app is None:
         return
 
-    if getattr(request.config.option, "flash_port", None):
+    _reset_runtime_ports(request.config)
+
+    if getattr(request.config, "_arduino_cli_initial_flash_port", None):
         return
-    if getattr(request.config.option, "port", None):
+    if getattr(request.config, "_arduino_cli_initial_port", None):
         return
 
     resolved_port = resolve_port(request.config, profile=arduino_cli_app.profile)
+    if not resolved_port and is_socket_url(arduino_cli_app.profile_port):
+        resolved_port = arduino_cli_app.profile_port
     if resolved_port:
         request.config.option.port = resolved_port
 

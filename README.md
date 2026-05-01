@@ -109,15 +109,17 @@ For profile-specific serial ports, the plugin resolves ports in this order:
 2. `--port`
 3. `TEST_SERIAL_PORT_<PROFILE>`
 4. `TEST_SERIAL_PORT`
+5. `profiles.<PROFILE>.port` in `sketch.yaml`, only when it is a `socket://...` URL
 
 Because of how `pytest` parses arguments, options that take path-like values such as `--port` and `--flash-port` are safer when written with `=`, for example `--port=/dev/ttyUSB0`.
-Depending on the environment, `uv run pytest --port /dev/ttyUSB0` may cause that path to be interpreted as another base path.
-If needed, `uv run pytest --rootdir . --port /dev/ttyUSB0` is also a valid workaround.
+Depending on the environment, `uv run pytest --port=/dev/ttyUSB0` may cause that path to be interpreted as another base path.
+If needed, `uv run pytest --rootdir . --port=/dev/ttyUSB0` is also a valid workaround.
 
 For targets that run on the host machine and expose the DUT over TCP/IP, use the URL format supported by `pytest-embedded-serial` / pyserial.
+If the selected `sketch.yaml` profile defines `port: socket://localhost`, `--port=socket://localhost` can be omitted.
 
 ```bash
-uv run pytest tests/my_app --profile host --port=socket://localhost
+uv run pytest tests/my_app --profile host
 ```
 
 When the port number is specified, such as `socket://localhost:56789`, the DUT connects to that socket directly.
@@ -234,7 +236,7 @@ Additional samples:
   - Uses thin wrapper `#include` files so the runner can reference sketch-side code that is not separated as a library
 - `examples/09_host_arduino_core`
   - Demonstrates a board core that builds and runs the Arduino sketch on the host machine
-  - Intended to connect from `--port=socket://localhost` to the TCP/IP endpoint opened by the host executable
+  - Uses `port: socket://localhost` in `sketch.yaml` to connect to the TCP/IP endpoint opened by the host executable
   - Useful for simple pure-logic and serial-protocol checks, not a replacement for real hardware tests or build tests with the real board profile
 - `examples/10_build_flags`
   - Demonstrates value-less compile-time defines with `[flags]` in `build_config.toml`

@@ -15,7 +15,7 @@ DISABLED_FLAG = false
 想定コマンド:
 
 ```bash
-uv run pytest examples/10_build_flags --port=socket://localhost
+uv run pytest examples/10_build_flags
 ```
 
 このサンプルでは `PYTEST_BUILD` と `ENABLE_TEST_HOOKS` が定義されていることを sketch 側で確認し、serial 出力を pytest から検証します。

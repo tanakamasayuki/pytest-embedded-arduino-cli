@@ -15,7 +15,7 @@ Only `true` entries are passed to `arduino-cli compile` as `-D<macro name>`.
 Expected command:
 
 ```bash
-uv run pytest examples/10_build_flags --port=socket://localhost
+uv run pytest examples/10_build_flags
 ```
 
 This sample checks in the sketch that `PYTEST_BUILD` and `ENABLE_TEST_HOOKS` are defined, then verifies the serial output from pytest.

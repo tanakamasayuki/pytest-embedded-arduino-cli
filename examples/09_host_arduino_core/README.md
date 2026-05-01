@@ -11,7 +11,8 @@ Target board core:
 `arduino-cli upload` launches that executable on the host machine.
 
 The host executable prints or writes the TCP/IP port used for DUT communication.
-When `--port=socket://localhost` is specified without a port number, the plugin is expected to read `port` from `*.host-arduino.json` under the build output directory and complete the actual connection URL.
+This sample's `sketch.yaml` sets `port: socket://localhost`, so the pytest command can omit `--port`.
+The plugin reads the runtime `port` from `*.host-arduino.json` under the build output directory and completes the actual connection URL.
 
 ```json
 {
@@ -34,7 +35,7 @@ For real projects, run build tests with the actual board profile and run hardwar
 Expected command:
 
 ```bash
-uv run pytest examples/09_host_arduino_core --profile host --port=socket://localhost
+uv run pytest examples/09_host_arduino_core --profile host
 ```
 
 If the port number is already known, specify it explicitly:
