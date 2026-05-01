@@ -193,6 +193,13 @@ export TEST_WIFI_PASSWORD=my-password
 uv run pytest tests/my_app --port=/dev/ttyACM0
 ```
 
+You can also load these values from a dotenv file through `uv run`.
+`--env-file` is a `uv` option, so put it before `pytest`:
+
+```bash
+uv run --env-file .env pytest tests/my_app --port=/dev/ttyACM0
+```
+
 If an environment variable is missing, the plugin still passes the define with an empty string value.
 This allows the test or sketch code to decide how to handle missing settings.
 The plugin does not add test flags such as `PYTEST_BUILD` automatically.
