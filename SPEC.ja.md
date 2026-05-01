@@ -75,6 +75,7 @@
 - コマンド生成と option 解釈を検証する単体テスト
 - plugin 読み込み確認の最小統合テスト
 - README と examples
+- Arduino 側テストライブラリ `ArduTest` と連携する `arduino_test` fixture の設計
 
 ### 5.2 本仕様に含めない
 
@@ -87,6 +88,12 @@
 - `arduino-cli board list` 連携や自動ポート解決の高度化
 - ボード定義ごとの artifact 自動探索の最適化
 - 並列デバイス制御や device farm 機能
+
+### 5.3 関連仕様
+
+`ArduTest` と `arduino_test` fixture の通信 protocol、初期同期、実行制御、成果物収集の詳細は [`ARDUTEST_PROTOCOL_SPEC.ja.md`](ARDUTEST_PROTOCOL_SPEC.ja.md) で管理する。
+
+`arduino_test` fixture の公開 API、設定解決、pytest result への反映、artifact 保存など pytest 側の詳細は [`ARDUTEST_PYTEST_SPEC.ja.md`](ARDUTEST_PYTEST_SPEC.ja.md) で管理する。
 
 ## 6. 想定ユースケース
 
