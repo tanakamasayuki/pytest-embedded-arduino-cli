@@ -3,7 +3,7 @@ profiles:
     fqbn: lang-ship:host:host
     port: socket://localhost
     platforms:
-      - platform: lang-ship:host (0.1.3)
+      - platform: lang-ship:host (0.1.5)
         platform_index_url: https://tanakamasayuki.github.io/host-arduino-core/package_index.json
 
 default_profile: host
