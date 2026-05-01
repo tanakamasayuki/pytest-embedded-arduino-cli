@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 import re
+import time
 from typing import Any, Literal
 
 
@@ -84,13 +85,30 @@ class ArduTestSession:
         self.timeout = timeout
         self.environ = environ if environ is not None else os.environ
         self.results: list[ArduTestResult] = []
+        self._tests: list[ArduTestCase] | None = None
 
     def run(self, name: str | None = None) -> list[ArduTestResult]:
         return self._run_protocol(name)
 
     def list_tests(self) -> list[ArduTestCase]:
+        if self._tests is not None:
+            return self._tests
+
         self._sync_hello()
-        return self._list_tests_after_hello()
+        self._tests = self._list_tests_after_hello()
+        return self._tests
+
+    @property
+    def logs(self) -> dict[str, list[str]]:
+        return {result.name: result.logs for result in self.results}
+
+    @property
+    def metrics(self) -> dict[str, dict[str, list[int | float | str]]]:
+        return {result.name: result.metrics for result in self.results}
+
+    @property
+    def artifacts(self) -> dict[str, dict[str, str]]:
+        return {result.name: result.artifacts for result in self.results}
 
     def _list_tests_after_hello(self) -> list[ArduTestCase]:
         self._send_command("AT > LIST")
@@ -143,12 +161,19 @@ class ArduTestSession:
 
         self.results = []
         by_name = {test.name: test for test in tests}
+        runnable_tests: list[ArduTestCase] = []
         for test_name in selected_names:
             test = by_name[test_name]
             skip_reason = self._skip_reason(test)
             if skip_reason:
                 self.results.append(ArduTestResult(name=test_name, status="skipped", skip_reason=skip_reason))
                 continue
+            runnable_tests.append(test)
+
+        self._apply_configs(runnable_tests)
+
+        for test in runnable_tests:
+            test_name = test.name
             self._send_command(f"AT > RUN {test_name}")
             self.results.append(self._collect_one_protocol_result(test_name))
 
@@ -168,6 +193,23 @@ class ArduTestSession:
             return "missing config: " + ", ".join(missing_configs)
 
         return None
+
+    def _apply_configs(self, tests: list[ArduTestCase]) -> None:
+        config_names: list[str] = []
+        for test in tests:
+            for name in test.required_configs:
+                if name not in config_names:
+                    config_names.append(name)
+
+        if not config_names:
+            return
+
+        self._send_command("AT > CLEAR_CONFIG")
+        for name in config_names:
+            value = self._config_value(name)
+            if value is None:
+                continue
+            self._send_payload_command("SET_CONFIG", name, value)
 
     def _capability_enabled(self, name: str) -> bool:
         value = self.environ.get("ARDUINO_TEST_CAP_" + _env_name(name))
@@ -228,12 +270,19 @@ class ArduTestSession:
             if parsed.kind == "HELLO":
                 return parsed
             if parsed.kind == "READY":
+                time.sleep(0.1)
+                self._send_command("AT > HELLO 1")
+                time.sleep(0.1)
                 self._send_command("AT > HELLO 1")
                 continue
             raise ArduTestError(f"expected ArduTest protocol HELLO, got: AT < {parsed.kind} {parsed.fields}")
 
     def _send_command(self, command: str) -> None:
         self.dut.write(f"{command}\n")
+
+    def _send_payload_command(self, command: str, name: str, value: str) -> None:
+        length = len(value.encode("utf-8"))
+        self.dut.write(f"AT > {command} {name} {length}\n{value}")
 
     @staticmethod
     def _parse_result_fields(fields: str) -> tuple[str, str]:
