@@ -1,0 +1,26 @@
+profiles:
+  host:
+    fqbn: lang-ship:host:host
+    port: socket://localhost
+    platforms:
+      - platform: lang-ship:host (1.0.0)
+        platform_index_url: https://tanakamasayuki.github.io/host-arduino-core/package_index.json
+    libraries:
+      - ArduTest (0.2.0)
+
+  uno:
+    fqbn: arduino:avr:uno
+    platforms:
+      - platform: arduino:avr (1.8.7)
+    libraries:
+      - ArduTest (0.2.0)
+
+  esp32:
+    fqbn: esp32:esp32:esp32
+    platforms:
+      - platform: esp32:esp32 (3.3.8)
+        platform_index_url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+    libraries:
+      - ArduTest (0.2.0)
+
+default_profile: host

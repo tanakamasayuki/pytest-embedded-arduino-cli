@@ -28,6 +28,15 @@ uv run pytest examples/01_basic --profile uno --port=/dev/ttyACM0
 
 個別の前提条件や補足は、各サンプルの `README.ja.md` に記載しています。
 
+これらのサンプルは、Arduino CLI の package index と library index がある程度新しいことを前提にしています。
+毎回のテスト実行で更新する必要はありませんが、定期的に、または CI / release 確認の前に更新しておく運用を推奨します。
+`sketch.yaml` で指定した platform や library の version が見つからず build に失敗する場合は、次のコマンドで index を更新してから再実行してください。
+
+```bash
+arduino-cli core update-index
+arduino-cli lib update-index
+```
+
 ## Profile Selection
 
 plugin の profile 解決順は次のとおりです。
@@ -143,6 +152,9 @@ plugin が何をしているか確認したい場合は verbosity を使いま�
 - `10_build_flags`
   - `build_config.toml` の `[flags]` で値なし compile-time define を渡す例
   - `PYTEST_BUILD` のようなテスト用 flag を project 側が明示する方法を示します
+- `11_ardutest`
+  - ArduTest Arduino ライブラリと experimental な `arduino_test` fixture の例
+  - basic runner と metadata/config runner を分け、各 sketch の目的を絞っています
 
 ## ディレクトリ構成
 
@@ -211,6 +223,16 @@ examples/
       build_config.toml
       build_flag_switch.ino
       test_build_flag_switch.py
+  11_ardutest/
+    README.ja.md
+    ardutest_basic/
+      sketch.yaml
+      ardutest_basic.ino
+      test_ardutest_basic.py
+    ardutest_metadata/
+      sketch.yaml
+      ardutest_metadata.ino
+      test_ardutest_metadata.py
 ```
 
 この plugin は、実行したテストファイルがあるディレクトリを sketch ディレクトリとして扱います。
