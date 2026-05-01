@@ -441,9 +441,12 @@ host は以下から config を収集して device へ送る。
 
 推奨初期値:
 
-- 最大件数: 8
+- 最大件数: 4
 - key 最大長: 31 bytes
-- value 最大長: 96 bytes
+- value 最大長: 48 bytes
+
+これらは ArduTest Arduino ライブラリの既定 compile-time define と一致する。
+必要に応じて Arduino 側で上限を変更できるが、小容量ボードでは RAM 使用量に注意する。
 
 上限を超えた場合、device は `ERROR invalid_config` を返す。
 
