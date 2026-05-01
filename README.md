@@ -40,6 +40,15 @@ Runtime dependencies include:
 - Installed Arduino board core(s)
 - A serial port accessible from the host when running hardware tests
 
+When `sketch.yaml` declares platform or library versions, Arduino CLI resolves them through its local package and library indexes.
+The indexes do not need to be refreshed on every test run, but they should be updated periodically or before CI/release verification.
+If a build fails because a declared platform or library version cannot be found, try:
+
+```bash
+arduino-cli core update-index
+arduino-cli lib update-index
+```
+
 ## Project Layout
 
 The expected layout is one sketch directory per test app.
@@ -273,6 +282,9 @@ Additional samples:
 - `examples/10_build_flags`
   - Demonstrates value-less compile-time defines with `[flags]` in `build_config.toml`
   - Shows how a project can explicitly enable test flags such as `PYTEST_BUILD`
+- `examples/11_ardutest`
+  - Demonstrates the experimental `arduino_test` fixture with the ArduTest Arduino library
+  - Splits the basic runner and metadata/config runner so each sketch stays focused
 
 Execution guidance for `examples/` is described in [examples/README.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.md).
 

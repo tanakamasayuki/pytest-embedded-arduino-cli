@@ -40,6 +40,15 @@ uv sync
 - 必要な Arduino board core がインストール済みであること
 - 実機テスト時にホストからアクセスできる serial port があること
 
+`sketch.yaml` で platform や library の version を指定する場合、Arduino CLI はローカルの package index / library index からそれらを解決します。
+毎回のテスト実行で index を更新する必要はありませんが、定期的に、または CI / release 確認の前に更新しておく運用を推奨します。
+指定した platform や library の version が見つからず build に失敗する場合は、次のコマンドで index を更新してから再実行してください。
+
+```bash
+arduino-cli core update-index
+arduino-cli lib update-index
+```
+
 ## 想定レイアウト
 
 基本は 1 つのテストアプリごとに 1 つの sketch ディレクトリを想定します。
@@ -277,6 +286,9 @@ void loop() {}
 - `examples/10_build_flags`
   - `build_config.toml` の `[flags]` で値なし compile-time define を渡す例
   - `PYTEST_BUILD` のようなテスト用 flag を project 側が明示する方法を示す
+- `examples/11_ardutest`
+  - ArduTest Arduino ライブラリと experimental な `arduino_test` fixture の例
+  - basic runner と metadata/config runner を分け、各 sketch の目的を絞って示す
 
 `examples/` 配下の実行方法は [examples/README.ja.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.ja.md) にまとめています。
 

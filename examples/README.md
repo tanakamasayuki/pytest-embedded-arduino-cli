@@ -28,6 +28,15 @@ uv run pytest examples/01_basic --profile uno --port=/dev/ttyACM0
 
 Sample-specific requirements are documented in each sample's own `README.md`.
 
+These examples expect Arduino CLI's package and library indexes to be reasonably up to date.
+The indexes do not need to be refreshed on every test run, but updating them periodically or before CI/release verification is recommended.
+If a build fails because a platform or library version declared in `sketch.yaml` cannot be found, try refreshing the indexes:
+
+```bash
+arduino-cli core update-index
+arduino-cli lib update-index
+```
+
 ## Profile Selection
 
 The plugin resolves profiles in this order:
@@ -143,6 +152,9 @@ The directories are numbered in the recommended reading and verification order.
 - `10_build_flags`
   - Demonstrates value-less compile-time defines with `[flags]` in `build_config.toml`
   - Shows how a project can explicitly enable test flags such as `PYTEST_BUILD`
+- `11_ardutest`
+  - Demonstrates the experimental `arduino_test` fixture with the ArduTest Arduino library
+  - Splits the basic runner and metadata/config runner so each sketch stays focused
 
 ## Layout
 
@@ -211,6 +223,16 @@ examples/
       build_config.toml
       build_flag_switch.ino
       test_build_flag_switch.py
+  11_ardutest/
+    README.md
+    ardutest_basic/
+      sketch.yaml
+      ardutest_basic.ino
+      test_ardutest_basic.py
+    ardutest_metadata/
+      sketch.yaml
+      ardutest_metadata.ino
+      test_ardutest_metadata.py
 ```
 
 This plugin treats the directory containing the selected test file as the sketch directory.
