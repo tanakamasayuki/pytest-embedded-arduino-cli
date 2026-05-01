@@ -76,8 +76,8 @@ serial port は次の優先順位で解決されます。
 5. `sketch.yaml` の `profiles.<PROFILE>.port`。ただし `socket://...` URL の場合のみ
 
 `pytest` の引数解釈の都合で、`--port` や `--flash-port` のように path を受け取る option は、`--port=/dev/ttyUSB0` のように `=` 付きで書く方が安全です。
-環境によっては `uv run pytest --port=/dev/ttyUSB0` の形だと、その path を別の基準パスとして解釈してしまうことがあります。
-必要なら `uv run pytest --rootdir . --port=/dev/ttyUSB0` のように `--rootdir .` を明示しても構いません。
+環境によっては `uv run pytest --port /dev/ttyUSB0` の形だと、その path を別の基準パスとして解釈してしまうことがあります。
+必要なら `uv run pytest --rootdir . --port /dev/ttyUSB0` のように `--rootdir .` を明示しても構いません。
 
 host 上で Arduino sketch を実行する board core では、serial device path ではなく pyserial の socket URL を使う方針です。
 選択された profile に `port: socket://localhost` が定義されている場合は、`--port=socket://localhost` を省略できます。

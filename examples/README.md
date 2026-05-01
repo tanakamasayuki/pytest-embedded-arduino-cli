@@ -76,8 +76,8 @@ Port resolution uses this priority:
 5. `profiles.<PROFILE>.port` in `sketch.yaml`, only when it is a `socket://...` URL
 
 Because of how `pytest` parses arguments, options that take path-like values such as `--port` and `--flash-port` are safer when written with `=`, for example `--port=/dev/ttyUSB0`.
-Depending on the environment, `uv run pytest --port=/dev/ttyUSB0` may cause that path to be interpreted as another base path.
-If needed, `uv run pytest --rootdir . --port=/dev/ttyUSB0` is also a valid workaround.
+Depending on the environment, `uv run pytest --port /dev/ttyUSB0` may cause that path to be interpreted as another base path.
+If needed, `uv run pytest --rootdir . --port /dev/ttyUSB0` is also a valid workaround.
 
 For board cores that run the Arduino sketch on the host machine, use a pyserial socket URL instead of a serial device path.
 If the selected profile defines `port: socket://localhost`, `--port=socket://localhost` can be omitted.
