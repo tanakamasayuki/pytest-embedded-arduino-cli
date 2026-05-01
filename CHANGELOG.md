@@ -1,6 +1,14 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Add pytest `--clean` option and pass it through to `arduino-cli compile --clean`.
+- (JA) pytest の `--clean` option を追加し、`arduino-cli compile --clean` として渡すように変更。
+- (EN) Add experimental `arduino_test` fixture support for the bundled ArduTest protocol, including test listing, requirement/config handling, logs, metrics, text artifacts, and assertion failure collection.
+- (JA) 同梱 ArduTest protocol 向けの実験的な `arduino_test` fixture を追加し、test 一覧取得、requirement/config 処理、log、metric、text artifact、assertion failure の収集に対応。
+- (EN) Update ArduTest protocol handling to use length-prefixed payloads for logs, text artifacts, failures, and protocol errors.
+- (JA) ArduTest protocol の log、text artifact、failure、protocol error を length-prefixed payload 形式で扱うように更新。
+- (EN) Batch `socket://` serial reads for host Arduino core runs to avoid very slow one-byte-at-a-time redirect behavior.
+- (JA) host Arduino core の `socket://` 実行で 1 byte ずつ redirect されて遅くなる問題を避けるため、serial read を chunk 化。
 - (EN) Reset internally completed host socket ports for each sketch so multi-sketch runs do not reuse the previous runtime port.
 - (JA) 複数 sketch の実行で前の runtime port を再利用しないよう、内部補完した host socket port を sketch ごとにリセットするように修正。
 - (EN) Auto-resolve host socket ports from `profiles.<profile>.port` in `sketch.yaml` when no CLI or environment port is specified.

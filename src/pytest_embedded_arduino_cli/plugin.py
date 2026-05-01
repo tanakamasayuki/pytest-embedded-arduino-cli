@@ -56,6 +56,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=30.0,
         help="Timeout in seconds while waiting for ArduTest serial output.",
     )
+    group.addoption(
+        "--clean",
+        action="store_true",
+        default=False,
+        help="Pass --clean to arduino-cli compile.",
+    )
 
 
 def pytest_report_header(config: pytest.Config) -> list[str]:
@@ -182,6 +188,7 @@ def _build_config_from_request(
         return ArduinoCliBuildConfig.from_test_path(
             _request_path(request),
             profile=config.getoption("profile"),
+            clean=config.getoption("clean"),
         )
     except UnsupportedProfileError:
         raise

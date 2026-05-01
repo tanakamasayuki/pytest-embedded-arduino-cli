@@ -74,6 +74,12 @@ build のみ:
 uv run pytest tests/my_app --run-mode=build
 ```
 
+Arduino CLI の clean compile を強制する例:
+
+```bash
+uv run pytest tests/my_app --clean
+```
+
 既存 build artifact を使って upload してから test:
 
 ```bash
@@ -92,6 +98,11 @@ uv run pytest
 
 - `--run-mode=all|build|test`
 - `--profile`
+- `--clean`
+- `--arduino-test-timeout=SECONDS`
+
+`--clean` は `arduino-cli compile` に `--clean` を渡します。
+Arduino CLI の incremental build cache を使わずに再 build したいときに使います。
 
 実行時の制御には `pytest-embedded` 標準 option を使います。主なものは次です。
 
@@ -137,6 +148,7 @@ host 上の実行は、実機なしで純粋なロジックや serial protocol �
 実行結果は host machine の OS、gcc などの toolchain version、host Arduino core の `Serial` class 実装に影響されるため、実機上の動作を保証するものではありません。
 実機依存の peripheral、timing、割り込み、メモリ配置、Flash/NVS、board 固有 API は実機で確認してください。
 また、compile が通るかどうかも board core や platform ごとに差が出るため、本番で使う board profile での build test は別途実行することを推奨します。
+`socket://...` port では、host Arduino core で 1 byte ずつ redirect されて極端に遅くなる挙動を避けるため、この plugin が serial read を chunk 化します。
 
 例:
 
@@ -194,6 +206,31 @@ uv run pytest tests/my_app --port=/dev/ttyACM0
   - `arduino-cli compile` / `arduino-cli upload` の実行コマンドを表示
 - `-vv`
   - 上記に加えて `cwd`、`sketch_dir`、`build_path`、`profile`、`port` なども表示
+
+## ArduTest fixture
+
+この package には、同梱の `env/ArduTest` Arduino ライブラリを使う sketch 向けの実験的な `arduino_test` fixture も含まれます。
+fixture は既存の `dut` serial 接続上で ArduTest line protocol を使って通信します。
+
+```python
+def test_board(arduino_test):
+    arduino_test.run()
+```
+
+現時点で対応している主な機能:
+
+- protocol sync と test 一覧取得
+- 単一 test または全 test の実行
+- requirement と required config に基づく host 側 skip 判定
+- `SET_CONFIG` による config 配布
+- log、metric、text artifact、assertion failure、最終 result の収集
+
+初期実装で使う環境変数:
+
+- `ARDUINO_TEST_CAP_<NAME>`: requirement の有無
+- `ARDUINO_TEST_CONFIG_<NAME>`: config 値
+
+`<NAME>` 内の英数字以外は `_` に正規化され、大文字化されます。
 
 ## 例
 
