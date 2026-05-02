@@ -16,11 +16,6 @@
 - `tests/run_wsl.sh`
 
 `tests/pyproject.toml` は、このテストワークスペースを `uv` で実行するための設定です。
-この例では必須依存に `pytest-html` も追加しています。
-なくてもテスト自体は動きますが、結果を `report.html` として確認できるので、実プロジェクトではあると便利です。
-
-`tests/pytest.ini` には、その HTML レポート出力設定を入れています。
-あわせて、`pytest-embedded` 由来の実用上ほぼ意味のない warning を無視する設定も入れています。
 
 プロジェクトルートの `.gitignore` は、このリポジトリのトップと同じ方針に寄せています。
 Python / `uv` のローカル生成物、HTML レポート、各種キャッシュを無視しつつ、この構成向けに runner ごとの `tests/**/build/` も追加しています。
