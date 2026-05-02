@@ -16,11 +16,6 @@ Test root:
 - `tests/run_wsl.sh`
 
 `tests/pyproject.toml` defines the `uv` workspace used for this test setup.
-This example also adds `pytest-html` as a regular dependency.
-The tests can run without it, but it is useful in practice because it produces an HTML report as `report.html`.
-
-`tests/pytest.ini` contains that HTML report configuration.
-It also ignores a warning from `pytest-embedded` that is usually not meaningful in day-to-day use.
 
 The project-root `.gitignore` follows the same policy as this repository's top-level ignore list.
 It ignores Python and `uv` local files, the HTML report, and common caches, and adds `tests/**/build/` for per-runner Arduino CLI build output in this layout.
