@@ -286,8 +286,8 @@ Additional samples:
   - Demonstrates value-less compile-time defines with `[flags]` in `build_config.toml`
   - Shows how a project can explicitly enable test flags such as `PYTEST_BUILD`
 - `examples/11_ardutest`
-  - Demonstrates the experimental `arduino_test` fixture with the ArduTest Arduino library
-  - Splits the basic runner and metadata/config runner so each sketch stays focused
+  - Minimal examples for using the experimental `arduino_test` fixture with the ArduTest Arduino library
+  - Detailed protocol/API and artifact-saving tests live in the ArduTest test suite: https://github.com/tanakamasayuki/ArduTest/tree/main/tests
 
 Execution guidance for `examples/` is described in [examples/README.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.md).
 
