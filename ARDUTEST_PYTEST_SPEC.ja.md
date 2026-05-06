@@ -320,9 +320,9 @@ wifi.password -> ARDUINO_TEST_CONFIG_WIFI_PASSWORD
 
 ### 10.3 必須 config 不足
 
-`REQUIRE_CONFIG` で宣言された config が見つからない場合、初期実装では skipped とする。
+`REQUIRE_CONFIG` で宣言された config が見つからない場合、既定では skipped とする。
 
-将来、以下の option で error 扱いへ切り替えられるようにしてよい。
+以下の option で error 扱いへ切り替えられる。
 
 ```text
 --arduino-test-missing-config=skip|error

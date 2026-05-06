@@ -52,6 +52,7 @@ class DummyConfig:
                 "embedded_services": embedded_services,
                 "profile": None,
                 "arduino_test_artifact_dir": "ardutest",
+                "arduino_test_missing_config": "skip",
                 "clean": False,
             },
         )()
@@ -76,6 +77,7 @@ def test_plugin_help_lists_options(pytester: pytest.Pytester) -> None:
     assert "--profile=PROFILE" in stdout
     assert "--arduino-test-timeout=ARDUINO_TEST_TIMEOUT" in stdout
     assert "--arduino-test-artifact-dir=ARDUINO_TEST_ARTIFACT_DIR" in stdout
+    assert "--arduino-test-missing-config={skip,error}" in stdout
     assert "--clean" in stdout
     assert "--arduino-cli-build-path" not in stdout
     assert "--arduino-cli-upload-port" not in stdout

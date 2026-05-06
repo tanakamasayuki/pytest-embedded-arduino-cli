@@ -198,6 +198,25 @@ def test_ardutest_session_skips_missing_config_without_running() -> None:
     assert results[0].skip_reason == "missing config: sample_rate"
 
 
+def test_ardutest_session_errors_on_missing_config_when_configured() -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_metric_and_artifact",
+            "AT < REQUIRE_CONFIG test_metric_and_artifact sample_rate",
+            "AT < END_LIST",
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="missing required ArduTest config for test_metric_and_artifact: sample_rate"):
+        ArduTestSession(dut, environ={}, missing_config="error").run()
+
+    assert dut.writes == [
+        "AT > HELLO 1\n",
+        "AT > LIST\n",
+    ]
+
+
 def test_ardutest_session_lists_metadata() -> None:
     dut = ProtocolFakeDut(
         [

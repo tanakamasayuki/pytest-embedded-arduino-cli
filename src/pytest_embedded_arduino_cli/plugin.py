@@ -64,6 +64,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Directory for ArduTest artifacts, relative to pytest rootdir unless absolute.",
     )
     group.addoption(
+        "--arduino-test-missing-config",
+        action="store",
+        choices=("skip", "error"),
+        default="skip",
+        help="Treat missing required ArduTest config as skipped tests or pytest errors.",
+    )
+    group.addoption(
         "--clean",
         action="store_true",
         default=False,
@@ -251,6 +258,7 @@ def arduino_test(request: pytest.FixtureRequest, dut: Any) -> ArduTestSession:
         dut,
         timeout=request.config.getoption("arduino_test_timeout"),
         artifact_dir=_ardutest_artifact_dir(request.config),
+        missing_config=request.config.getoption("arduino_test_missing_config"),
     )
 
 
