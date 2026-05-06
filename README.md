@@ -109,9 +109,19 @@ uv run pytest
 - `--profile`
 - `--clean`
 - `--arduino-test-timeout=SECONDS`
+- `--arduino-test-artifact-dir=PATH`
+- `--arduino-test-missing-config=skip|error`
 
 `--clean` passes `--clean` to `arduino-cli compile`.
 It is useful when Arduino CLI's incremental build cache should be ignored.
+It also removes the ArduTest artifact directory before running.
+
+`--arduino-test-artifact-dir` selects the ArduTest artifact root.
+The default is `ardutest`, resolved relative to pytest's `rootdir`.
+The directory is created only when an artifact is saved.
+
+`--arduino-test-missing-config` controls required ArduTest config that is not provided.
+The default is `skip`; use `error` when missing config should fail the pytest run.
 
 Use `pytest-embedded` standard options for runtime control, such as:
 

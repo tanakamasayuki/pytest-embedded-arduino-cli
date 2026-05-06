@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 
 ArduTestStatus = Literal["passed", "failed", "skipped", "error"]
+MissingConfigMode = Literal["skip", "error"]
 
 
 class ArduTestError(RuntimeError):
@@ -88,11 +89,13 @@ class ArduTestSession:
         timeout: float = 30.0,
         environ: dict[str, str] | None = None,
         artifact_dir: Path | str | None = None,
+        missing_config: MissingConfigMode = "skip",
     ) -> None:
         self.dut = dut
         self.timeout = timeout
         self.environ = environ if environ is not None else os.environ
         self.artifact_dir = Path(artifact_dir) if artifact_dir is not None else None
+        self.missing_config = missing_config
         self.results: list[ArduTestResult] = []
         self._tests: list[ArduTestCase] | None = None
 
@@ -180,6 +183,9 @@ class ArduTestSession:
             if skip_reason:
                 self.results.append(ArduTestResult(name=test_name, status="skipped", skip_reason=skip_reason))
                 continue
+            missing_config_error = self._missing_config_error(test)
+            if missing_config_error:
+                raise ArduTestError(missing_config_error)
             runnable_tests.append(test)
 
         self._apply_configs(runnable_tests)
@@ -200,10 +206,19 @@ class ArduTestSession:
         if missing_requirements:
             return "missing capability: " + ", ".join(missing_requirements)
 
+        if self.missing_config == "skip":
+            missing_configs = [name for name in test.required_configs if self._config_value(name) is None]
+            if missing_configs:
+                return "missing config: " + ", ".join(missing_configs)
+
+        return None
+
+    def _missing_config_error(self, test: ArduTestCase) -> str | None:
+        if self.missing_config != "error":
+            return None
         missing_configs = [name for name in test.required_configs if self._config_value(name) is None]
         if missing_configs:
-            return "missing config: " + ", ".join(missing_configs)
-
+            return f"missing required ArduTest config for {test.name}: " + ", ".join(missing_configs)
         return None
 
     def _apply_configs(self, tests: list[ArduTestCase]) -> None:

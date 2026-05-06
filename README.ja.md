@@ -110,6 +110,7 @@ uv run pytest
 - `--clean`
 - `--arduino-test-timeout=SECONDS`
 - `--arduino-test-artifact-dir=PATH`
+- `--arduino-test-missing-config=skip|error`
 
 `--clean` は `arduino-cli compile` に `--clean` を渡します。
 Arduino CLI の incremental build cache を使わずに再 build したいときに使います。
@@ -118,6 +119,9 @@ ArduTest の artifact 保存先 directory も、実行前に directory ごと削
 `--arduino-test-artifact-dir` は ArduTest artifact の保存先 root を指定します。
 既定値は `ardutest` で、pytest の `rootdir` からの相対 path として解決されます。
 保存先 directory は artifact を保存する時点で自動生成され、artifact が発生しない実行では空 directory を作りません。
+
+`--arduino-test-missing-config` は、ArduTest の必須 config が未指定だった場合の扱いを指定します。
+既定値は `skip` です。未指定 config を pytest error にしたい場合は `error` を指定します。
 
 実行時の制御には `pytest-embedded` 標準 option を使います。主なものは次です。
 
