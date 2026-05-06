@@ -98,13 +98,39 @@ tests = arduino_test.list_tests()
 - `requirements`
 - `required_configs`
 
-### 5.4 `arduino_test.reset()`
+### 5.4 `arduino_test.set_config(name, value)`
+
+ArduTest の required config に渡す値を、pytest test function 内で明示設定する。
+
+```python
+def test_sample_rate(arduino_test):
+    arduino_test.set_config("sample_rate", 1000)
+    arduino_test.run("test_sample_rate")
+```
+
+`value` は `str(value)` で文字列化して device へ送る。
+
+同じ name が複数回設定された場合は後勝ちとする。
+
+### 5.5 `arduino_test.set_capability(name, enabled=True)`
+
+ArduTest の requirement を満たすかどうかを、pytest test function 内で明示設定する。
+
+```python
+def test_measurement(arduino_test):
+    arduino_test.set_capability("measurement.current")
+    arduino_test.run("test_measurement")
+```
+
+同じ name が複数回設定された場合は後勝ちとする。
+
+### 5.6 `arduino_test.reset()`
 
 device reset または protocol 状態 reset を行う。
 
 初期実装では、物理 reset の有無は `pytest-embedded-arduino-cli` の既存 reset 能力に従う。protocol のみの reset が可能な場合は `RESET_STATE` を送る。
 
-### 5.5 収集データ
+### 5.7 収集データ
 
 実行後、以下を参照できる。
 
@@ -190,7 +216,7 @@ ArduTestArtifact(
 
 同じ pytest test function 内で複数回 `run()` が呼ばれた場合、初期同期結果は再利用してよい。
 
-config や capability を変更したい場合は、明示 API を追加するまでは同一 fixture 内では非対応とする。
+`set_config()` / `set_capability()` は `run()` の実行計画作成時に参照する。`run()` 後に値を変更して再度 `run()` する場合、test metadata は再利用してよいが、config / capability 評価は再実行する。
 
 ---
 
@@ -238,9 +264,19 @@ device から取得した requirement は host 側 capability と照合する。
 
 満たされない requirement を持つテストは `RUN` せず skipped とする。
 
-### 9.2 環境変数
+### 9.2 提供元と優先順位
 
-初期実装では以下の形式をサポートする。
+capability は以下の順で解決する。
+
+1. `arduino_test.set_capability(name, enabled)`
+2. 環境変数 `ARDUINO_TEST_CAP_<NAME>`
+3. 未設定の場合は false
+
+固定値や test-local な前提は `set_capability()` で明示する。実機や CI 環境に依存する値は環境変数で渡す。
+
+### 9.3 環境変数
+
+環境変数では以下の形式をサポートする。
 
 ```text
 ARDUINO_TEST_CAP_<NAME>=true
@@ -275,17 +311,15 @@ false とみなす値:
 
 その他の値は設定不備として pytest error にする。
 
-### 9.3 pytest option
+### 9.4 pytest option
 
-将来、以下の option を追加してよい。
+capability 用の pytest option は初期実装では追加しない。
 
-```text
---arduino-test-capability=name
---arduino-test-capability=name=true
---arduino-test-capability=name=false
-```
+理由:
 
-初期実装では環境変数のみでもよい。
+- capability はテスト対象環境の条件であり、`.env` や CI variables と相性がよい
+- 固定値は `set_capability()` で pytest test 内に明示できる
+- plugin option を増やしすぎない
 
 ---
 
@@ -293,17 +327,17 @@ false とみなす値:
 
 ### 10.1 config 提供元
 
-初期実装では以下から config を取得する。
+config は以下の順で解決する。
 
-1. pytest option
-2. 環境変数
-3. pytest ini
+1. `arduino_test.set_config(name, value)`
+2. 環境変数 `ARDUINO_TEST_CONFIG_<NAME>`
+3. 未設定
 
-ただし、最初の実装では環境変数のみでもよい。
+固定値や test-local な値は `set_config()` で明示する。serial port、接続先、secret、実機固有値など環境依存の値は `.env` や CI variables から環境変数として渡す。
 
 ### 10.2 環境変数
 
-初期実装では以下の形式をサポートする。
+環境変数では以下の形式をサポートする。
 
 ```text
 ARDUINO_TEST_CONFIG_<NAME>=value
@@ -333,6 +367,16 @@ wifi.password -> ARDUINO_TEST_CONFIG_WIFI_PASSWORD
 host は実行対象テストが要求する config だけを `SET_CONFIG` で送る。
 
 同じ config を複数テストが要求する場合は 1 回だけ送ってよい。
+
+### 10.5 pytest option
+
+config 用の pytest option は初期実装では追加しない。
+
+理由:
+
+- config は環境依存値になりやすく、`.env` や CI variables と相性がよい
+- 固定値は `set_config()` で pytest test 内に明示できる
+- plugin option を増やしすぎない
 
 ---
 
@@ -431,8 +475,6 @@ protocol error は pytest error とし、可能であれば reset を試みる�
 将来候補:
 
 ```text
---arduino-test-capability=NAME[=BOOL]
---arduino-test-config=NAME=VALUE
 --arduino-test-show-log
 --arduino-test-collect
 ```
@@ -496,7 +538,6 @@ src/pytest_embedded_arduino_cli/
 
 ## 16. 未決事項
 
-- 初期実装で環境変数以外の config provider を入れるか
 - metrics の同名複数値を list にするか最後の値にするか
 - artifact root の既定値
 - protocol error を pytest error と failure のどちらで表現するか

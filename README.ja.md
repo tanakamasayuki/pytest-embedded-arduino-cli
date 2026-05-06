@@ -249,6 +249,17 @@ ArduTest 側が failed または error の結果を返した場合、`arduino_te
 
 現在の fixture は ArduTest protocol version `1` を使います。
 
+固定値や test-local な ArduTest の値は fixture method で渡します。
+
+```python
+def test_sample_rate(arduino_test):
+    arduino_test.set_capability("measurement.current")
+    arduino_test.set_config("sample_rate", 1000)
+    arduino_test.run("test_sample_rate")
+```
+
+実行する PC、接続先、実機環境、secret に依存する値は、環境変数、`.env`、CI variables で渡します。
+
 ## 例
 
 ```python
