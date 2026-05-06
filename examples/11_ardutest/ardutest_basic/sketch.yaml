@@ -4,7 +4,7 @@ profiles:
     port: socket://localhost
     platforms:
       - platform: lang-ship:host (1.0.5)
-        platform_index_url: https://tanakamasayuki.github.io/host-arduino-core/package_index.json
+        platform_index_url: https://tanakamasayuki.github.io/lang-ship-arduino-core/package_lang-ship_index.json
     libraries:
       - ArduTest (0.2.1)
 
