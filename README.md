@@ -245,6 +245,17 @@ Use additional assertions only when you want to check collected logs, metrics, a
 
 The current fixture speaks ArduTest protocol version `1`.
 
+Use fixture methods for fixed test-local ArduTest values:
+
+```python
+def test_sample_rate(arduino_test):
+    arduino_test.set_capability("measurement.current")
+    arduino_test.set_config("sample_rate", 1000)
+    arduino_test.run("test_sample_rate")
+```
+
+Use environment variables, `.env`, or CI variables for values that depend on the machine, board, lab setup, or secrets.
+
 ## Example
 
 ```python

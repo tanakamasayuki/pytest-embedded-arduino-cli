@@ -431,10 +431,8 @@ TEST_CASE_WITH_REQUIREMENTS(test_wifi, "network", "ssid") {
 
 host は以下から config を収集して device へ送る。
 
-- pytest option
-- pytest ini
+- fixture API
 - 環境変数
-- ユーザー指定の設定ファイル
 
 具体的な優先順位は `pytest-embedded-arduino-cli` 側仕様で定義する。
 
@@ -479,11 +477,9 @@ sensor.temperature
 host 側は requirement ごとの満足可否を以下から判断する。
 
 - 環境変数
-- pytest option
-- 設定ファイル
 - fixture / plugin 拡張
 
-初期案では環境変数 `ARDUINO_TEST_CAP_<name>` をサポートする。`.` や `-` は `_` に正規化し、大文字小文字を区別しない。
+初期案では fixture API と環境変数 `ARDUINO_TEST_CAP_<name>` をサポートする。`.` や `-` は `_` に正規化し、大文字小文字を区別しない。
 
 ---
 
