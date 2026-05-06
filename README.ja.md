@@ -296,8 +296,8 @@ void loop() {}
   - `build_config.toml` の `[flags]` で値なし compile-time define を渡す例
   - `PYTEST_BUILD` のようなテスト用 flag を project 側が明示する方法を示す
 - `examples/11_ardutest`
-  - ArduTest Arduino ライブラリと experimental な `arduino_test` fixture の例
-  - basic runner と metadata/config runner を分け、各 sketch の目的を絞って示す
+  - ArduTest Arduino ライブラリと experimental な `arduino_test` fixture の最小例
+  - protocol / API や artifact 保存の詳しい test は ArduTest 側の test suite を参照: https://github.com/tanakamasayuki/ArduTest/tree/main/tests
 
 `examples/` 配下の実行方法は [examples/README.ja.md](https://github.com/tanakamasayuki/pytest-embedded-arduino-cli/blob/main/examples/README.ja.md) にまとめています。
 

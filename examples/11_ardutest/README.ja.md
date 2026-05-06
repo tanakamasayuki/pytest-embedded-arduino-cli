@@ -4,13 +4,14 @@
 
 ArduTest は Arduino 側ライブラリです。sketch は `sketch.yaml` の `libraries` で ArduTest を宣言し、Arduino 側 protocol 実装と pytest 側 fixture の互換性を保つために version を固定します。
 
-このディレクトリでは、目的ごとに sketch を分けています。
+このディレクトリの例は意図的に最小限にしています。
 
-- `ardutest_basic`
-  - 最小の `TEST_CASE` と `arduino_test.run()` の例
-  - ArduTest 側が failed または error を返した場合、`arduino_test.run()` が pytest の失敗として扱います
-- `ardutest_metadata`
-  - requirement metadata、required config、log、metric、text artifact の例
+- `ardutest_basic`: 最小の `TEST_CASE` と `arduino_test.run()` の例
+- `ardutest_metadata`: requirement、config、log、metric、text artifact の短い例
+
+protocol / API の詳細な検証や artifact 保存の integration test は、ArduTest 側の test suite を参照してください。
+
+https://github.com/tanakamasayuki/ArduTest/tree/main/tests
 
 default は host 実行です。
 

@@ -4,13 +4,14 @@ This example demonstrates the experimental `arduino_test` fixture with the ArduT
 
 ArduTest is an Arduino-side library. The sketch declares it in `sketch.yaml` through `libraries`, with a pinned version so the Arduino-side protocol implementation and the pytest-side fixture stay compatible.
 
-This directory is split into two sketches:
+This directory keeps the examples intentionally small:
 
-- `ardutest_basic`
-  - Minimal `TEST_CASE` usage with `arduino_test.run()`
-  - `arduino_test.run()` fails the pytest test automatically when ArduTest reports a failed or error result
-- `ardutest_metadata`
-  - Requirement metadata, required config, logs, metrics, and text artifacts
+- `ardutest_basic`: minimal `TEST_CASE` usage with `arduino_test.run()`
+- `ardutest_metadata`: a compact example of requirements, config, logs, metrics, and a text artifact
+
+For detailed protocol/API coverage and artifact-saving integration tests, see the ArduTest test suite:
+
+https://github.com/tanakamasayuki/ArduTest/tree/main/tests
 
 The example uses host execution by default:
 
