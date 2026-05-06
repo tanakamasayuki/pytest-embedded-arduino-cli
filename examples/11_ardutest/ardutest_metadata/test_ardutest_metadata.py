@@ -1,6 +1,6 @@
-def test_ardutest_metadata(monkeypatch, arduino_test):
-    monkeypatch.setenv("ARDUINO_TEST_CAP_MEASUREMENT_CURRENT", "true")
-    monkeypatch.setenv("ARDUINO_TEST_CONFIG_SAMPLE_RATE", "1000")
+def test_ardutest_metadata(arduino_test):
+    arduino_test.set_capability("measurement.current")
+    arduino_test.set_config("sample_rate", 1000)
 
     tests = arduino_test.list_tests()
 

@@ -69,13 +69,11 @@ def test_ardutest_session_runs_protocol_by_name() -> None:
         ]
     )
 
-    results = ArduTestSession(
-        dut,
-        environ={
-            "ARDUINO_TEST_CAP_MEASUREMENT_CURRENT": "true",
-            "ARDUINO_TEST_CONFIG_SAMPLE_RATE": "1000",
-        },
-    ).run("test_metric_and_artifact")
+    session = ArduTestSession(dut)
+    session.set_capability("measurement.current")
+    session.set_config("sample_rate", 1000)
+
+    results = session.run("test_metric_and_artifact")
 
     assert dut.writes == [
         "AT > HELLO 1\n",
@@ -196,6 +194,58 @@ def test_ardutest_session_skips_missing_config_without_running() -> None:
     ]
     assert results[0].status == "skipped"
     assert results[0].skip_reason == "missing config: sample_rate"
+
+
+def test_ardutest_session_explicit_values_override_environment() -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_metric_and_artifact",
+            "AT < REQUIRE test_metric_and_artifact measurement.current",
+            "AT < REQUIRE_CONFIG test_metric_and_artifact sample_rate",
+            "AT < END_LIST",
+            "AT < RUNNING test_metric_and_artifact",
+            "AT < RESULT test_metric_and_artifact passed",
+        ]
+    )
+    session = ArduTestSession(
+        dut,
+        environ={
+            "ARDUINO_TEST_CAP_MEASUREMENT_CURRENT": "false",
+            "ARDUINO_TEST_CONFIG_SAMPLE_RATE": "500",
+        },
+    )
+    session.set_capability("measurement.current", True)
+    session.set_config("sample_rate", 1000)
+
+    results = session.run("test_metric_and_artifact")
+
+    assert results[0].status == "passed"
+    assert dut.writes == [
+        "AT > HELLO 1\n",
+        "AT > LIST\n",
+        "AT > CLEAR_CONFIG\n",
+        "AT > SET_CONFIG sample_rate 4\n1000",
+        "AT > RUN test_metric_and_artifact\n",
+    ]
+
+
+def test_ardutest_session_can_disable_explicit_capability() -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_metric_and_artifact",
+            "AT < REQUIRE test_metric_and_artifact measurement.current",
+            "AT < END_LIST",
+        ]
+    )
+    session = ArduTestSession(dut, environ={"ARDUINO_TEST_CAP_MEASUREMENT_CURRENT": "true"})
+    session.set_capability("measurement.current", False)
+
+    results = session.run("test_metric_and_artifact")
+
+    assert results[0].status == "skipped"
+    assert results[0].skip_reason == "missing capability: measurement.current"
 
 
 def test_ardutest_session_errors_on_missing_config_when_configured() -> None:

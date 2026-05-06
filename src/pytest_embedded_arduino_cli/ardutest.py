@@ -96,11 +96,19 @@ class ArduTestSession:
         self.environ = environ if environ is not None else os.environ
         self.artifact_dir = Path(artifact_dir) if artifact_dir is not None else None
         self.missing_config = missing_config
+        self._capabilities: dict[str, bool] = {}
+        self._configs: dict[str, str] = {}
         self.results: list[ArduTestResult] = []
         self._tests: list[ArduTestCase] | None = None
 
     def run(self, name: str | None = None) -> list[ArduTestResult]:
         return self._run_protocol(name)
+
+    def set_capability(self, name: str, enabled: bool = True) -> None:
+        self._capabilities[name] = bool(enabled)
+
+    def set_config(self, name: str, value: object) -> None:
+        self._configs[name] = str(value)
 
     def list_tests(self) -> list[ArduTestCase]:
         if self._tests is not None:
@@ -239,6 +247,8 @@ class ArduTestSession:
             self._send_payload_command("SET_CONFIG", name, value)
 
     def _capability_enabled(self, name: str) -> bool:
+        if name in self._capabilities:
+            return self._capabilities[name]
         value = self.environ.get("ARDUINO_TEST_CAP_" + _env_name(name))
         if value is None:
             return False
@@ -250,6 +260,8 @@ class ArduTestSession:
         raise ArduTestError(f"invalid capability value for {name}: {value}")
 
     def _config_value(self, name: str) -> str | None:
+        if name in self._configs:
+            return self._configs[name]
         return self.environ.get("ARDUINO_TEST_CONFIG_" + _env_name(name))
 
     def _collect_one_protocol_result(self, test_name: str) -> ArduTestResult:
