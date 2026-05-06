@@ -352,7 +352,7 @@ pytest の `-s` や verbose mode で表示するかどうかは別途 option 化
 
 ### 11.3 artifacts
 
-`ARTIFACT_TEXT` / `ARTIFACT_BINARY` はファイルとして保存する。
+`ARTIFACT_TEXT` / `ARTIFACT_BINARY` はファイルとして保存する。`ARTIFACT_TEXT` は UTF-8 text として保存し、`ARTIFACT_BINARY` は payload bytes を decode せずそのまま保存する。
 
 保存先 root は pytest option で指定できる。
 

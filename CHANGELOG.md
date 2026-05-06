@@ -1,6 +1,10 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Add `--arduino-test-artifact-dir` for ArduTest artifact output, defaulting to `ardutest` under pytest `rootdir`, with lazy directory creation and `--clean` removal.
+- (JA) ArduTest artifact の保存先を指定する `--arduino-test-artifact-dir` を追加。既定値は pytest `rootdir` 配下の `ardutest` とし、保存時のみ directory を作成し、`--clean` 時に削除するように変更。
+- (EN) Save ArduTest `ARTIFACT_BINARY` payloads as raw bytes without Base64 decoding, alongside existing text artifact saving.
+- (JA) ArduTest の `ARTIFACT_BINARY` payload を Base64 ではなく raw bytes のまま保存するようにし、既存の text artifact 保存と併せて扱うように変更。
 
 ## 1.1.1
 - (EN) Add pytest `--clean` option and pass it through to `arduino-cli compile --clean`.
