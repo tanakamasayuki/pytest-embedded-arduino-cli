@@ -354,13 +354,27 @@ pytest の `-s` や verbose mode で表示するかどうかは別途 option 化
 
 `ARTIFACT_TEXT` / `ARTIFACT_BINARY` はファイルとして保存する。
 
-推奨保存先:
+保存先 root は pytest option で指定できる。
 
 ```text
-<pytest tmp/report root>/ardutest/<test-name>/<filename>
+--arduino-test-artifact-dir=PATH
 ```
 
-初期実装では pytest の `tmp_path` 系 fixture に依存せず、`request.node` から安定した artifact root を決める。
+既定値は `ardutest` とする。
+
+`PATH` が相対 path の場合は pytest の `rootdir` からの相対 path として解決する。したがって既定の保存先は `<pytest rootdir>/ardutest` となる。
+
+保存 layout:
+
+```text
+<artifact-dir>/<test-name>/<filename>
+```
+
+`<artifact-dir>` は artifact を保存する必要がある時点で自動生成する。artifact が 1 件も発生しない実行では、空の artifact directory を作成しない。
+
+初期実装では pytest の `tmp_path` 系 fixture に依存せず、option で指定された artifact root と `request.node` から安定した保存先を決める。
+
+`--clean` が指定されている場合、テスト実行前に `<artifact-dir>` を directory ごと削除する。その後も通常実行と同じく、artifact を保存する必要がある時点まで directory は再作成しない。
 
 filename は protocol 仕様に従い検証する。
 
@@ -411,7 +425,7 @@ protocol error は pytest error とし、可能であれば reset を試みる�
 ```text
 --arduino-test-timeout=SECONDS
 --arduino-test-missing-config=skip|error
---arduino-test-artifact-dir=PATH
+--arduino-test-artifact-dir=PATH  # default: ardutest
 ```
 
 将来候補:

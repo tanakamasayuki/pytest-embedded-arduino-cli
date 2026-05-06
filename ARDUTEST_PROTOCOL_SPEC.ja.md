@@ -488,15 +488,17 @@ host 側は requirement ごとの満足可否を以下から判断する。
 
 ### 12.1 保存先
 
-host は成果物を pytest 実行結果に紐づくディレクトリへ保存する。
+host は成果物を pytest 側で解決した artifact directory へ保存する。
 
 推奨 layout:
 
 ```text
-artifacts/
+<artifact-dir>/
   <test-name>/
     <filename>
 ```
+
+保存先 option、既定値、directory 作成、clean 時の削除は [`ARDUTEST_PYTEST_SPEC.ja.md`](ARDUTEST_PYTEST_SPEC.ja.md) で定義する。
 
 ### 12.2 filename 制約
 
