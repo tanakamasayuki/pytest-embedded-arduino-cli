@@ -5,6 +5,7 @@ import types
 import pytest
 
 from pytest_embedded_arduino_cli.plugin import (
+    _ardutest_artifact_dir,
     _log_command,
     _set_optional_metadata,
     _should_build,
@@ -50,10 +51,13 @@ class DummyConfig:
                 "verbose": verbose,
                 "embedded_services": embedded_services,
                 "profile": None,
+                "arduino_test_artifact_dir": "ardutest",
+                "clean": False,
             },
         )()
         self.pluginmanager = DummyPluginManager(reporter)
         self.stash = {}
+        self.rootpath = Path.cwd()
 
     def getoption(self, name: str):
         return getattr(self.option, name)
@@ -71,6 +75,7 @@ def test_plugin_help_lists_options(pytester: pytest.Pytester) -> None:
     assert "--run-mode={all,build,test}" in stdout
     assert "--profile=PROFILE" in stdout
     assert "--arduino-test-timeout=ARDUINO_TEST_TIMEOUT" in stdout
+    assert "--arduino-test-artifact-dir=ARDUINO_TEST_ARTIFACT_DIR" in stdout
     assert "--clean" in stdout
     assert "--arduino-cli-build-path" not in stdout
     assert "--arduino-cli-upload-port" not in stdout
@@ -169,6 +174,38 @@ def test_clean_option(arduino_cli_app):
         "pytest_embedded_arduino_cli.plugin",
     )
     result.assert_outcomes(passed=1)
+
+
+def test_clean_option_removes_ardutest_artifact_dir(pytester: pytest.Pytester) -> None:
+    artifact_dir = pytester.path / "ardutest"
+    artifact_dir.mkdir()
+    (artifact_dir / "old.txt").write_text("old", encoding="utf-8")
+    pytester.makepyfile(
+        """
+def test_artifact_dir_removed():
+    from pathlib import Path
+
+    assert not Path("ardutest").exists()
+"""
+    )
+
+    result = pytester.runpytest(
+        "--clean",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+
+    result.assert_outcomes(passed=1)
+    assert not artifact_dir.exists()
+
+
+def test_ardutest_artifact_dir_resolves_relative_to_pytest_root(tmp_path: Path) -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.rootpath = tmp_path
+
+    assert _ardutest_artifact_dir(config) == tmp_path / "ardutest"
 
 
 def test_plugin_completes_host_arduino_socket_port(pytester: pytest.Pytester) -> None:

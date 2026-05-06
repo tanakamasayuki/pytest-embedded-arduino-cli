@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 import shlex
 from typing import Any
 
@@ -57,10 +58,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Timeout in seconds while waiting for ArduTest serial output.",
     )
     group.addoption(
+        "--arduino-test-artifact-dir",
+        action="store",
+        default="ardutest",
+        help="Directory for ArduTest artifacts, relative to pytest rootdir unless absolute.",
+    )
+    group.addoption(
         "--clean",
         action="store_true",
         default=False,
-        help="Pass --clean to arduino-cli compile.",
+        help="Pass --clean to arduino-cli compile and remove ArduTest artifacts before running.",
     )
 
 
@@ -74,6 +81,7 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
 def pytest_configure(config: pytest.Config) -> None:
     install_fast_socket_redirect_thread()
     _remember_initial_ports(config)
+    _clean_ardutest_artifacts(config)
     ensure_default_embedded_services(config)
     _set_optional_metadata(config)
 
@@ -95,6 +103,25 @@ def _set_optional_metadata(config: pytest.Config) -> None:
         return
 
     config.stash[metadata_key]["Profile"] = config.getoption("profile") or "default"
+
+
+def _ardutest_artifact_dir(config: pytest.Config) -> Path:
+    value = Path(config.getoption("arduino_test_artifact_dir"))
+    if value.is_absolute():
+        return value
+    return Path(config.rootpath) / value
+
+
+def _clean_ardutest_artifacts(config: pytest.Config) -> None:
+    if not config.getoption("clean"):
+        return
+
+    artifact_dir = _ardutest_artifact_dir(config)
+    if not artifact_dir.exists():
+        return
+    if not artifact_dir.is_dir():
+        raise NotADirectoryError(f"ArduTest artifact path is not a directory: {artifact_dir}")
+    shutil.rmtree(artifact_dir)
 
 
 def _request_path(request: pytest.FixtureRequest) -> Path:
@@ -223,6 +250,7 @@ def arduino_test(request: pytest.FixtureRequest, dut: Any) -> ArduTestSession:
     return ArduTestSession(
         dut,
         timeout=request.config.getoption("arduino_test_timeout"),
+        artifact_dir=_ardutest_artifact_dir(request.config),
     )
 
 
