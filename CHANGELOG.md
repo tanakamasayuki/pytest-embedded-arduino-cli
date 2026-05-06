@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.1.2
 - (EN) Add `arduino_test.set_config()` and `arduino_test.set_capability()` for fixed test-local ArduTest config and capability values without environment patching.
 - (JA) 環境変数の patch なしで test-local な ArduTest config / capability 固定値を渡せる `arduino_test.set_config()` と `arduino_test.set_capability()` を追加。
 - (EN) Add `--arduino-test-missing-config=skip|error` to choose whether missing required ArduTest config skips tests or raises an error.
