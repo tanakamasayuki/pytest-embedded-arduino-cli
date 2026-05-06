@@ -20,9 +20,12 @@ class FakeMatch:
 
 
 class ProtocolFakeDut:
-    def __init__(self, lines: list[str]) -> None:
+    def __init__(self, lines: list[str | bytes]) -> None:
         self.buffer = bytearray()
         for line in lines:
+            if isinstance(line, bytes):
+                self.buffer.extend(line)
+                continue
             if "\n" in line:
                 self.buffer.extend(line.encode())
             else:
@@ -104,6 +107,24 @@ def test_ardutest_session_saves_text_artifacts(tmp_path) -> None:
     assert (tmp_path / "ardutest" / "test_metric_and_artifact" / "notes" / "note.txt").read_text(
         encoding="utf-8"
     ) == "hello from ArduTest"
+
+
+def test_ardutest_session_saves_binary_artifacts(tmp_path) -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_binary_artifact",
+            "AT < END_LIST",
+            "AT < RUNNING test_binary_artifact",
+            b"AT < ARTIFACT_BINARY test_binary_artifact data/sample.bin application/octet-stream 4\n\x00\x01\n\xff",
+            "AT < RESULT test_binary_artifact passed",
+        ]
+    )
+
+    results = ArduTestSession(dut, artifact_dir=tmp_path / "ardutest").run()
+
+    assert results[0].events[0].message == "data/sample.bin 4 bytes"
+    assert (tmp_path / "ardutest" / "test_binary_artifact" / "data" / "sample.bin").read_bytes() == b"\x00\x01\n\xff"
 
 
 def test_ardutest_session_does_not_create_empty_artifact_dir(tmp_path) -> None:

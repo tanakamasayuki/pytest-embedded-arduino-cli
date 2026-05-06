@@ -88,7 +88,9 @@ AT < LOG <test-name> <length>\n
 
 payload の後ろに追加の終端文字は付けない。必要な場合、送信側は payload の直後に次の `AT ...\n` を続けてよい。
 
-受信側は header の `<length>` byte だけを payload として読む。payload は初期コアでは UTF-8 テキストを想定する。
+受信側は header の `<length>` byte だけを payload として読む。
+
+payload の解釈は message type ごとに定義する。`LOG`、`ERROR`、`FAIL`、`ARTIFACT_TEXT` は UTF-8 text として扱う。`ARTIFACT_BINARY` は raw binary bytes として扱い、Base64 などの text encoding は行わない。
 
 ### 4.4 数値
 
@@ -329,14 +331,15 @@ AT < ARTIFACT_TEXT <test-name> <filename> <content-type> <length>\n
 
 ### 8.11 ARTIFACT_BINARY
 
-バイナリ成果物を通知する。
+バイナリ成果物を通知する。payload は Base64 ではなく raw binary bytes とする。
 
 ```text
 AT < ARTIFACT_BINARY <test-name> <filename> <content-type> <length>\n
 <payload bytes>
 ```
 
-`ARTIFACT_BINARY` は拡張機能とし、初期コアでは必須にしない。
+- `<length>` は raw binary payload の byte 数
+- host は payload を decode せず、そのまま file に保存する
 
 ### 8.12 FAIL
 

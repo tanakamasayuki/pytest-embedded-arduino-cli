@@ -258,7 +258,7 @@ class ArduTestSession:
                 code, message = self._read_error_payload(parsed.fields)
                 raise ArduTestError(f"ArduTest protocol error: {code}: {message}")
 
-            if parsed.kind not in {"LOG", "METRIC", "ARTIFACT_TEXT", "FAIL"}:
+            if parsed.kind not in {"LOG", "METRIC", "ARTIFACT_TEXT", "ARTIFACT_BINARY", "FAIL"}:
                 raise ArduTestError(f"unexpected ArduTest event while running {test_name}: AT < {parsed.kind}")
             event = self._read_event(parsed)
             if event.test_name not in (None, test_name):
@@ -274,18 +274,21 @@ class ArduTestSession:
             line = str(value)
         return parse_ardutest_line(line)
 
-    def _read_payload(self, length: int) -> str:
+    def _read_payload_bytes(self, length: int) -> bytes:
         if length < 0:
             raise ArduTestError(f"invalid ArduTest payload length: {length}")
         if length == 0:
-            return ""
+            return b""
 
         pattern = re.compile(rb"(?s)(.{%d})" % length)
         match = self.dut.expect(pattern, timeout=self.timeout)
         value = match.group(1)
         if isinstance(value, bytes):
-            return value.decode("utf-8", errors="replace")
-        return str(value)
+            return value
+        return str(value).encode("utf-8")
+
+    def _read_payload(self, length: int) -> str:
+        return self._read_payload_bytes(length).decode("utf-8", errors="replace")
 
     def _read_event(self, parsed: ParsedArduTestLine) -> ArduTestEvent:
         if parsed.kind == "LOG":
@@ -298,6 +301,13 @@ class ArduTestSession:
             if test_name is not None:
                 self._save_text_artifact(test_name, filename, payload)
             return ArduTestEvent(kind=parsed.kind, test_name=test_name, message=f"{filename} {payload}")
+
+        if parsed.kind == "ARTIFACT_BINARY":
+            test_name, filename, _content_type, length = self._parse_artifact_payload_header(parsed.fields)
+            payload = self._read_payload_bytes(length)
+            if test_name is not None:
+                self._save_binary_artifact(test_name, filename, payload)
+            return ArduTestEvent(kind=parsed.kind, test_name=test_name, message=f"{filename} {len(payload)} bytes")
 
         if parsed.kind == "FAIL":
             test_name, file_name, line, length = self._parse_fail_payload_header(parsed.fields)
@@ -347,6 +357,16 @@ class ArduTestSession:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(payload, encoding="utf-8")
 
+    def _save_binary_artifact(self, test_name: str, filename: str, payload: bytes) -> None:
+        if self.artifact_dir is None:
+            return
+
+        relative_test_name = _validate_artifact_test_name(test_name)
+        relative_filename = _validate_artifact_filename(filename)
+        path = self.artifact_dir / relative_test_name / relative_filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+
     def _read_error_payload(self, fields: str) -> tuple[str, str]:
         parts = fields.split(" ", 1)
         if len(parts) != 2:
@@ -389,9 +409,9 @@ class ArduTestSession:
     def _parse_artifact_payload_header(cls, fields: str) -> tuple[str | None, str, str, int]:
         parts = fields.split(" ", 3)
         if len(parts) != 4:
-            raise ArduTestError(f"invalid ArduTest ARTIFACT_TEXT fields: {fields}")
+            raise ArduTestError(f"invalid ArduTest artifact fields: {fields}")
         test_name = None if parts[0] == "-" else parts[0]
-        return test_name, parts[1], parts[2], cls._parse_length(parts[3], "ARTIFACT_TEXT")
+        return test_name, parts[1], parts[2], cls._parse_length(parts[3], "artifact")
 
     @classmethod
     def _parse_fail_payload_header(cls, fields: str) -> tuple[str | None, str, int, int]:
