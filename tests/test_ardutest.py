@@ -87,6 +87,56 @@ def test_ardutest_session_runs_protocol_by_name() -> None:
     assert results[0].artifacts == {"note.txt": "hello from ArduTest"}
 
 
+def test_ardutest_session_saves_text_artifacts(tmp_path) -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_metric_and_artifact",
+            "AT < END_LIST",
+            "AT < RUNNING test_metric_and_artifact",
+            "AT < ARTIFACT_TEXT test_metric_and_artifact notes/note.txt text/plain 19\nhello from ArduTest",
+            "AT < RESULT test_metric_and_artifact passed",
+        ]
+    )
+
+    ArduTestSession(dut, artifact_dir=tmp_path / "ardutest").run()
+
+    assert (tmp_path / "ardutest" / "test_metric_and_artifact" / "notes" / "note.txt").read_text(
+        encoding="utf-8"
+    ) == "hello from ArduTest"
+
+
+def test_ardutest_session_does_not_create_empty_artifact_dir(tmp_path) -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_true_passes",
+            "AT < END_LIST",
+            "AT < RUNNING test_true_passes",
+            "AT < RESULT test_true_passes passed",
+        ]
+    )
+
+    ArduTestSession(dut, artifact_dir=tmp_path / "ardutest").run()
+
+    assert not (tmp_path / "ardutest").exists()
+
+
+def test_ardutest_session_rejects_unsafe_artifact_filename(tmp_path) -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.1.0",
+            "AT < TEST test_metric_and_artifact",
+            "AT < END_LIST",
+            "AT < RUNNING test_metric_and_artifact",
+            "AT < ARTIFACT_TEXT test_metric_and_artifact ../note.txt text/plain 19\nhello from ArduTest",
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="invalid ArduTest artifact filename"):
+        ArduTestSession(dut, artifact_dir=tmp_path / "ardutest").run()
+
+
 def test_ardutest_session_skips_missing_capability_without_running() -> None:
     dut = ProtocolFakeDut(
         [

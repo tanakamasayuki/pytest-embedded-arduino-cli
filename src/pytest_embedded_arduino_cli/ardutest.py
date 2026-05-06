@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import os
+from pathlib import Path, PurePosixPath
 import re
 import time
 from typing import Any, Literal
@@ -80,10 +81,18 @@ def parse_ardutest_line(line: str) -> ParsedArduTestLine:
 class ArduTestSession:
     """Controls ArduTest over the line-based protocol."""
 
-    def __init__(self, dut: Any, *, timeout: float = 30.0, environ: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        dut: Any,
+        *,
+        timeout: float = 30.0,
+        environ: dict[str, str] | None = None,
+        artifact_dir: Path | str | None = None,
+    ) -> None:
         self.dut = dut
         self.timeout = timeout
         self.environ = environ if environ is not None else os.environ
+        self.artifact_dir = Path(artifact_dir) if artifact_dir is not None else None
         self.results: list[ArduTestResult] = []
         self._tests: list[ArduTestCase] | None = None
 
@@ -285,7 +294,10 @@ class ArduTestSession:
 
         if parsed.kind == "ARTIFACT_TEXT":
             test_name, filename, _content_type, length = self._parse_artifact_payload_header(parsed.fields)
-            return ArduTestEvent(kind=parsed.kind, test_name=test_name, message=f"{filename} {self._read_payload(length)}")
+            payload = self._read_payload(length)
+            if test_name is not None:
+                self._save_text_artifact(test_name, filename, payload)
+            return ArduTestEvent(kind=parsed.kind, test_name=test_name, message=f"{filename} {payload}")
 
         if parsed.kind == "FAIL":
             test_name, file_name, line, length = self._parse_fail_payload_header(parsed.fields)
@@ -324,6 +336,16 @@ class ArduTestSession:
     def _send_payload_command(self, command: str, name: str, value: str) -> None:
         length = len(value.encode("utf-8"))
         self.dut.write(f"AT > {command} {name} {length}\n{value}")
+
+    def _save_text_artifact(self, test_name: str, filename: str, payload: str) -> None:
+        if self.artifact_dir is None:
+            return
+
+        relative_test_name = _validate_artifact_test_name(test_name)
+        relative_filename = _validate_artifact_filename(filename)
+        path = self.artifact_dir / relative_test_name / relative_filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(payload, encoding="utf-8")
 
     def _read_error_payload(self, fields: str) -> tuple[str, str]:
         parts = fields.split(" ", 1)
@@ -414,3 +436,27 @@ def _parse_metric_value(value: str) -> int | float | str:
 
 def _env_name(name: str) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in name).upper()
+
+
+def _validate_artifact_filename(filename: str) -> PurePosixPath:
+    if filename == "":
+        raise ArduTestError("invalid ArduTest artifact filename: empty")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in filename):
+        raise ArduTestError(f"invalid ArduTest artifact filename: {filename!r}")
+
+    path = PurePosixPath(filename)
+    if path.is_absolute() or ".." in path.parts:
+        raise ArduTestError(f"invalid ArduTest artifact filename: {filename}")
+    if any(part == "" for part in path.parts):
+        raise ArduTestError(f"invalid ArduTest artifact filename: {filename}")
+    return path
+
+
+def _validate_artifact_test_name(test_name: str) -> PurePosixPath:
+    if test_name == "":
+        raise ArduTestError("invalid ArduTest artifact test name: empty")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in test_name):
+        raise ArduTestError(f"invalid ArduTest artifact test name: {test_name!r}")
+    if "/" in test_name or "\\" in test_name:
+        raise ArduTestError(f"invalid ArduTest artifact test name: {test_name}")
+    return PurePosixPath(test_name)
