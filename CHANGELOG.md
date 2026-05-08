@@ -1,6 +1,12 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Add peer DUT support through `peer_<name>` sketch directories, the `peers` fixture, and per-peer `--peer-profile` / `--peer-port` options.
+- (JA) `peer_<name>` sketch directory、`peers` fixture、peer ごとの `--peer-profile` / `--peer-port` option による peer DUT 対応を追加。
+- (EN) Add `examples/12_peer_host_core` as a minimal host Arduino core peer DUT example without DUT-to-DUT communication.
+- (JA) DUT 間通信を行わない最小の host Arduino core peer DUT 例として `examples/12_peer_host_core` を追加。
+- (EN) Avoid completing peer `socket://` runtime ports in `--run-mode=build`, because upload has not generated host Arduino port metadata yet.
+- (JA) `--run-mode=build` では upload 前で host Arduino の port 情報が未生成のため、peer の `socket://` runtime port 補完を行わないように修正。
 
 ## 1.1.2
 - (EN) Add `arduino_test.set_config()` and `arduino_test.set_capability()` for fixed test-local ArduTest config and capability values without environment patching.

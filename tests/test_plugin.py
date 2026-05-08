@@ -18,6 +18,8 @@ from pytest_embedded_arduino_cli.serial import (
     is_socket_url,
     normalize_profile_name,
     read_host_arduino_port,
+    resolve_peer_port,
+    resolve_peer_upload_port,
     resolve_port,
     resolve_upload_port,
     socket_url_needs_port_completion,
@@ -75,6 +77,8 @@ def test_plugin_help_lists_options(pytester: pytest.Pytester) -> None:
     stdout = result.stdout.str()
     assert "--run-mode={all,build,test}" in stdout
     assert "--profile=PROFILE" in stdout
+    assert "--peer-profile=NAME:PROFILE" in stdout
+    assert "--peer-port=NAME:PORT" in stdout
     assert "--arduino-test-timeout=ARDUINO_TEST_TIMEOUT" in stdout
     assert "--arduino-test-artifact-dir=ARDUINO_TEST_ARTIFACT_DIR" in stdout
     assert "--arduino-test-missing-config={skip,error}" in stdout
@@ -544,6 +548,196 @@ def test_plain():
     result.assert_outcomes(passed=1)
 
 
+def test_peer_build_runs_only_when_peers_fixture_is_requested(pytester: pytest.Pytester) -> None:
+    test_dir = pytester.path / "sample_app"
+    peer_dir = test_dir / "peer_echo"
+    peer_dir.mkdir(parents=True)
+    (test_dir / "sample_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text(
+        "default_profile: host\nprofiles:\n  host: {}\n",
+        encoding="utf-8",
+    )
+    (peer_dir / "peer_echo.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (peer_dir / "sketch.yaml").write_text(
+        "default_profile: host\nprofiles:\n  host: {}\n",
+        encoding="utf-8",
+    )
+    pytester.makeconftest(
+        """
+from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
+
+
+def _fake_compile(self, *, check=True):
+    self.build_path.mkdir(parents=True, exist_ok=True)
+    (self.build_path / "compiled.txt").write_text(self.sketch_dir.name, encoding="utf-8")
+    return None
+
+
+ArduinoCliBuildConfig.compile = _fake_compile
+"""
+    )
+    (test_dir / "test_sample.py").write_text(
+        """
+def test_primary_only(dut):
+    assert True
+
+
+def test_with_peer(dut, peers):
+    assert False
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=build",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+
+    result.assert_outcomes(skipped=2)
+    assert (test_dir / "build" / "host" / "compiled.txt").is_file()
+    assert (peer_dir / "build" / "host" / "compiled.txt").is_file()
+
+
+def test_peer_profile_does_not_auto_select_single_profile(pytester: pytest.Pytester) -> None:
+    test_dir = pytester.path / "sample_app"
+    peer_dir = test_dir / "peer_echo"
+    peer_dir.mkdir(parents=True)
+    (test_dir / "sample_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text(
+        "default_profile: host\nprofiles:\n  host: {}\n",
+        encoding="utf-8",
+    )
+    (peer_dir / "peer_echo.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (peer_dir / "sketch.yaml").write_text(
+        "profiles:\n  host: {}\n",
+        encoding="utf-8",
+    )
+    pytester.makeconftest(
+        """
+from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
+
+
+def _fake_compile(self, *, check=True):
+    self.build_path.mkdir(parents=True, exist_ok=True)
+    return None
+
+
+ArduinoCliBuildConfig.compile = _fake_compile
+"""
+    )
+    (test_dir / "test_sample.py").write_text(
+        """
+def test_with_peer(dut, peers):
+    assert False
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=build",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+
+    result.assert_outcomes(skipped=1)
+    assert not (peer_dir / "build").exists()
+
+
+def test_peer_profile_option_enables_peer_without_default_profile(pytester: pytest.Pytester) -> None:
+    test_dir = pytester.path / "sample_app"
+    peer_dir = test_dir / "peer_echo"
+    peer_dir.mkdir(parents=True)
+    (test_dir / "sample_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text(
+        "default_profile: host\nprofiles:\n  host: {}\n",
+        encoding="utf-8",
+    )
+    (peer_dir / "peer_echo.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (peer_dir / "sketch.yaml").write_text(
+        "profiles:\n  host: {}\n",
+        encoding="utf-8",
+    )
+    pytester.makeconftest(
+        """
+from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
+
+
+def _fake_compile(self, *, check=True):
+    self.build_path.mkdir(parents=True, exist_ok=True)
+    return None
+
+
+ArduinoCliBuildConfig.compile = _fake_compile
+"""
+    )
+    (test_dir / "test_sample.py").write_text(
+        """
+def test_with_peer(dut, peers):
+    assert False
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=build",
+        "--peer-profile",
+        "echo:host",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+
+    result.assert_outcomes(skipped=1)
+    assert (peer_dir / "build" / "host").is_dir()
+
+
+def test_peer_profile_rejects_duplicate_peer_names(pytester: pytest.Pytester) -> None:
+    test_dir = pytester.path / "sample_app"
+    peer_dir = test_dir / "peer_echo"
+    peer_dir.mkdir(parents=True)
+    (test_dir / "sample_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text(
+        "default_profile: host\nprofiles:\n  host: {}\n",
+        encoding="utf-8",
+    )
+    (peer_dir / "peer_echo.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (peer_dir / "sketch.yaml").write_text(
+        "default_profile: host\nprofiles:\n  host: {}\n",
+        encoding="utf-8",
+    )
+    (test_dir / "test_sample.py").write_text(
+        """
+def test_with_peer(dut, peers):
+    assert False
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=build",
+        "--peer-profile",
+        "echo:host",
+        "--peer-profile",
+        "echo:uno",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+
+    result.assert_outcomes(errors=1)
+
+
 def test_log_command_respects_v_level() -> None:
     reporter = DummyReporter()
     config = DummyConfig(verbose=1, reporter=reporter)
@@ -617,6 +811,29 @@ def test_resolve_upload_port_prefers_profile_env(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("TEST_SERIAL_PORT_ESP32_S3", "/dev/ttyUSB1")
 
     assert resolve_upload_port(config) == "/dev/ttyUSB1"
+
+
+def test_resolve_peer_port_prefers_profile_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEST_SERIAL_PORT_PEER_ECHO_HOST", "socket://localhost")
+    monkeypatch.setenv("TEST_SERIAL_PORT_PEER_ECHO", "/dev/ttyUSB1")
+
+    assert resolve_peer_port(peer="echo", profile="host") == "socket://localhost"
+
+
+def test_resolve_peer_port_uses_socket_profile_port() -> None:
+    assert (
+        resolve_peer_port(
+            peer="echo",
+            profile="host",
+            profile_port="socket://localhost",
+        )
+        == "socket://localhost"
+    )
+
+
+def test_resolve_peer_upload_port_omits_socket_url() -> None:
+    assert resolve_peer_upload_port("socket://localhost") is None
+    assert resolve_peer_upload_port("/dev/ttyUSB1") == "/dev/ttyUSB1"
 
 
 def test_resolve_upload_port_falls_back_to_common_env(monkeypatch: pytest.MonkeyPatch) -> None:

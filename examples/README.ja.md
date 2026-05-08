@@ -155,6 +155,10 @@ plugin が何をしているか確認したい場合は verbosity を使いま�
 - `11_ardutest`
   - ArduTest Arduino ライブラリと experimental な `arduino_test` fixture の例
   - basic runner と metadata/config runner を分け、各 sketch の目的を絞っています
+- `12_peer_host_core`
+  - host Arduino core を使った最小の `peers` fixture 例
+  - primary DUT と peer DUT を起動しますが、DUT 間の通信は行いません
+  - `peer_<name>` ディレクトリ規約と `peers["<name>"]` による参照を示します
 
 ## ディレクトリ構成
 
@@ -233,6 +237,15 @@ examples/
       sketch.yaml
       ardutest_metadata.ino
       test_ardutest_metadata.py
+  12_peer_host_core/
+    README.ja.md
+    peer_host_smoke/
+      sketch.yaml
+      peer_host_smoke.ino
+      test_peer_host_smoke.py
+      peer_echo/
+        sketch.yaml
+        peer_echo.ino
 ```
 
 この plugin は、実行したテストファイルがあるディレクトリを sketch ディレクトリとして扱います。

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 import shutil
 import shlex
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 
@@ -21,11 +22,24 @@ from .serial import (
     ensure_default_embedded_services,
     install_fast_socket_redirect_thread,
     is_socket_url,
+    resolve_peer_port,
+    resolve_peer_upload_port,
     resolve_port,
     resolve_upload_port,
     socket_url_needs_port_completion,
     wait_for_socket_url,
 )
+
+
+@dataclass(frozen=True)
+class PeerTarget:
+    name: str
+    app: ArduinoCliBuildConfig
+    runtime_port: str | None
+
+
+class PeerDutMap(dict[str, Any]):
+    pass
 
 
 def _should_build(run_mode: str) -> bool:
@@ -49,6 +63,20 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--profile",
         action="store",
         help="Arduino CLI sketch profile name from sketch.yaml.",
+    )
+    group.addoption(
+        "--peer-profile",
+        action="append",
+        default=[],
+        metavar="NAME:PROFILE",
+        help="Set a peer DUT profile. May be specified multiple times.",
+    )
+    group.addoption(
+        "--peer-port",
+        action="append",
+        default=[],
+        metavar="NAME:PORT",
+        help="Set a peer DUT runtime port. May be specified multiple times.",
     )
     group.addoption(
         "--arduino-test-timeout",
@@ -140,6 +168,99 @@ def _request_path(request: pytest.FixtureRequest) -> Path:
 def _request_has_sketch(request: pytest.FixtureRequest) -> bool:
     test_path = resolve_test_path(_request_path(request))
     return any(test_path.glob("*.ino"))
+
+
+def _request_uses_peers(request: pytest.FixtureRequest) -> bool:
+    return "peers" in getattr(request, "fixturenames", ())
+
+
+def _peer_dirs(test_path: Path) -> dict[str, Path]:
+    peers: dict[str, Path] = {}
+    for peer_dir in sorted(test_path.glob("peer_*")):
+        if not peer_dir.is_dir():
+            continue
+        name = peer_dir.name.removeprefix("peer_")
+        if not name:
+            raise SketchConfigError(f"invalid peer directory name: {peer_dir}")
+        if name in peers:
+            raise SketchConfigError(f"duplicate peer DUT name: {name}")
+        peers[name] = peer_dir
+    return peers
+
+
+def _parse_peer_option(values: list[str], option_name: str) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for value in values or []:
+        if ":" not in value:
+            raise pytest.UsageError(f"{option_name} must use NAME:VALUE format: {value}")
+        name, option_value = value.split(":", 1)
+        if not name or not option_value:
+            raise pytest.UsageError(f"{option_name} must use NAME:VALUE format: {value}")
+        if name in parsed:
+            raise pytest.UsageError(f"{option_name} specified more than once for peer '{name}'")
+        parsed[name] = option_value
+    return parsed
+
+
+def _peer_option_map(config: pytest.Config, option_name: str) -> dict[str, str]:
+    cache_name = f"_arduino_cli_{option_name}_map"
+    cached = getattr(config, cache_name, None)
+    if cached is not None:
+        return cached
+    parsed = _parse_peer_option(config.getoption(option_name), f"--{option_name.replace('_', '-')}")
+    setattr(config, cache_name, parsed)
+    return parsed
+
+
+def _validate_peer_option_names(config: pytest.Config, peers: dict[str, Path]) -> None:
+    peer_names = set(peers)
+    for option_name in ("peer_profile", "peer_port"):
+        for name in _peer_option_map(config, option_name):
+            if name not in peer_names:
+                raise pytest.UsageError(
+                    f"--{option_name.replace('_', '-')} specified unknown peer '{name}'"
+                )
+
+
+def _peer_targets_from_request(request: pytest.FixtureRequest) -> list[PeerTarget]:
+    test_path = resolve_test_path(_request_path(request))
+    peer_dirs = _peer_dirs(test_path)
+    _validate_peer_option_names(request.config, peer_dirs)
+    peer_profiles = _peer_option_map(request.config, "peer_profile")
+    peer_ports = _peer_option_map(request.config, "peer_port")
+
+    targets: list[PeerTarget] = []
+    for name, peer_dir in peer_dirs.items():
+        try:
+            app = ArduinoCliBuildConfig.from_test_path(
+                peer_dir,
+                profile=peer_profiles.get(name),
+                clean=request.config.getoption("clean"),
+                allow_single_profile=False,
+            )
+        except UnsupportedProfileError as e:
+            _log_skip(request.config, f"peer {name}: {e}")
+            pytest.skip(f"peer {name}: {e}")
+
+        if app.profile is None:
+            reason = f"peer {name}: profile is not resolved; set --peer-profile {name}:<profile> or default_profile"
+            _log_skip(request.config, reason)
+            pytest.skip(reason)
+
+        runtime_port = resolve_peer_port(
+            peer=name,
+            profile=app.profile,
+            option_port=peer_ports.get(name),
+            profile_port=app.profile_port,
+        )
+        if not runtime_port and request.config.getoption("run_mode") != "build":
+            reason = f"peer {name}: port is not resolved"
+            _log_skip(request.config, reason)
+            pytest.skip(reason)
+
+        targets.append(PeerTarget(name=name, app=app, runtime_port=runtime_port))
+
+    return targets
 
 
 def _terminal_reporter(config: pytest.Config) -> Any | None:
@@ -365,10 +486,166 @@ def arduino_cli_upload(
         wait_for_socket_url(request.config.option.port)
 
 
+def _log_peer_command(
+    config: pytest.Config,
+    *,
+    peer: str,
+    action: str,
+    command: list[str],
+    details: dict[str, str | None],
+) -> None:
+    peer_details = {"peer": peer, **details}
+    _log_command(config, action=f"peer {peer} {action}", command=command, details=peer_details)
+
+
+def _prepare_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
+    cached = getattr(request.module, "_arduino_cli_peer_targets", None)
+    if cached is not None:
+        return cached
+
+    targets = _peer_targets_from_request(request)
+    run_mode = request.config.getoption("run_mode")
+
+    for target in targets:
+        app = target.app
+        if _should_build(run_mode):
+            _log_peer_command(
+                request.config,
+                peer=target.name,
+                action="compile",
+                command=app.build_command(),
+                details={
+                    "cwd": str(app.sketch_dir),
+                    "sketch_dir": str(app.sketch_dir),
+                    "build_path": str(app.build_path),
+                    "profile": app.profile,
+                },
+            )
+            app.compile()
+
+        if not _should_upload(run_mode):
+            continue
+
+        if not app.build_path.is_dir():
+            raise FileNotFoundError(
+                f"peer {target.name}: build output directory not found: {app.build_path}. "
+                "Run with --run-mode=all first, or build the sketch before --run-mode=test."
+            )
+
+        flasher = ArduinoCliUploadConfig.from_build_config(
+            app,
+            port=resolve_peer_upload_port(target.runtime_port),
+        )
+        _log_peer_command(
+            request.config,
+            peer=target.name,
+            action="upload",
+            command=flasher.upload_command(),
+            details={
+                "cwd": str(flasher.sketch_dir),
+                "sketch_dir": str(flasher.sketch_dir),
+                "build_path": str(flasher.build_path),
+                "profile": flasher.profile,
+                "port": flasher.port,
+            },
+        )
+        flasher.upload()
+
+    completed: list[PeerTarget] = []
+    for target in targets:
+        runtime_port = target.runtime_port
+        if _should_upload(run_mode) and socket_url_needs_port_completion(runtime_port):
+            runtime_port = complete_host_arduino_socket_url(runtime_port, target.app.build_path)
+            wait_for_socket_url(runtime_port)
+        completed.append(PeerTarget(name=target.name, app=target.app, runtime_port=runtime_port))
+
+    request.module._arduino_cli_peer_targets = completed
+    return completed
+
+
+def _make_peer_dut(request: pytest.FixtureRequest, target: PeerTarget) -> tuple[Any, Callable[[], None]]:
+    if not target.runtime_port:
+        raise RuntimeError(f"peer {target.name}: runtime port is not resolved")
+
+    from pytest_embedded.app import App
+    from pytest_embedded.dut import Dut
+    from pytest_embedded.plugin import _listener_gn, _pexpect_fr_gn, pexpect_proc_fn
+    from pytest_embedded_serial.serial import Serial
+
+    manager = request.getfixturevalue("_mp_manager")
+    meta = request.getfixturevalue("_meta")
+    test_case_tempdir = Path(request.getfixturevalue("test_case_tempdir"))
+    logfile_extension = request.getfixturevalue("logfile_extension")
+    with_timestamp = request.getfixturevalue("with_timestamp")
+    baud = int(request.config.getoption("baud") or Serial.DEFAULT_BAUDRATE)
+
+    msg_queue = manager.MessageQueue()
+    logfile = str(test_case_tempdir / f"peer-{target.name}{logfile_extension}")
+    listener = _listener_gn(
+        msg_queue,
+        logfile,
+        with_timestamp,
+        0,
+        0,
+    )
+    pexpect_fr = _pexpect_fr_gn(logfile, listener)
+    pexpect_proc = pexpect_proc_fn(pexpect_fr)
+    app = App(app_path=str(target.app.sketch_dir), build_dir=str(target.app.build_path))
+    serial = Serial(msg_queue=msg_queue, port=target.runtime_port, baud=baud, meta=meta)
+    dut = Dut(
+        pexpect_proc=pexpect_proc,
+        msg_queue=msg_queue,
+        app=app,
+        pexpect_logfile=logfile,
+        test_case_name=request.node.name,
+        meta=meta,
+        serial=serial,
+    )
+
+    def cleanup() -> None:
+        try:
+            dut.close()
+        finally:
+            try:
+                serial.close()
+            finally:
+                try:
+                    pexpect_fr.close()
+                finally:
+                    if listener.is_alive():
+                        listener.terminate()
+                        listener.join(timeout=5)
+                    listener.close()
+
+    return dut, cleanup
+
+
+@pytest.fixture
+def peers(request: pytest.FixtureRequest) -> PeerDutMap:
+    targets = _prepare_peer_targets(request)
+    if request.config.getoption("run_mode") == "build":
+        yield PeerDutMap()
+        return
+
+    peer_map: PeerDutMap = PeerDutMap()
+    cleanups: list[Callable[[], None]] = []
+    try:
+        for target in targets:
+            dut, cleanup = _make_peer_dut(request, target)
+            peer_map[target.name] = dut
+            cleanups.append(cleanup)
+        yield peer_map
+    finally:
+        for cleanup in reversed(cleanups):
+            cleanup()
+
+
 @pytest.fixture(autouse=True)
 def skip_test_execution_in_build_mode(
     request: pytest.FixtureRequest,
     arduino_cli_build: None,
 ) -> None:
     if request.config.getoption("run_mode") == "build":
+        if _request_uses_peers(request):
+            request.getfixturevalue("peers")
         pytest.skip("skipped test execution in build-only mode")
