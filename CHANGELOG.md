@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Fix peer DUT sending failure
+- (JA) peer DUT に送信できなかったのを修正
 
 ## 1.1.3
 - (EN) Add peer DUT support through `peer_<name>` sketch directories, the `peers` fixture, and per-peer `--peer-profile` / `--peer-port` options.
