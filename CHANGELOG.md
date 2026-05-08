@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.1.4
 - (EN) Fix peer DUT sending failure
 - (JA) peer DUT に送信できなかったのを修正
 
