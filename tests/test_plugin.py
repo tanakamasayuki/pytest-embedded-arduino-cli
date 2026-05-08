@@ -1,8 +1,10 @@
+import inspect
 from pathlib import Path
 import sys
 import types
 
 import pytest
+import pytest_embedded_arduino_cli.plugin as plugin_module
 
 from pytest_embedded_arduino_cli.plugin import (
     _ardutest_artifact_dir,
@@ -85,6 +87,14 @@ def test_plugin_help_lists_options(pytester: pytest.Pytester) -> None:
     assert "--clean" in stdout
     assert "--arduino-cli-build-path" not in stdout
     assert "--arduino-cli-upload-port" not in stdout
+
+
+def test_make_peer_dut_uses_serial_dut() -> None:
+    source = inspect.getsource(plugin_module._make_peer_dut)
+
+    assert "from pytest_embedded_serial.dut import SerialDut" in source
+    assert "dut = SerialDut(" in source
+    assert "dut = Dut(" not in source
 
 
 def test_plugin_fixtures_resolve_app_and_build_dir(pytester: pytest.Pytester) -> None:

@@ -568,8 +568,8 @@ def _make_peer_dut(request: pytest.FixtureRequest, target: PeerTarget) -> tuple[
         raise RuntimeError(f"peer {target.name}: runtime port is not resolved")
 
     from pytest_embedded.app import App
-    from pytest_embedded.dut import Dut
     from pytest_embedded.plugin import _listener_gn, _pexpect_fr_gn, pexpect_proc_fn
+    from pytest_embedded_serial.dut import SerialDut
     from pytest_embedded_serial.serial import Serial
 
     manager = request.getfixturevalue("_mp_manager")
@@ -592,7 +592,7 @@ def _make_peer_dut(request: pytest.FixtureRequest, target: PeerTarget) -> tuple[
     pexpect_proc = pexpect_proc_fn(pexpect_fr)
     app = App(app_path=str(target.app.sketch_dir), build_dir=str(target.app.build_path))
     serial = Serial(msg_queue=msg_queue, port=target.runtime_port, baud=baud, meta=meta)
-    dut = Dut(
+    dut = SerialDut(
         pexpect_proc=pexpect_proc,
         msg_queue=msg_queue,
         app=app,
