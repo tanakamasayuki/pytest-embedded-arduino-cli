@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.1.3
 - (EN) Add peer DUT support through `peer_<name>` sketch directories, the `peers` fixture, and per-peer `--peer-profile` / `--peer-port` options.
 - (JA) `peer_<name>` sketch directory、`peers` fixture、peer ごとの `--peer-profile` / `--peer-port` option による peer DUT 対応を追加。
 - (EN) Add `examples/12_peer_host_core` as a minimal host Arduino core peer DUT example without DUT-to-DUT communication.
