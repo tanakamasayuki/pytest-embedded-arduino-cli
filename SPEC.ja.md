@@ -133,6 +133,50 @@ sketch の場所を CLI option で明示指定する前提は持ち込まない�
 同じディレクトリの `sketch.yaml` に記載された profile だけを、その sketch が対応する profile とみなす。
 対応していない profile を `--profile` で指定された場合、その sketch は build 前に skip 対象として扱う。
 
+### 6.4 peer DUT を使う複数台テスト
+
+複数台の DUT を使うテストでは、通常の test/sketch ディレクトリ直下に `peer_<name>` ディレクトリを置けるものとする。
+
+例:
+
+```text
+host_smoke/
+  host_smoke.ino
+  sketch.yaml
+  test_host_smoke.py
+  peer_echo/
+    peer_echo.ino
+    sketch.yaml
+  peer_bridge/
+    peer_bridge.ino
+    sketch.yaml
+```
+
+- test/sketch ディレクトリ直下の sketch は primary DUT とし、既存通り `dut` fixture で扱う
+- `peer_<name>` ディレクトリは peer DUT とし、`peers["<name>"]` で参照できる
+- `peer_*` ディレクトリはそれぞれ独立した Arduino sketch ディレクトリとして扱う
+- peer DUT ごとに `.ino` と `sketch.yaml` を持つ
+- `sketch.yaml` は Arduino CLI の規定フォーマットとして扱い、peer DUT 用の独自項目は追加しない
+- peer DUT 用の追加設定ファイルは導入しない
+
+テスト例:
+
+```python
+def test_round_trip(dut, peers):
+    echo = peers["echo"]
+
+    dut.expect_exact("main ready")
+    echo.expect_exact("echo ready")
+```
+
+peer DUT の準備は、原則として `peers` fixture を要求したテストでのみ行う。
+同じ module 内に `dut` だけを使うテストがある場合、そのテストのために peer DUT を build / upload / connect しない。
+`peers` fixture を要求した時点で peer DUT を使うテストとみなし、`peers["<name>"]` がテスト関数内で参照されるかどうかは有効化条件にしない。
+これは、peer DUT が自律的に動作し、primary DUT 側からの観測だけで検証するテストを許容するためである。
+
+同じ sketch を複数台へ書き込む場合は、`peer_sensor1`、`peer_sensor2` のように peer ディレクトリを分ける。
+設定ファイルを増やさない方針を優先し、初期仕様では同一 sketch path を複数 peer へ割り当てるための alias 設定は持たない。
+
 ## 7. 依存関係
 
 ### 7.1 runtime dependencies
@@ -383,6 +427,63 @@ peripheral、timing、割り込み、Flash/NVS、board 固有 API は実機で�
 一方で、同じ profile でも実機状態や外部条件によって実行不能になるケースはテスト側で `pytest.skip()` を使ってよい。
 例えば Wi-Fi 接続条件や外部サービス条件のような runtime 条件は、Python テスト側で扱ってよい。
 
+### 12.6 peer DUT の profile 解決
+
+peer DUT の profile は、各 `peer_<name>/sketch.yaml` を基準に解決する。
+
+peer DUT の profile 解決順は次の通り。
+
+1. `--peer-profile <name>:<profile>`
+2. `peer_<name>/sketch.yaml` の `default_profile`
+3. 決まらなければ、その peer DUT を必要とするテストを skip する
+
+`--profile` は primary DUT 専用とし、peer DUT の profile 解決には使わない。
+peer DUT では、profile が 1 つだけの場合でも自動選択しない。
+これは、重い複数台テストが意図せず実行されることを避けるためである。
+
+`--peer-profile` で指定された profile が peer DUT の `sketch.yaml` に存在しない場合は、その peer DUT を必要とするテストを skip する。
+
+peer DUT は重い複数台テストで使われることが多いため、無指定で動かしたくない peer sketch では `default_profile` を定義しない。
+この場合、`--peer-profile` が指定されなければ、`peers` fixture を使うテストは skip される。
+
+### 12.7 peer DUT の port 解決
+
+`--port` と `--flash-port` は primary DUT 専用とする。
+peer DUT の port は peer 名に基づいて解決し、primary DUT の port 指定を暗黙に流用しない。
+
+peer DUT の runtime port 解決順は次の通り。
+
+1. `--peer-port <name>:<port>`
+2. `TEST_SERIAL_PORT_PEER_<NAME>_<PROFILE>`
+3. `TEST_SERIAL_PORT_PEER_<NAME>`
+4. `peer_<name>/sketch.yaml` の `profiles.<profile>.port` が `socket://...` URL の場合
+5. 解決できなければ、その peer DUT を必要とするテストを skip する
+
+`<NAME>` と `<PROFILE>` は大文字化し、`-` を `_` に置換した形式とする。
+例えば `peer_echo` の `host` profile では `TEST_SERIAL_PORT_PEER_ECHO_HOST` を参照する。
+
+peer DUT の upload port 解決では、runtime port が `socket://...` URL の場合は `arduino-cli upload --port` へ渡さない。
+これは primary DUT と同じく、socket URL を runtime 接続先として扱うためである。
+
+peer DUT でも host Arduino core の port 番号なし socket URL を使える。
+`socket://localhost` のような URL は、該当 peer DUT の upload 後に、その peer DUT の build 出力ディレクトリ配下の `*.host-arduino.json` から `port` を読み取って補完する。
+
+### 12.8 peer DUT の build / upload / connect
+
+peer DUT の build path は、各 peer sketch ディレクトリ配下の `<peer_dir>/build/<profile or default>` とする。
+primary DUT の build path と peer DUT の build path は分離する。
+
+`peers` fixture が要求された場合、plugin は検出された peer DUT について build / upload / runtime port 補完 / 接続を行う。
+`peers["<name>"]` は接続済み peer DUT を参照するための mapping API であり、参照された peer だけを遅延起動する仕様にはしない。
+
+- `--run-mode=all`: peer DUT を build し、upload してから test を実行する
+- `--run-mode=build`: peer DUT を build し、test 実行は skip する。この場合 peer port は不要
+- `--run-mode=test`: 既存 build artifact を使って peer DUT を upload してから test を実行する
+
+peer DUT の構造不備は設定エラーとして扱う。
+例えば `.ino` がない、`.ino` が複数ある、`sketch.yaml` が壊れている場合は error とする。
+一方で、profile 非対応、profile 未決定、port 未解決のように実行条件が揃わない場合は skip とする。
+
 ## 13. pytest option 要件
 
 少なくとも次のカテゴリの option を対象とする。
@@ -418,7 +519,37 @@ build 実行前に profile 対応可否を判定し、非対応 profile の sket
 upload に必要な port 指定は `pytest-embedded` 標準の `--flash-port` または `--port` を使う。
 ただし、`--port=socket://...` は runtime 接続先を表すため、`arduino-cli upload --port` には渡さない。
 
-### 13.4 serial / DUT 関連
+### 13.4 peer DUT 関連
+
+peer DUT 個別指定のため、次の option を追加する。
+
+- `--peer-profile <name>:<profile>`
+- `--peer-port <name>:<port>`
+
+どちらも複数回指定できる。
+
+例:
+
+```bash
+pytest tests/foo \
+  --peer-profile echo:host \
+  --peer-profile bridge:esp32 \
+  --peer-port echo:socket://localhost \
+  --peer-port bridge:/dev/ttyUSB1
+```
+
+`--peer-profile` と `--peer-port` の値は `<peer-name>:<value>` 形式とする。
+`,` 区切りの複数指定は採用せず、複数 peer を指定する場合は option を複数回書く。
+
+`:` が含まれない値は error とする。
+同じ peer 名が同一 option で複数回指定された場合は error とする。
+存在しない peer 名が指定された場合も error とする。
+
+`--peer-profile` は該当 peer DUT の profile 解決だけに影響する。
+`--peer-port` は該当 peer DUT の runtime port / upload port 解決だけに影響する。
+primary DUT の `--profile`、`--port`、`--flash-port` の挙動は既存通り維持する。
+
+### 13.5 serial / DUT 関連
 
 - `pytest-embedded` 標準 option を活かす
 - 必要に応じて plugin 側で橋渡しする
@@ -438,7 +569,7 @@ profile ごとの環境変数名は、例えば `TEST_SERIAL_PORT_ESP32S3` の�
 port 番号なしの socket URL は、upload 後に build 出力ディレクトリの `*.host-arduino.json` から `port` を読み取って補完する。
 port 番号ありの socket URL は補完せず、そのまま使う。
 
-### 13.5 pytest 標準 verbosity 連携
+### 13.6 pytest 標準 verbosity 連携
 
 - 追加の専用 verbose option は設けない
 - pytest 標準の `-v` / `-vv` に従って build / upload のログ出力量を変える
@@ -446,14 +577,15 @@ port 番号ありの socket URL は補完せず、そのまま使う。
 - `-vv` では上記に加えて `cwd`、`sketch_dir`、`build_path`、`profile`、`port` などの実行文脈も表示する
 
 build 前 skip が発生した場合、`-v` 以上では非対応 profile により skip したことが分かる出力を持つことが望ましい。
+peer DUT の build / upload でも、`-v` / `-vv` のログには peer 名が分かる情報を含める。
 
-### 13.6 option 設計方針
+### 13.7 option 設計方針
 
 - 命名は `arduino-cli` の用語を優先する
 - ESP 固有用語を option 名に持ち込まない
 - pytest-embedded 既存 option と競合しにくい名前にする
 - build / upload / runtime の責務境界が option 名から見えるようにする
-- plugin 固有 option は `--run-mode` と `--profile` に絞る
+- plugin 固有 option は、基本実行用の `--run-mode` / `--profile` と、peer DUT 用の `--peer-profile` / `--peer-port` に絞る
 - `sketch path` や `fqbn` のような override option は必須要件に含めない
 - ログ出力制御は pytest 標準の verbosity に従わせ、専用 option を増やさない
 
@@ -478,6 +610,14 @@ build 前 skip が発生した場合、`-v` 以上では非対応 profile によ
 - socket URL を upload port に渡さないこと
 - 非対応 profile 指定時の build 前 skip
 - `default_profile` と単一 profile 自動選択の解決
+- `peer_*` ディレクトリから peer DUT を検出できること
+- `peers["<name>"]` の名前解決
+- `--peer-profile <name>:<profile>` の複数回指定と重複指定 error
+- `--peer-port <name>:<port>` の複数回指定と重複指定 error
+- peer DUT の profile 解決順
+- peer DUT の port 解決順
+- peer DUT の profile 未決定 / port 未解決による skip
+- `peers` fixture を使わないテストでは peer DUT を準備しないこと
 
 ### 14.2 最小統合テスト
 
@@ -513,6 +653,13 @@ host Arduino core 向けの example では、次を示すこと。
 - `--port=socket://localhost` による TCP/IP 経由の DUT 接続
 - `*.host-arduino.json` の `port` を使った socket URL 補完
 - host 実行は純粋なロジックや serial protocol の簡易確認向けで、実機テストや本物の board profile による build test の代替ではないこと
+
+peer DUT 向けの example では、次を示すこと。
+
+- `peer_<name>` ディレクトリによる peer DUT の自動検出
+- `peers["<name>"]` による peer DUT 参照
+- `--peer-profile` / `--peer-port` による peer DUT 個別指定
+- `default_profile` を持つ peer は無指定でも動作し、持たない peer は明示 profile 指定時だけ動作すること
 
 ## 16. README 要件
 
@@ -608,6 +755,8 @@ README には少なくとも次を含める。
 7. 最低限の単体テストと plugin 読み込みテストが存在する
 8. README と examples が存在する
 9. `sketch.yaml` に存在しない profile を指定した sketch は build 前に skip される
+10. `peer_*` ディレクトリを使った複数 DUT テスト仕様が定義されている
+11. peer DUT の profile / port を名前付きで指定できる
 
 ## 21. 今後の拡張候補
 
@@ -615,7 +764,6 @@ README には少なくとも次を含める。
 - `arduino-cli board list` 連携によるポート解決支援
 - artifact 自動探索と board ごとの差分吸収
 - monitor / reset 制御の抽象化
-- 複数 DUT 対応
 - build profile と test matrix の統合
 - `fqbn` override や sketch path override の追加
 - board core / fqbn ごとの capability 宣言
