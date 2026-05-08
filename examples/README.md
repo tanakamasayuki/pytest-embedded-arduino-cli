@@ -155,6 +155,10 @@ The directories are numbered in the recommended reading and verification order.
 - `11_ardutest`
   - Demonstrates the experimental `arduino_test` fixture with the ArduTest Arduino library
   - Splits the basic runner and metadata/config runner so each sketch stays focused
+- `12_peer_host_core`
+  - Minimal `peers` fixture example using the host Arduino core
+  - Starts a primary DUT and one peer DUT without making them communicate with each other
+  - Shows the `peer_<name>` directory convention and `peers["<name>"]` access
 
 ## Layout
 
@@ -233,6 +237,15 @@ examples/
       sketch.yaml
       ardutest_metadata.ino
       test_ardutest_metadata.py
+  12_peer_host_core/
+    README.md
+    peer_host_smoke/
+      sketch.yaml
+      peer_host_smoke.ino
+      test_peer_host_smoke.py
+      peer_echo/
+        sketch.yaml
+        peer_echo.ino
 ```
 
 This plugin treats the directory containing the selected test file as the sketch directory.

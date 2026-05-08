@@ -62,7 +62,12 @@ def load_sketch_yaml(path: str | Path) -> dict[str, Any]:
     return data
 
 
-def resolve_profile_name(sketch_data: dict[str, Any], profile: str | None) -> str | None:
+def resolve_profile_name(
+    sketch_data: dict[str, Any],
+    profile: str | None,
+    *,
+    allow_single_profile: bool = True,
+) -> str | None:
     profiles = sketch_data.get("profiles") or {}
     if profile:
         if profiles and profile not in profiles:
@@ -76,7 +81,7 @@ def resolve_profile_name(sketch_data: dict[str, Any], profile: str | None) -> st
     if default_profile:
         return default_profile
 
-    if len(profiles) == 1:
+    if allow_single_profile and len(profiles) == 1:
         return next(iter(profiles))
 
     if len(profiles) > 1:
@@ -192,12 +197,17 @@ class ArduinoCliBuildConfig:
         extra_args: tuple[str, ...] = (),
         clean: bool = False,
         cli_path: str = "arduino-cli",
+        allow_single_profile: bool = True,
     ) -> "ArduinoCliBuildConfig":
         sketch_dir = resolve_sketch_dir(test_file_or_dir)
         sketch_yaml = find_sketch_yaml(sketch_dir)
         sketch_data = load_sketch_yaml(sketch_yaml)
         build_config = load_build_config(sketch_dir)
-        resolved_profile = resolve_profile_name(sketch_data, profile)
+        resolved_profile = resolve_profile_name(
+            sketch_data,
+            profile,
+            allow_single_profile=allow_single_profile,
+        )
         resolved_profile_port = resolve_profile_port(sketch_data, resolved_profile)
         resolved_build_path = resolve_build_path(sketch_dir, resolved_profile, build_path)
         resolved_build_properties = tuple(build_properties) + resolve_build_properties(sketch_dir, build_config)

@@ -480,6 +480,18 @@ primary DUT の build path と peer DUT の build path は分離する。
 - `--run-mode=build`: peer DUT を build し、test 実行は skip する。この場合 peer port は不要
 - `--run-mode=test`: 既存 build artifact を使って peer DUT を upload してから test を実行する
 
+upload / connect の順序は次の通りとする。
+
+1. primary DUT を build / upload する
+2. `peers` fixture が要求された場合、検出された peer DUT を名前順で build / upload する
+3. peer DUT の runtime port 補完を行う
+4. peer DUT に接続し、`peers["<name>"]` として提供する
+5. pytest-embedded の通常処理により primary DUT に接続し、`dut` として提供する
+
+この順序では、実機 DUT が upload 直後に短時間だけ出力する起動メッセージを Python 側が取りこぼす可能性がある。
+host Arduino core のように出力が socket 接続まで保持される環境では問題になりにくいが、一般の実機 serial では sketch 側で十分な待機、再送、または Python 側からの入力を待つ handshake を用意することを推奨する。
+特に peer DUT では、`peers` fixture が要求された時点で検出済み peer をすべて起動するため、DUT 間の起動順に依存するテストは sketch 側 protocol で同期する。
+
 peer DUT の構造不備は設定エラーとして扱う。
 例えば `.ino` がない、`.ino` が複数ある、`sketch.yaml` が壊れている場合は error とする。
 一方で、profile 非対応、profile 未決定、port 未解決のように実行条件が揃わない場合は skip とする。

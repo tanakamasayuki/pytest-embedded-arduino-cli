@@ -107,6 +107,8 @@ uv run pytest
 
 - `--run-mode=all|build|test`
 - `--profile`
+- `--peer-profile=NAME:PROFILE`
+- `--peer-port=NAME:PORT`
 - `--clean`
 - `--arduino-test-timeout=SECONDS`
 - `--arduino-test-artifact-dir=PATH`
@@ -186,6 +188,75 @@ Profile resolution works as follows:
 In practice, explicitly specifying `--profile` is recommended.
 If you do not want to pass `--profile`, define `default_profile` in `sketch.yaml`.
 The single-profile auto-selection is supported as a fallback, but it is better not to rely on it for regular project configuration.
+
+## Peer DUTs
+
+Tests that need additional DUTs can place `peer_<name>/` sketch directories next to the primary sketch.
+The primary sketch remains available as `dut`; peer sketches are available through the `peers` fixture.
+
+```text
+tests/
+  my_app/
+    sketch.yaml
+    my_app.ino
+    test_my_app.py
+    peer_echo/
+      sketch.yaml
+      peer_echo.ino
+```
+
+```python
+def test_with_peer(dut, peers):
+    echo = peers["echo"]
+
+    dut.expect_exact("MAIN_READY")
+    echo.expect_exact("ECHO_READY")
+```
+
+Peer DUTs are prepared only for tests that request the `peers` fixture.
+If a test uses only `dut`, `peer_*` directories are ignored for that test.
+Requesting `peers` enables all detected peer DUTs; `peers["<name>"]` is the mapping API for accessing the connected peer.
+
+Startup order is fixed:
+
+1. the primary DUT is built and uploaded first
+2. peer DUTs are built and uploaded later, in peer name order
+3. peer DUTs are connected and exposed through `peers`
+4. the primary DUT is connected and exposed as `dut`
+
+On real serial hardware, short boot-time messages can be missed if a sketch prints them immediately after reset or upload.
+Host Arduino core socket runs often keep enough output for this not to matter, but hardware tests should use a startup delay, repeated READY message, or an explicit handshake from Python before relying on early output.
+
+`sketch.yaml` is not extended for peer configuration.
+Each peer directory is a normal sketch directory with its own `.ino` and `sketch.yaml`.
+
+Peer profiles are resolved in this order:
+
+1. `--peer-profile <name>:<profile>`
+2. `default_profile` in `peer_<name>/sketch.yaml`
+3. Skip the peer test if no profile is resolved
+
+`--profile` is for the primary DUT only and is not inherited by peer DUTs.
+Peer DUTs also do not use single-profile auto-selection.
+If a peer should run without `--peer-profile`, define `default_profile` in that peer's `sketch.yaml`.
+
+Peer ports are resolved in this order:
+
+1. `--peer-port <name>:<port>`
+2. `TEST_SERIAL_PORT_PEER_<NAME>_<PROFILE>`
+3. `TEST_SERIAL_PORT_PEER_<NAME>`
+4. `profiles.<PROFILE>.port` in the peer `sketch.yaml`, only when it is a `socket://...` URL
+5. Skip the peer test if no port is resolved
+
+`--peer-profile` and `--peer-port` may be specified multiple times.
+Use one option per peer instead of comma-separated values.
+
+```bash
+uv run pytest tests/my_app \
+  --profile esp32 \
+  --peer-profile echo:host \
+  --peer-port echo:socket://localhost
+```
 
 For compile-time defines, place a `build_config.toml` in the sketch directory:
 

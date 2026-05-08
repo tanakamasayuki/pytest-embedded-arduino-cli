@@ -103,6 +103,10 @@ def normalize_profile_name(profile: str) -> str:
     return profile.upper().replace("-", "_")
 
 
+def normalize_peer_name(peer: str) -> str:
+    return peer.upper().replace("-", "_")
+
+
 def install_fast_socket_redirect_thread() -> None:
     try:
         import pytest_embedded_serial.serial as embedded_serial
@@ -189,6 +193,40 @@ def resolve_upload_port(config: Config, profile: str | None = None) -> str | Non
     if env_port and is_socket_url(env_port):
         return None
     return env_port
+
+
+def resolve_peer_port(
+    *,
+    peer: str,
+    profile: str | None,
+    option_port: str | None = None,
+    profile_port: str | None = None,
+) -> str | None:
+    if option_port:
+        return option_port
+
+    normalized_peer = normalize_peer_name(peer)
+    if profile:
+        env_profile_port = os.getenv(
+            f"TEST_SERIAL_PORT_PEER_{normalized_peer}_{normalize_profile_name(profile)}"
+        )
+        if env_profile_port:
+            return env_profile_port
+
+    env_port = os.getenv(f"TEST_SERIAL_PORT_PEER_{normalized_peer}")
+    if env_port:
+        return env_port
+
+    if is_socket_url(profile_port):
+        return profile_port
+
+    return None
+
+
+def resolve_peer_upload_port(runtime_port: str | None) -> str | None:
+    if runtime_port and is_socket_url(runtime_port):
+        return None
+    return runtime_port
 
 
 def is_socket_url(port: str | None) -> bool:

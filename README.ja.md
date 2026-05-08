@@ -107,6 +107,8 @@ uv run pytest
 
 - `--run-mode=all|build|test`
 - `--profile`
+- `--peer-profile=NAME:PROFILE`
+- `--peer-port=NAME:PORT`
 - `--clean`
 - `--arduino-test-timeout=SECONDS`
 - `--arduino-test-artifact-dir=PATH`
@@ -186,6 +188,76 @@ profile の解決順は次のとおりです。
 実運用では `--profile` を明示することを推奨します。
 `--profile` を省略したい場合は、`sketch.yaml` に `default_profile` を定義してください。
 profile が 1 つだけのときの自動選択は fallback としてサポートしていますが、通常の設定ではそれに依存しない方が明確です。
+
+## peer DUT
+
+追加 DUT が必要なテストでは、primary sketch と同じディレクトリ直下に `peer_<name>/` sketch ディレクトリを置きます。
+primary sketch は従来通り `dut` として扱われ、peer sketch は `peers` fixture から参照できます。
+
+```text
+tests/
+  my_app/
+    sketch.yaml
+    my_app.ino
+    test_my_app.py
+    peer_echo/
+      sketch.yaml
+      peer_echo.ino
+```
+
+```python
+def test_with_peer(dut, peers):
+    echo = peers["echo"]
+
+    dut.expect_exact("MAIN_READY")
+    echo.expect_exact("ECHO_READY")
+```
+
+peer DUT は `peers` fixture を要求したテストでだけ準備されます。
+`dut` だけを使うテストでは、`peer_*` ディレクトリは無視されます。
+`peers` を要求すると、検出されたすべての peer DUT が有効化されます。
+`peers["<name>"]` は、接続済み peer を参照するための mapping API です。
+
+起動順は固定です。
+
+1. primary DUT を先に build / upload する
+2. peer DUT を peer 名順で build / upload する
+3. peer DUT に接続し、`peers` から参照できるようにする
+4. primary DUT に接続し、`dut` として参照できるようにする
+
+実機 serial では、reset や upload 直後に sketch が短時間だけ出力する起動メッセージを Python 側が取りこぼす可能性があります。
+host Arduino core の socket 実行では問題になりにくいですが、実機テストでは sketch 側で十分な待機、READY の再送、または Python 側からの入力を待つ handshake を用意することを推奨します。
+
+peer 設定のために `sketch.yaml` は拡張しません。
+各 peer ディレクトリは、`.ino` と `sketch.yaml` を持つ通常の sketch ディレクトリです。
+
+peer profile は次の順で解決します。
+
+1. `--peer-profile <name>:<profile>`
+2. `peer_<name>/sketch.yaml` の `default_profile`
+3. 解決できなければ peer テストを skip
+
+`--profile` は primary DUT 専用で、peer DUT には継承されません。
+peer DUT では profile が 1 つだけでも自動選択しません。
+`--peer-profile` なしで動かしたい peer では、その peer の `sketch.yaml` に `default_profile` を定義してください。
+
+peer port は次の順で解決します。
+
+1. `--peer-port <name>:<port>`
+2. `TEST_SERIAL_PORT_PEER_<NAME>_<PROFILE>`
+3. `TEST_SERIAL_PORT_PEER_<NAME>`
+4. peer 側 `sketch.yaml` の `profiles.<PROFILE>.port`。ただし `socket://...` URL の場合のみ
+5. 解決できなければ peer テストを skip
+
+`--peer-profile` と `--peer-port` は複数回指定できます。
+カンマ区切りではなく、peer ごとに option を 1 回ずつ指定します。
+
+```bash
+uv run pytest tests/my_app \
+  --profile esp32 \
+  --peer-profile echo:host \
+  --peer-port echo:socket://localhost
+```
 
 compile-time define を渡したい場合は、sketch ディレクトリに `build_config.toml` を置きます。
 
