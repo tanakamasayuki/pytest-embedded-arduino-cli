@@ -598,6 +598,195 @@ peer DUT の build / upload でも、`-v` / `-vv` のログには peer 名が分
 - pytest-embedded 既存 option と競合しにくい名前にする
 - build / upload / runtime の責務境界が option 名から見えるようにする
 - plugin 固有 option は、基本実行用の `--run-mode` / `--profile` と、peer DUT 用の `--peer-profile` / `--peer-port` に絞る
+
+## 14. テスト状態保存要件
+
+### 14.1 目的と位置付け
+
+pytest で実行したマイコン向け実機テストについて、各テストの検証状態をローカルファイルに保存する。
+
+主目的は、ローカル開発中に「最後にいつ成功したか」「前回の結果はどうだったか」を確認できるようにすることである。
+
+本機能は「実機 verification state cache」として扱い、以下は対象外である。
+
+- テストレポート、長期履歴管理、CIダッシュボード、品質ゲート
+- 実行履歴の蓄積、メトリクス収集、trend 分析
+- build artifact、ログ、シリアル出力、スクリーンショットなどの artifact 保存
+- stale entry の自動削除や rename 検出
+
+state cache は実行環境に応じてリセットしてもテスト本体やビルドに影響しない disposable なファイルである。
+
+### 14.2 基本方針
+
+- state は実機上で実際に verification が行われた場合のみ更新する
+- 認識単位は `(profile_name, nodeid)` の組とする
+- profile ごとに別ファイルへ分割することは初期仕様に含めない
+- state.json は current state cache であり、append-only history は保持しない
+- pytest collection との完全一致を保証しない
+- stale entry が残ることを許容する
+
+### 14.3 保存先と構成
+
+#### 14.3.1 ディレクトリ設定
+
+状態保存ディレクトリは CLI option で指定可能とする。
+
+- option: `--save-state-dir`
+- default: `.pytest-results`
+- absolute path または relative path（pytest rootdir 基準）を指定可能
+- git 管理外とすることを推奨し、`.gitignore` への追加を推奨する
+
+#### 14.3.2 ファイル構成
+
+- state は `<save_state_dir>/state.json` に保存する
+- `<save_state_dir>/` はローカル状態保存用ディレクトリとして扱う
+- 将来の拡張用に他のキャッシュファイルを置ける構造を想定するが、初期仕様では `state.json` のみ
+
+#### 14.3.3 state.json 構造
+
+```json
+{
+  "schema_version": 1,
+  "updated_at": "2026-05-10T20:00:00+09:00",
+  "profiles": {
+    "uno": {
+      "tests": {
+        "tests/test_gpio.py::test_led": {
+          "last_result": "passed",
+          "last_run_at": "2026-05-10T20:00:00+09:00",
+          "last_success_at": "2026-05-10T20:00:00+09:00"
+        }
+      }
+    },
+    "esp32": {
+      "tests": {
+        "tests/test_gpio.py::test_led": {
+          "last_result": "failed",
+          "last_run_at": "2026-05-10T20:05:00+09:00",
+          "last_success_at": "2026-05-09T18:30:00+09:00"
+        }
+      }
+    }
+  }
+}
+```
+
+- 内部では profile 名を親キーとして管理する
+- 各 profile の配下に、pytest の `nodeid` をキーとしたテスト状態を保存する
+- profile 名には、実際に使用された最終的な実行 profile 名をそのまま使用する
+- profile 未指定実行でも、内部選択された最終 profile 名を使用する
+- synthetic/default profile 名は使用しない
+
+### 14.4 保存内容
+
+各テストについて、少なくとも以下を保存する。
+
+- `last_result`: 最終結果（`passed`、`failed`、`error` など）
+- `last_run_at`: 最終実行日時（ISO8601 形式、タイムゾーン付き）
+- `last_success_at`: 最終成功日時（ISO8601 形式、タイムゾーン付き）
+
+- 最初に成功するまでは `last_success_at` は存在しなくてよい
+- 未実行テストは `state.json` に entry が存在しないことで表現する
+- JSON は人間にも読みやすく、機械にも処理しやすい形式とする
+
+### 14.5 保存対象の判定
+
+state を更新するのは、実機上で実際に verification が行われた場合のみである。
+
+次の場合は state を更新しない：
+
+- `build failed`: compile に失敗した場合
+- `upload failed`: upload に失敗した場合
+- 環境要因による失敗: board not found、port open failed、device unavailable など
+- `skipped`、`deselected`: テストが実行されなかった場合
+
+state を更新する場合：
+
+- `pass`/`fail`/`error` など、実際にボード上でテストが開始された結果のみ更新対象
+- upload 成功後にテスト実行へ到達した場合のみ更新対象
+
+### 14.6 結果更新動作
+
+- 実行されたテストだけを upsert する
+- 実行されなかったテストの entry は変更しない
+
+成功時（`pass`）：
+- `last_result`、`last_run_at`、`last_success_at` を更新する
+
+失敗時（`fail`/`error` など）：
+- `last_result`、`last_run_at` のみ更新し、既存の `last_success_at` は保持する
+
+テストの削除、rename、対象外化によって古い entry が残ってもよい。
+stale entry の cleanup は初期仕様に含めない。
+
+### 14.7 peer DUT の扱い
+
+peer DUT を使うテストでも、state cache には primary DUT（親ディレクトリの sketch）のみの結果を保存する。
+
+- peer DUT の build / upload 状態は記録しない
+- `nodeid` は peer 名を含まない
+- 同じ `nodeid` を持つテストが複数台で実行されても、state には primary DUT の結果のみ反映される
+
+### 14.8 ArduTest との独立性
+
+state cache 機能は ArduTest に依存しない。
+
+- ArduTest を使わないテストでも state cache を利用できる
+- ArduTest fixture の有無にかかわらず、テスト実行がボード上で行われた結果が記録される
+- `pytest-embedded` 標準の expect による basic テストでも state cache に entry が作成される
+
+### 14.9 CLI option 追加
+
+state cache 機能を制御するため、pytest option に次を追加する。
+
+- `--save-state`: flag 形式。指定された場合のみ state を保存する（default: 無効）
+- `--save-state-dir`: 値指定形式。state.json を保存するディレクトリを指定（default: `.pytest-results`）
+
+例：
+
+```bash
+pytest tests/foo --save-state
+pytest tests/foo --save-state --save-state-dir .test-cache
+```
+
+`--save-state-dir` が指定されても `--save-state` がない場合、state は保存されない。
+
+### 14.10 実装上の考慮
+
+#### 14.10.1 plugin 層の責務
+
+- pytest hook（`pytest_runtest_logreport` など）を使ってテスト結果を捕捉
+- build / upload 成功の確認（失敗時は state 更新をスキップ）
+- テスト実行が実機上で行われたかどうかの判定
+- profile 名の確定
+- nodeid の取得
+- state.json の読み書き（ファイル I/O）
+
+#### 14.10.2 ファイル I/O 設計
+
+- state.json が存在しないとき、初期構造を自動生成する
+- `<save_state_dir>/` ディレクトリが存在しないとき、自動作成する
+- 複数テストの同時実行（pytest-xdist など）による race condition は、初期仕様では対応外とする
+- ユーザーが state.json を削除または手動編集してもテスト本体に影響しない
+
+#### 14.10.3 テストの判定
+
+テスト実行が実機上で行われたかの判定基準：
+
+- upload フェーズが成功した後、test フェーズの execution に到達したこと
+- この判定は `pytest_runtest_logreport` で `when == "call"` の report を使う
+
+#### 14.10.4 profile 名の確定
+
+- `--profile` が明示指定された場合はその値を使用
+- 自動選択（`--profile` 未指定で profile 1 つの場合）された場合、選択された profile 名を使用
+
+### 14.11 スコープ外
+
+- state.json の content versioning や migration 機構は初期仕様に含めない
+- stale entry の自動検出・削除は行わない
+- history file や long-term metrics は初期仕様に含めない
+- CI 向けレポート生成や HTML 表示は初期仕様に含めない
 - `sketch path` や `fqbn` のような override option は必須要件に含めない
 - ログ出力制御は pytest 標準の verbosity に従わせ、専用 option を増やさない
 
@@ -754,7 +943,7 @@ README には少なくとも次を含める。
 
 この段階では API 名は仮であり、実装時に Python パッケージとして自然な形へ調整してよい。
 
-## 20. 受け入れ条件
+## 21. 受け入れ条件
 
 本仕様の受け入れ条件は次の通り。
 
@@ -769,8 +958,14 @@ README には少なくとも次を含める。
 9. `sketch.yaml` に存在しない profile を指定した sketch は build 前に skip される
 10. `peer_*` ディレクトリを使った複数 DUT テスト仕様が定義されている
 11. peer DUT の profile / port を名前付きで指定できる
+12. `--save-state` option で state cache 保存の有効/無効を制御できる
+13. `--save-state-dir` option で state.json の保存先を指定できる
+14. state.json に `(profile_name, nodeid)` 単位でテスト状態が記録される
+15. 実機上で実行されたテストのみ state.json に entry が作成される
+16. peer DUT の state は記録されず、primary DUT のみ記録される
+17. ArduTest に依存せず、基本的な pytest-embedded テストでも state cache が機能する
 
-## 21. 今後の拡張候補
+## 22. 今後の拡張候補
 
 - board family ごとの upload strategy 差し替え
 - `arduino-cli board list` 連携によるポート解決支援
