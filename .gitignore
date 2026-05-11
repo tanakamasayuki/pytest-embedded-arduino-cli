@@ -26,6 +26,7 @@ htmlcov/
 .ruff_cache/
 report.html
 ardutest/
+.pytest-results/
 
 # IDE / OS
 .DS_Store
