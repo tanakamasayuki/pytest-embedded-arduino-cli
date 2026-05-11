@@ -29,6 +29,7 @@ from .serial import (
     socket_url_needs_port_completion,
     wait_for_socket_url,
 )
+from .state_cache import StateCache
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Pass --clean to arduino-cli compile and remove ArduTest artifacts before running.",
     )
+    group.addoption(
+        "--save-state",
+        action="store_true",
+        default=False,
+        help="Save test verification state to state.json for local development.",
+    )
+    group.addoption(
+        "--save-state-dir",
+        action="store",
+        default=".pytest-results",
+        help="Directory to save state.json (relative to pytest rootdir unless absolute).",
+    )
 
 
 def pytest_report_header(config: pytest.Config) -> list[str]:
@@ -119,6 +132,7 @@ def pytest_configure(config: pytest.Config) -> None:
     _clean_ardutest_artifacts(config)
     ensure_default_embedded_services(config)
     _set_optional_metadata(config)
+    _initialize_state_cache(config)
 
 
 def _remember_initial_ports(config: pytest.Config) -> None:
@@ -422,6 +436,10 @@ def arduino_cli_build(
     if not _should_build(request.config.getoption("run_mode")):
         return
 
+    # Record profile for state cache
+    if arduino_cli_app.profile:
+        _set_current_profile(request.config, arduino_cli_app.profile)
+
     _log_command(
         request.config,
         action="compile",
@@ -476,6 +494,10 @@ def arduino_cli_upload(
         },
     )
     arduino_cli_flasher.upload()
+
+    # Record profile for state cache after successful upload
+    if arduino_cli_flasher.profile:
+        _set_current_profile(request.config, arduino_cli_flasher.profile)
 
     runtime_port = resolve_port(request.config, profile=arduino_cli_app.profile)
     if socket_url_needs_port_completion(runtime_port):
@@ -649,3 +671,148 @@ def skip_test_execution_in_build_mode(
         if _request_uses_peers(request):
             request.getfixturevalue("peers")
         pytest.skip("skipped test execution in build-only mode")
+
+
+def _initialize_state_cache(config: pytest.Config) -> None:
+    """Initialize state cache if --save-state is enabled."""
+    # Save config globally for use in pytest_runtest_logreport
+    globals()["_GLOBAL_CONFIG"] = config
+
+    if not config.getoption("save_state"):
+        config._arduino_cli_state_cache = None
+        return
+
+    save_dir_opt = config.getoption("save_state_dir")
+    if Path(save_dir_opt).is_absolute():
+        save_dir = Path(save_dir_opt)
+    else:
+        save_dir = Path(config.rootpath) / save_dir_opt
+
+    cache = StateCache(save_dir)
+    cache.ensure_dir_exists()
+    config._arduino_cli_state_cache = cache
+    globals()["_GLOBAL_STATE_CACHE"] = cache
+
+
+_GLOBAL_STATE_CACHE: StateCache | None = None
+_GLOBAL_CONFIG: pytest.Config | None = None
+# Pending updates collected during the test session. Each item is (profile, nodeid, result)
+_PENDING_STATE_UPDATES: list[tuple[str, str, str]] = []
+
+def _get_state_cache(config: pytest.Config) -> StateCache | None:
+    """Get state cache from config, or None if not enabled.
+
+    Falls back to a process-global cache if set (robust across config instances).
+    """
+    cache = getattr(config, "_arduino_cli_state_cache", None)
+    if cache is not None:
+        return cache
+    return globals().get("_GLOBAL_STATE_CACHE")
+
+
+def _get_current_profile(config: pytest.Config) -> str | None:
+    """Get the profile that was used for the current test run."""
+    return getattr(config, "_arduino_cli_current_profile", None)
+
+
+def _set_current_profile(config: pytest.Config, profile: str | None) -> None:
+    """Record the profile being used for the current test run."""
+    config._arduino_cli_current_profile = profile
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    """Capture test results and update state cache on test completion."""
+    # Only process call phase (actual test execution)
+    if report.when != "call":
+        return
+
+    # Skip if test was skipped or not run
+    if report.outcome == "skipped":
+        return
+
+    # Get config from report; be robust across pytest versions
+    config = getattr(report, "config", None)
+    if config is None:
+        pyfuncitem = getattr(report, "_pyfuncitem", None)
+        if pyfuncitem is not None:
+            config = getattr(pyfuncitem, "config", None)
+    if config is None:
+        session = getattr(report, "session", None)
+        if session is not None:
+            config = getattr(session, "config", None)
+    if config is None:
+        # Fallback to global config set during pytest_configure
+        config = globals().get("_GLOBAL_CONFIG")
+    if config is None:
+        # Unable to determine config, skip state update
+        return
+
+    # Determine profile: prefer recorded one, fall back to CLI option
+    profile = _get_current_profile(config) or config.getoption("profile")
+    if profile is None:
+        return
+
+    # Get state cache
+    cache = _get_state_cache(config)
+    if cache is None:
+        # Attempt to initialize a cache from config options if save_state was enabled
+        try:
+            if config.getoption("save_state"):
+                save_dir_opt = config.getoption("save_state_dir")
+                if Path(save_dir_opt).is_absolute():
+                    save_dir = Path(save_dir_opt)
+                else:
+                    save_dir = Path(config.rootpath) / save_dir_opt
+                cache = StateCache(save_dir)
+                cache.ensure_dir_exists()
+                config._arduino_cli_state_cache = cache
+                globals()["_GLOBAL_STATE_CACHE"] = cache
+        except Exception:
+            pass
+    if cache is None:
+        return
+
+    # Collect pending update to apply at session finish
+    try:
+        nodeid = report.nodeid
+        if report.outcome == "passed":
+            result = "passed"
+        elif report.outcome == "failed":
+            result = "failed"
+        else:
+            result = report.outcome
+        _PENDING_STATE_UPDATES.append((profile, nodeid, result))
+    except Exception:
+        pass
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Apply pending state cache updates at session end and persist state.json."""
+    try:
+        config = getattr(session, "config", None)
+        if config is None:
+            return
+        if not config.getoption("save_state"):
+            return
+
+        save_dir_opt = config.getoption("save_state_dir")
+        if Path(save_dir_opt).is_absolute():
+            save_dir = Path(save_dir_opt)
+        else:
+            save_dir = Path(config.rootpath) / save_dir_opt
+
+        cache = StateCache(save_dir)
+        cache.ensure_dir_exists()
+        state = cache.load_state()
+
+        # Apply pending updates
+        for profile, nodeid, result in _PENDING_STATE_UPDATES:
+            try:
+                cache.update_test_result(state, profile, nodeid, result)
+            except Exception:
+                continue
+
+        # Save the consolidated state
+        cache.save_state(state)
+    except Exception:
+        pass

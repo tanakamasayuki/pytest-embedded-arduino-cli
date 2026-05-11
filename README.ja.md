@@ -110,6 +110,8 @@ uv run pytest
 - `--peer-profile=NAME:PROFILE`
 - `--peer-port=NAME:PORT`
 - `--clean`
+- `--save-state`
+- `--save-state-dir=PATH`
 - `--arduino-test-timeout=SECONDS`
 - `--arduino-test-artifact-dir=PATH`
 - `--arduino-test-missing-config=skip|error`
@@ -117,6 +119,42 @@ uv run pytest
 `--clean` は `arduino-cli compile` に `--clean` を渡します。
 Arduino CLI の incremental build cache を使わずに再 build したいときに使います。
 ArduTest の artifact 保存先 directory も、実行前に directory ごと削除します。
+
+`--save-state` を指定すると、ローカル開発用にテストの検証状態を `state.json` に記録します。
+既定値は無効です。
+有効化すると、profile ごとにテスト結果が `.pytest-results/state.json` に記録されます（`--save-state-dir` で別の directory に変更可能）。
+この機能は開発中にテストの pass/fail を追跡する際に便利で、外部の CI システムに依存しません。
+
+使用例:
+
+```bash
+uv run pytest tests/my_app --profile esp32 --port=/dev/ttyACM0 --save-state
+```
+
+状態ファイルの構造 (`.pytest-results/state.json`):
+
+```json
+{
+  "schema_version": 1,
+  "updated_at": "2026-05-11T12:00:00.123456+09:00",
+  "profiles": {
+    "esp32": {
+      "tests": {
+        "tests/my_app/test_my_app.py::test_something": {
+          "last_result": "passed",
+          "last_run_at": "2026-05-11T12:00:00.123456+09:00",
+          "last_success_at": "2026-05-11T12:00:00.123456+09:00"
+        }
+      }
+    }
+  }
+}
+```
+
+peer test（複数 DUT）の場合、primary DUT の状態のみ記録されます。
+
+`--save-state-dir` は `state.json` の保存先 directory を指定します。
+既定値は `.pytest-results` です（pytest rootdir からの相対 path。絶対 path の場合はそのまま使用）。
 
 `--arduino-test-artifact-dir` は ArduTest artifact の保存先 root を指定します。
 既定値は `ardutest` で、pytest の `rootdir` からの相対 path として解決されます。
