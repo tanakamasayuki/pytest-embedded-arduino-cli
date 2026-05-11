@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.1.5
 - (EN) Add `--save-state` and `--save-state-dir` options to save test verification state to `state.json` for local development. State is recorded per profile with per-test timestamps. For peer tests, only the primary DUT state is recorded. Feature is disabled by default.
 - (JA) ローカル開発用にテストの検証状態を `state.json` に記録する `--save-state` と `--save-state-dir` option を追加。Profile ごと、test ごとのタイムスタンプを記録。peer test では primary DUT のみ記録。既定値は無効。
 
