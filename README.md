@@ -110,6 +110,8 @@ uv run pytest
 - `--peer-profile=NAME:PROFILE`
 - `--peer-port=NAME:PORT`
 - `--clean`
+- `--save-state`
+- `--save-state-dir=PATH`
 - `--arduino-test-timeout=SECONDS`
 - `--arduino-test-artifact-dir=PATH`
 - `--arduino-test-missing-config=skip|error`
@@ -117,6 +119,42 @@ uv run pytest
 `--clean` passes `--clean` to `arduino-cli compile`.
 It is useful when Arduino CLI's incremental build cache should be ignored.
 It also removes the ArduTest artifact directory before running.
+
+`--save-state` enables local test verification state caching to `state.json` for development convenience.
+By default, this is disabled.
+When enabled, test results are recorded per profile in `.pytest-results/state.json` (or a custom directory specified with `--save-state-dir`).
+This feature is useful during development to track which tests are passing/failing without relying on external CI systems.
+
+Example:
+
+```bash
+uv run pytest tests/my_app --profile esp32 --port=/dev/ttyACM0 --save-state
+```
+
+State file structure (`.pytest-results/state.json`):
+
+```json
+{
+  "schema_version": 1,
+  "updated_at": "2026-05-11T12:00:00.123456+09:00",
+  "profiles": {
+    "esp32": {
+      "tests": {
+        "tests/my_app/test_my_app.py::test_something": {
+          "last_result": "passed",
+          "last_run_at": "2026-05-11T12:00:00.123456+09:00",
+          "last_success_at": "2026-05-11T12:00:00.123456+09:00"
+        }
+      }
+    }
+  }
+}
+```
+
+For peer tests (multi-DUT), only the primary DUT state is recorded.
+
+`--save-state-dir` specifies the directory for state.json storage.
+The default is `.pytest-results` (relative to pytest rootdir unless absolute).
 
 `--arduino-test-artifact-dir` selects the ArduTest artifact root.
 The default is `ardutest`, resolved relative to pytest's `rootdir`.
