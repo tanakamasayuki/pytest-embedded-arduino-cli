@@ -7,7 +7,7 @@ import tempfile
 
 import pytest
 
-from pytest_embedded_arduino_cli.state_cache import StateCache, TestResult
+from pytest_embedded_arduino_cli.state_cache import StateCache
 
 
 class TestStateCache:
