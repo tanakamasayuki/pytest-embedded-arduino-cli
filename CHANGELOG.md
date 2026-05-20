@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Sort per-profile `tests` entries in `state.json` by pytest nodeid when saving.
+- (JA) `state.json` 保存時に profile ごとの `tests` entry を pytest nodeid 順に並べるように変更。
 
 ## 1.1.5
 - (EN) Add `--save-state` and `--save-state-dir` options to save test verification state to `state.json` for local development. State is recorded per profile with per-test timestamps. For peer tests, only the primary DUT state is recorded. Feature is disabled by default.
