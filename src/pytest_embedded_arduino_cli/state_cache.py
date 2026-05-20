@@ -64,10 +64,24 @@ class StateCache:
         """
         self.ensure_dir_exists()
         state["updated_at"] = self._current_iso8601()
+        self.sort_tests(state)
 
         # Write with indentation for readability
         with self.state_file.open("w", encoding="utf-8") as f:
             json.dump(state, f, indent=2, ensure_ascii=False)
+
+    def sort_tests(self, state: dict[str, Any]) -> None:
+        """Sort test entries by nodeid while preserving the surrounding JSON order."""
+        profiles = state.get("profiles")
+        if not isinstance(profiles, dict):
+            return
+
+        for profile_state in profiles.values():
+            if not isinstance(profile_state, dict):
+                continue
+            tests = profile_state.get("tests")
+            if isinstance(tests, dict):
+                profile_state["tests"] = dict(sorted(tests.items()))
 
     def update_test_result(
         self,

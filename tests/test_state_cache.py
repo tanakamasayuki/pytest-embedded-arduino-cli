@@ -146,6 +146,21 @@ class TestStateCache:
         assert loaded["schema_version"] == 1
         assert "profiles" in loaded
 
+    def test_save_state_sorts_tests_by_nodeid(self, temp_cache_dir):
+        """Test that saved test entries are sorted by nodeid."""
+        cache = StateCache(temp_cache_dir)
+        state = cache._init_state()
+        cache.update_test_result(state, "board", "tests/test_b.py::test_b", "passed")
+        cache.update_test_result(state, "board", "tests/test_a.py::test_a", "passed")
+
+        cache.save_state(state)
+
+        loaded = cache.load_state()
+        assert list(loaded["profiles"]["board"]["tests"]) == [
+            "tests/test_a.py::test_a",
+            "tests/test_b.py::test_b",
+        ]
+
     def test_corrupt_state_file_returns_fresh_state(self, temp_cache_dir):
         """Test that corrupt state file causes fresh state to be returned."""
         cache = StateCache(temp_cache_dir)
