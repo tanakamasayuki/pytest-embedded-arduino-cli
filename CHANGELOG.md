@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.1.6
 - (EN) Sort per-profile `tests` entries in `state.json` by pytest nodeid when saving.
 - (JA) `state.json` 保存時に profile ごとの `tests` entry を pytest nodeid 順に並べるように変更。
 
