@@ -13,7 +13,7 @@
 - ログ、メトリクス、成果物、assertion 失敗、最終結果を機械的に収集できること
 - Arduino Uno でも実装できる単純な形式に保つこと
 
-本仕様はドラフトであり、既存の仮実装とは一致しない場合がある。実装は本仕様を優先して更新する。
+本仕様は、出荷されている [ArduTest](https://github.com/tanakamasayuki/ArduTest) Arduino ライブラリ（device 側）と、本パッケージの `arduino_test` fixture（host 側）が実装するプロトコルを記述する。ArduTest ライブラリは device 側の正規（canonical）実装であり、device の挙動と本ドキュメントが食い違う場合はライブラリを正とする。
 
 ---
 
@@ -68,7 +68,7 @@ AT <direction> <type> [fields...]\n
 
 ```text
 AT > HELLO 1
-AT < HELLO 1 ArduTest 0.1.0
+AT < HELLO 1 ArduTest 0.2.2
 ```
 
 ### 4.2 field encoding
@@ -98,7 +98,7 @@ payload の解釈は message type ごとに定義する。`LOG`、`ERROR`、`FAI
 
 - 整数は 10 進表記
 - 浮動小数点数は `Stream.print(value, digits)` 相当の 10 進表記
-- pytest 側は整数または float として解釈できない metric 値を protocol error にする
+- device は数値の metric 値のみを送る。host 側では、可能な場合 metric 値を整数または float に変換し、できない場合は文字列のまま保持する（protocol error として扱わない）
 
 ---
 
@@ -117,7 +117,7 @@ AT > HELLO 1
 device は利用する protocol version、ライブラリ名、ライブラリ version を返す。
 
 ```text
-AT < HELLO 1 ArduTest 0.1.0
+AT < HELLO 1 ArduTest 0.2.2
 ```
 
 host が対応しない protocol version を受け取った場合、テストを中止する。
@@ -235,7 +235,7 @@ ArduTest の実行状態を初期化する。
 AT > RESET_STATE
 ```
 
-config を保持するか破棄するかは未決事項とする。初期案では config は保持し、破棄が必要な場合は `CLEAR_CONFIG` を使う。
+device は現在のテスト状態と failure 状態をクリアし、protocol mode を抜ける。応答は返さない。config は保持され、config も破棄したい場合は `CLEAR_CONFIG` を使う。device は protocol mode を抜けるため、host は次の操作で `HELLO` により再同期する。host はこれを `arduino_test.reset()` として公開する。
 
 ---
 
@@ -352,7 +352,11 @@ AT < FAIL <test-name> <file> <line> <length>\n
 <payload bytes>
 ```
 
-payload には失敗した式、比較内容、補足メッセージのいずれかを含める。
+通常の assertion 失敗も equality assertion 失敗も同じ `FAIL` event を使う（`FAIL_EQ` のような別 event は存在しない）。payload は以下のいずれかとする。
+
+- 失敗した式（例: `ASSERT_TRUE` / `ASSERT_FALSE` / `ASSERT_NE` によるもの）
+- `ASSERT_EQ` による equality 比較。`<expectedExpr>=<expected> <actualExpr>=<actual>` の形式で整形する
+- 補足メッセージ
 
 ### 8.13 RESULT
 
@@ -379,14 +383,15 @@ AT < ERROR <code> <length>\n
 <payload bytes>
 ```
 
-代表的な `<code>`:
+payload は code に応じて意味が変わる、人間可読の短いメッセージである。device が送出する code は以下のとおり。
 
-- `unknown_command`
-- `unknown_test`
-- `invalid_state`
-- `invalid_config`
-- `duplicate_test`
-- `internal_error`
+| `<code>` | payload メッセージ | 意味 |
+| --- | --- | --- |
+| `unknown_command` | 該当する行、または `line_too_long` | 認識できない command、または受信バッファより長い command 行 |
+| `unknown_test` | テスト名 | `RUN` が未登録のテストを参照した |
+| `duplicate_test` | 重複したテスト名 | 登録済みの 2 つのテストが同じ名前を共有している（`LIST` 中に報告される） |
+| `invalid_config` | `missing_length` / `invalid_name` / `invalid_length` / `value_too_large` / `payload_timeout` / `store_full` | `SET_CONFIG` が不正、または config store の上限を超えた |
+| `internal_error` | （実装依存） | 特定の code が該当しない場合の fallback |
 
 ---
 
@@ -419,7 +424,7 @@ TEST_CASE_WITH_REQUIREMENTS(test_wifi, "network", "ssid") {
 }
 ```
 
-初期案では、実装の単純さと C++ macro の扱いやすさから案 A を優先候補とする。
+案 A を採用した。ArduTest ライブラリは `ARDUTEST_REQUIRE(test, "name")` と `ARDUTEST_REQUIRE_CONFIG(test, "name")` を提供し、device は `LIST` 中にこれらを `REQUIRE` / `REQUIRE_CONFIG` event として報告する。
 
 ### 9.3 実行中 requirement
 
@@ -559,9 +564,6 @@ host は以下を protocol error として扱う。
 
 ## 15. 未決事項
 
-- metadata 登録 API を案 A / 案 B のどちらにするか
-- `RESET_STATE` で config を保持するか破棄するか
-- `READY` を必須 event にするか、任意 event にするか
 - `skipped` を device result として許可するか
 - payload の文字コードを UTF-8 固定にするか、binary-safe とだけ定義するか
 - artifact の分割送信を初期から入れるか

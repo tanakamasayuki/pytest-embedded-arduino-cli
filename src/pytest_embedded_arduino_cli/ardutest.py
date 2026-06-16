@@ -11,6 +11,9 @@ from typing import Any, Literal
 ArduTestStatus = Literal["passed", "failed", "skipped", "error"]
 MissingConfigMode = Literal["skip", "error"]
 
+#: Protocol version this host implementation speaks (sent in ``AT > HELLO``).
+SUPPORTED_PROTOCOL_VERSION = "1"
+
 
 class ArduTestError(RuntimeError):
     """Raised when ArduTest output cannot be collected correctly."""
@@ -21,6 +24,17 @@ class ArduTestEvent:
     kind: str
     test_name: str | None
     message: str
+    content_type: str | None = None
+    path: str | None = None
+
+
+@dataclass(frozen=True)
+class ArduTestArtifact:
+    test_name: str | None
+    filename: str
+    content_type: str
+    binary: bool
+    path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -36,6 +50,7 @@ class ArduTestResult:
     status: ArduTestStatus
     events: list[ArduTestEvent] = field(default_factory=list)
     skip_reason: str | None = None
+    duration: float | None = None
 
     @property
     def logs(self) -> list[str]:
@@ -60,6 +75,35 @@ class ArduTestResult:
             name, value = _split_name_value(event.message)
             values[name] = value
         return values
+
+    @property
+    def artifact_files(self) -> list[ArduTestArtifact]:
+        """All saved artifacts (text and binary) with content type and path."""
+        items: list[ArduTestArtifact] = []
+        for event in self.events:
+            if event.kind == "ARTIFACT_TEXT":
+                filename, _ = _split_name_value(event.message)
+                items.append(
+                    ArduTestArtifact(
+                        test_name=event.test_name,
+                        filename=filename,
+                        content_type=event.content_type or "text/plain",
+                        binary=False,
+                        path=event.path,
+                    )
+                )
+            elif event.kind == "ARTIFACT_BINARY":
+                filename, _ = _split_name_value(event.message)
+                items.append(
+                    ArduTestArtifact(
+                        test_name=event.test_name,
+                        filename=filename,
+                        content_type=event.content_type or "application/octet-stream",
+                        binary=True,
+                        path=event.path,
+                    )
+                )
+        return items
 
 
 @dataclass(frozen=True)
@@ -100,9 +144,23 @@ class ArduTestSession:
         self._configs: dict[str, str] = {}
         self.results: list[ArduTestResult] = []
         self._tests: list[ArduTestCase] | None = None
+        self.device_protocol_version: str | None = None
+        self.device_library: str | None = None
+        self.device_library_version: str | None = None
 
     def run(self, name: str | None = None) -> list[ArduTestResult]:
         return self._run_protocol(name)
+
+    def reset(self) -> None:
+        """Reset the device-side ArduTest protocol state via ``RESET_STATE``.
+
+        The device clears its current test / failure state and leaves protocol
+        mode, so the next ``run()`` / ``list_tests()`` performs a fresh initial
+        synchronization. ``RESET_STATE`` produces no reply.
+        """
+        self._send_command("AT > RESET_STATE")
+        self._tests = None
+        self.results = []
 
     def set_capability(self, name: str, enabled: bool = True) -> None:
         self._capabilities[name] = bool(enabled)
@@ -129,6 +187,10 @@ class ArduTestSession:
     @property
     def artifacts(self) -> dict[str, dict[str, str]]:
         return {result.name: result.artifacts for result in self.results}
+
+    @property
+    def artifact_files(self) -> dict[str, list[ArduTestArtifact]]:
+        return {result.name: result.artifact_files for result in self.results}
 
     def _list_tests_after_hello(self) -> list[ArduTestCase]:
         self._send_command("AT > LIST")
@@ -200,8 +262,11 @@ class ArduTestSession:
 
         for test in runnable_tests:
             test_name = test.name
+            start = time.perf_counter()
             self._send_command(f"AT > RUN {test_name}")
-            self.results.append(self._collect_one_protocol_result(test_name))
+            result = self._collect_one_protocol_result(test_name)
+            result.duration = time.perf_counter() - start
+            self.results.append(result)
 
         failed = [result for result in self.results if result.status not in ("passed", "skipped")]
         if failed:
@@ -323,18 +388,32 @@ class ArduTestSession:
             return ArduTestEvent(kind=parsed.kind, test_name=test_name, message=self._read_payload(length))
 
         if parsed.kind == "ARTIFACT_TEXT":
-            test_name, filename, _content_type, length = self._parse_artifact_payload_header(parsed.fields)
+            test_name, filename, content_type, length = self._parse_artifact_payload_header(parsed.fields)
             payload = self._read_payload(length)
+            saved_path = None
             if test_name is not None:
-                self._save_text_artifact(test_name, filename, payload)
-            return ArduTestEvent(kind=parsed.kind, test_name=test_name, message=f"{filename} {payload}")
+                saved_path = self._save_text_artifact(test_name, filename, payload)
+            return ArduTestEvent(
+                kind=parsed.kind,
+                test_name=test_name,
+                message=f"{filename} {payload}",
+                content_type=content_type,
+                path=saved_path,
+            )
 
         if parsed.kind == "ARTIFACT_BINARY":
-            test_name, filename, _content_type, length = self._parse_artifact_payload_header(parsed.fields)
+            test_name, filename, content_type, length = self._parse_artifact_payload_header(parsed.fields)
             payload = self._read_payload_bytes(length)
+            saved_path = None
             if test_name is not None:
-                self._save_binary_artifact(test_name, filename, payload)
-            return ArduTestEvent(kind=parsed.kind, test_name=test_name, message=f"{filename} {len(payload)} bytes")
+                saved_path = self._save_binary_artifact(test_name, filename, payload)
+            return ArduTestEvent(
+                kind=parsed.kind,
+                test_name=test_name,
+                message=f"{filename} {len(payload)} bytes",
+                content_type=content_type,
+                path=saved_path,
+            )
 
         if parsed.kind == "FAIL":
             test_name, file_name, line, length = self._parse_fail_payload_header(parsed.fields)
@@ -358,6 +437,7 @@ class ArduTestSession:
         while True:
             parsed = self._read_protocol_line()
             if parsed.kind == "HELLO":
+                self._check_protocol_version(parsed.fields)
                 return parsed
             if parsed.kind == "READY":
                 time.sleep(0.1)
@@ -367,6 +447,18 @@ class ArduTestSession:
                 continue
             raise ArduTestError(f"expected ArduTest protocol HELLO, got: AT < {parsed.kind} {parsed.fields}")
 
+    def _check_protocol_version(self, fields: str) -> None:
+        parts = fields.split(" ", 2)
+        version = parts[0] if parts and parts[0] else ""
+        self.device_protocol_version = version
+        self.device_library = parts[1] if len(parts) > 1 else None
+        self.device_library_version = parts[2] if len(parts) > 2 else None
+        if version != SUPPORTED_PROTOCOL_VERSION:
+            raise ArduTestError(
+                f"unsupported ArduTest protocol version: {version!r} "
+                f"(host supports {SUPPORTED_PROTOCOL_VERSION})"
+            )
+
     def _send_command(self, command: str) -> None:
         self.dut.write(f"{command}\n")
 
@@ -374,25 +466,27 @@ class ArduTestSession:
         length = len(value.encode("utf-8"))
         self.dut.write(f"AT > {command} {name} {length}\n{value}")
 
-    def _save_text_artifact(self, test_name: str, filename: str, payload: str) -> None:
+    def _save_text_artifact(self, test_name: str, filename: str, payload: str) -> str | None:
         if self.artifact_dir is None:
-            return
+            return None
 
         relative_test_name = _validate_artifact_test_name(test_name)
         relative_filename = _validate_artifact_filename(filename)
         path = self.artifact_dir / relative_test_name / relative_filename
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(payload, encoding="utf-8")
+        return str(path)
 
-    def _save_binary_artifact(self, test_name: str, filename: str, payload: bytes) -> None:
+    def _save_binary_artifact(self, test_name: str, filename: str, payload: bytes) -> str | None:
         if self.artifact_dir is None:
-            return
+            return None
 
         relative_test_name = _validate_artifact_test_name(test_name)
         relative_filename = _validate_artifact_filename(filename)
         path = self.artifact_dir / relative_test_name / relative_filename
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(payload)
+        return str(path)
 
     def _read_error_payload(self, fields: str) -> tuple[str, str]:
         parts = fields.split(" ", 1)
@@ -458,7 +552,7 @@ class ArduTestSession:
         for result in failed:
             lines.append(f"- {result.name}: {result.status}")
             for event in result.events:
-                if event.kind in {"FAIL", "FAIL_EQ", "ERROR"}:
+                if event.kind in {"FAIL", "ERROR"}:
                     lines.append(f"  {event.kind}: {event.message}")
         return "\n".join(lines)
 

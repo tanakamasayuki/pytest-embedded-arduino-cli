@@ -384,3 +384,63 @@ def test_ardutest_session_fails_pytest_on_failed_result() -> None:
 
     with pytest.raises(AssertionError, match="test_fails: failed"):
         ArduTestSession(dut).run()
+
+
+def test_ardutest_session_rejects_unsupported_protocol_version() -> None:
+    dut = ProtocolFakeDut(["AT < HELLO 2 ArduTest 0.3.0"])
+
+    with pytest.raises(RuntimeError, match="unsupported ArduTest protocol version"):
+        ArduTestSession(dut).list_tests()
+
+
+def test_ardutest_session_records_device_version() -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.2.2",
+            "AT < TEST test_true_passes",
+            "AT < END_LIST",
+        ]
+    )
+
+    session = ArduTestSession(dut)
+    session.list_tests()
+
+    assert session.device_protocol_version == "1"
+    assert session.device_library == "ArduTest"
+    assert session.device_library_version == "0.2.2"
+
+
+def test_ardutest_session_reset_sends_reset_state() -> None:
+    dut = ProtocolFakeDut([])
+    session = ArduTestSession(dut)
+    session._tests = []
+
+    session.reset()
+
+    assert dut.writes == ["AT > RESET_STATE\n"]
+    assert session._tests is None
+
+
+def test_ardutest_session_exposes_artifact_files_and_duration(tmp_path) -> None:
+    dut = ProtocolFakeDut(
+        [
+            "AT < HELLO 1 ArduTest 0.2.2",
+            "AT < TEST test_art",
+            "AT < END_LIST",
+            "AT < RUNNING test_art",
+            "AT < ARTIFACT_TEXT test_art note.txt text/plain 5\nhello",
+            b"AT < ARTIFACT_BINARY test_art blob.bin application/octet-stream 3\n\x00\x01\x02",
+            "AT < RESULT test_art passed",
+        ]
+    )
+
+    session = ArduTestSession(dut, artifact_dir=tmp_path / "ardutest")
+    results = session.run()
+
+    files = results[0].artifact_files
+    assert [(a.filename, a.content_type, a.binary) for a in files] == [
+        ("note.txt", "text/plain", False),
+        ("blob.bin", "application/octet-stream", True),
+    ]
+    assert all(a.path is not None for a in files)
+    assert results[0].duration is not None and results[0].duration >= 0

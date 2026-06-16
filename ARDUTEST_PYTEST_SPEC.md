@@ -128,22 +128,38 @@ If the same name is set multiple times, the last one wins.
 
 ### 5.6 `arduino_test.reset()`
 
-Performs a device reset or a protocol state reset.
+Resets the device-side ArduTest protocol state by sending `RESET_STATE`.
 
-In the initial implementation, whether a physical reset occurs follows the existing reset capability of `pytest-embedded-arduino-cli`. When a protocol-only reset is possible, it sends `RESET_STATE`.
+```python
+def test_board(arduino_test):
+    arduino_test.run("test_a")
+    arduino_test.reset()
+    arduino_test.run("test_b")
+```
+
+The device clears its current test / failure state and leaves protocol mode, so the cached test list is discarded and the next `run()` / `list_tests()` performs a fresh initial synchronization. `RESET_STATE` produces no reply, so `reset()` does not read from the device. A physical board reset is not performed; it remains a possible future extension that would build on the existing reset capability of `pytest-embedded` / the serial layer.
 
 ### 5.7 Collected data
 
 After execution, the following can be referenced.
 
 ```python
-arduino_test.results
-arduino_test.logs
-arduino_test.metrics
-arduino_test.artifacts
+arduino_test.results        # list[ArduTestResult]
+arduino_test.logs           # dict[test_name, list[str]]
+arduino_test.metrics        # dict[test_name, dict[metric_name, list[value]]]
+arduino_test.artifacts      # dict[test_name, dict[filename, text]]  (text artifacts)
+arduino_test.artifact_files # dict[test_name, list[ArduTestArtifact]]  (text + binary)
 ```
 
-In the initial implementation, these are held as attributes on the fixture instance. How they are attached to the pytest report is considered separately.
+These are held as attributes on the fixture instance (the `ArduTestSession`). After the device's `HELLO` reply, the negotiated protocol version and the device library name / version are also recorded:
+
+```python
+arduino_test.device_protocol_version  # e.g. "1"
+arduino_test.device_library           # e.g. "ArduTest"
+arduino_test.device_library_version   # e.g. "0.2.2"
+```
+
+How they are attached to the pytest report is considered separately.
 
 ---
 
@@ -161,27 +177,50 @@ ArduTestCase(
 
 ### 6.2 Test result
 
+A test result holds the raw protocol events plus a few derived views.
+
 ```python
 ArduTestResult(
     name: str,
     status: Literal["passed", "failed", "skipped", "error"],
-    failures: list[ArduTestFailure],
-    logs: list[str],
-    metrics: dict[str, int | float],
-    artifacts: list[ArduTestArtifact],
-    duration: float,
+    events: list[ArduTestEvent],   # raw LOG / METRIC / ARTIFACT_* / FAIL events
     skip_reason: str | None,
+    duration: float | None,        # host-measured wall-clock seconds for RUN..RESULT
+)
+```
+
+`duration` is measured on the host as the wall-clock time between sending `RUN` and receiving `RESULT`, so it includes serial round-trip latency and is an approximation rather than a device-measured test time. It is `None` for skipped tests.
+
+The following are exposed as derived properties over `events`:
+
+- `logs -> list[str]`
+- `metrics -> dict[str, list[int | float | str]]` (values per metric name, in order)
+- `artifacts -> dict[str, str]` (text artifacts only: filename -> text)
+- `artifact_files -> list[ArduTestArtifact]` (text and binary)
+
+Individual events are:
+
+```python
+ArduTestEvent(
+    kind: str,                 # "LOG" | "METRIC" | "ARTIFACT_TEXT" | "ARTIFACT_BINARY" | "FAIL"
+    test_name: str | None,
+    message: str,
+    content_type: str | None,  # set for ARTIFACT_* events
+    path: str | None,          # saved file path for ARTIFACT_* events (when an artifact dir is set)
 )
 ```
 
 ### 6.3 Artifact
 
+`artifact_files` returns saved artifacts (both text and binary) with their content type and on-disk path.
+
 ```python
 ArduTestArtifact(
-    test_name: str,
+    test_name: str | None,
     filename: str,
     content_type: str,
-    path: Path,
+    binary: bool,
+    path: str | None,   # None when no artifact directory is configured
 )
 ```
 
@@ -195,7 +234,7 @@ ArduTestArtifact(
 1. pytest fixture setup
 2. arduino-cli build / upload follows the existing autouse fixtures
 3. Establish dut / serial connection
-4. protocol HELLO
+4. protocol HELLO (verify the device protocol version; abort on mismatch)
 5. Retrieve test metadata with LIST
 6. Evaluate capability / config
 7. Send config to the device
@@ -240,9 +279,8 @@ In the initial implementation, when multiple ArduTest tests are run within a sin
 On failure, `arduino_test.run()` includes a summary in the pytest failure message containing the following.
 
 - The test name of the failed / error
-- The file / line / expression of the assertion failure
-- The code / message of the protocol error
-- The number of skipped tests
+- The `FAIL` events (file / line / expression of the assertion failure)
+- The `ERROR` events (protocol error message)
 
 ### 8.3 Splitting into pytest items
 
@@ -394,11 +432,11 @@ Whether to display them in pytest's `-s` or verbose mode may be made an option s
 
 `METRIC` events are saved per test name.
 
-When the same metric name is sent multiple times, whether it is held as a list or only the last value is retained is left undecided in the initial implementation.
+When the same metric name is sent multiple times, all values are kept as a list in arrival order (`metrics[name] -> list`). A value that parses as an integer or float is converted; any other value is kept as a string rather than being treated as an error.
 
 ### 11.3 artifacts
 
-`ARTIFACT_TEXT` / `ARTIFACT_BINARY` are saved as files. `ARTIFACT_TEXT` is saved as UTF-8 text, and `ARTIFACT_BINARY` saves the payload bytes as-is without decoding.
+`ARTIFACT_TEXT` / `ARTIFACT_BINARY` are saved as files. `ARTIFACT_TEXT` is saved as UTF-8 text, and `ARTIFACT_BINARY` saves the payload bytes as-is without decoding. Both kinds are listed by `result.artifact_files` (and `arduino_test.artifact_files`) with their filename, content type, `binary` flag, and saved path; the `artifacts` dict exposes the text artifacts as `filename -> text`.
 
 The destination root can be specified with a pytest option.
 
@@ -450,17 +488,13 @@ The following are treated as protocol errors.
 - `RESULT` for a test that is not running
 - No `RESULT` arrives by the timeout after `RUN`
 
-A protocol error is treated as a pytest error, and a reset is attempted if possible.
+A protocol error is raised as an `ArduTestError` (a `RuntimeError`), which pytest surfaces as a test error.
 
 ### 12.3 reset
 
-`arduino_test.reset()` should be able to execute in the following order.
+`arduino_test.reset()` sends the protocol `RESET_STATE` command. The device clears its current test / failure state and leaves protocol mode, and the host discards its cached test list so the next `run()` / `list_tests()` re-synchronizes from `HELLO`.
 
-1. protocol `RESET_STATE`
-2. serial / board reset if available
-3. re-synchronization if necessary
-
-How far this can be implemented depends on the existing `pytest-embedded` / serial layer.
+A serial / board (physical) reset is not performed today; it remains a possible future extension that would depend on the existing `pytest-embedded` / serial layer.
 
 ---
 
@@ -485,30 +519,23 @@ The options use names that do not conflict with the existing `arduino-cli` optio
 
 ---
 
-## 14. Proposed Implementation Modules
+## 14. Implementation Modules
 
 ```text
 src/pytest_embedded_arduino_cli/
   ardutest.py
-  ardutest_protocol.py
 ```
 
-### 14.1 `ardutest_protocol.py`
+`ardutest.py` contains all of the ArduTest host logic in a single module:
 
-- Command generation
-- event parser
-- payload reader
-- protocol error definitions
-
-### 14.2 `ardutest.py`
-
-- The substance of the `arduino_test` fixture
-- metadata / result dataclasses
+- `ArduTestSession` (the substance of the `arduino_test` fixture)
+- metadata / result / artifact dataclasses (`ArduTestCase`, `ArduTestResult`, `ArduTestEvent`, `ArduTestArtifact`)
+- protocol command generation, event parsing, and payload reading
 - capability / config evaluation
-- run lifecycle
-- artifact saving
+- run lifecycle and `reset()`
+- artifact saving and filename validation
 
-`plugin.py` holds only the fixture registration and option registration, and the detailed logic is separated into the modules above.
+`plugin.py` holds only the fixture registration and option registration; the detailed logic lives in `ardutest.py`. Splitting the protocol layer into a separate module is not currently necessary at this size and is not done.
 
 ---
 
@@ -540,8 +567,7 @@ Real-hardware examples will be added under `examples/` at a later stage.
 
 ## 16. Open Issues
 
-- Whether multiple values with the same metric name should be a list or the last value
-- The default value of the artifact root
-- Whether a protocol error should be expressed as a pytest error or a failure
 - Whether the pytest result should be pass or skip when `arduino_test.run()` results in only skipped
 - Whether to implement pytest item splitting in the future
+- Whether to expose `LOG` output via a `-s` / verbose option
+- Whether to add a device-measured (rather than host-measured) test duration, which would require a protocol extension
