@@ -8,8 +8,8 @@ ArduTest is an Arduino-side library. The sketch declares it in `sketch.yaml` thr
 
 This directory keeps the examples intentionally small:
 
-- `ardutest_basic`: minimal `TEST_CASE` usage with `arduino_test.run()`
-- `ardutest_metadata`: a compact example of requirements, config, logs, metrics, and a text artifact
+- `ardutest_basic`: minimal `TEST_CASE` usage with `arduino_test.run()`, plus `arduino_test.reset()` and the negotiated `device_protocol_version` / `device_library`
+- `ardutest_metadata`: a compact example of requirements, config, logs, metrics, and a text artifact, plus `result.duration` and the unified `result.artifact_files` accessor
 
 For detailed protocol/API coverage and artifact-saving integration tests, see the ArduTest test suite:
 
