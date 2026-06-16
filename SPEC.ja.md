@@ -1,5 +1,7 @@
 # pytest-embedded-arduino-cli 仕様書
 
+[English](SPEC.md)
+
 ## 1. 文書の目的
 
 本書は、新規 Python パッケージ / pytest plugin `pytest-embedded-arduino-cli` の要件を整理するための仕様書である。

@@ -1,5 +1,7 @@
 # 12_peer_host_core
 
+[English](README.md)
+
 host Arduino core で `peers` fixture を使う最小サンプルです。
 
 このサンプルでは、primary DUT と peer DUT の間で通信は行いません。

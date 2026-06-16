@@ -1,5 +1,7 @@
 # 03_dut_input
 
+[English](README.md)
+
 このサンプルは、`dut` 経由で実行時にデバイスへ値を渡す方法を示します。
 
 - デフォルト profile は `esp32` です

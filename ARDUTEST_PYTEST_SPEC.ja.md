@@ -1,5 +1,7 @@
 # ArduTest pytest 連携仕様（ドラフト）
 
+[English](ARDUTEST_PYTEST_SPEC.md)
+
 ## 1. 概要
 
 本仕様は、`pytest-embedded-arduino-cli` が提供する `arduino_test` fixture の要件を定義する。

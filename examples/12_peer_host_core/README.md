@@ -1,5 +1,7 @@
 # 12_peer_host_core
 
+[日本語版 (Japanese)](README.ja.md)
+
 This sample demonstrates the `peers` fixture with a host Arduino core.
 
 It intentionally does not make the primary DUT and peer DUT communicate with each other.

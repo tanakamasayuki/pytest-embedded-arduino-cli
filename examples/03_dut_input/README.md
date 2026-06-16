@@ -1,5 +1,7 @@
 # 03_dut_input
 
+[日本語版 (Japanese)](README.ja.md)
+
 This sample demonstrates passing values to the device at runtime through `dut`.
 
 - The default profile is `esp32`

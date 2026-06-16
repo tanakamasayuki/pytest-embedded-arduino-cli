@@ -1,5 +1,7 @@
 # 08_arduino_ide_project
 
+[日本語版 (Japanese)](README.ja.md)
+
 This example shows a project layout for a sketch that can still be opened directly in Arduino IDE.
 
 - The application code stays in a regular Arduino sketch directory

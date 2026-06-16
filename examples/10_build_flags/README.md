@@ -1,5 +1,7 @@
 # 10_build_flags
 
+[日本語版 (Japanese)](README.ja.md)
+
 This sample demonstrates value-less compile-time defines through `[flags]` in `build_config.toml`.
 
 ```toml

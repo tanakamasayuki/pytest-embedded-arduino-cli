@@ -1,5 +1,7 @@
 # 07_arduino_library_project
 
+[日本語版 (Japanese)](README.ja.md)
+
 This example shows a practical Arduino library project layout.
 
 - The library source lives at the project root

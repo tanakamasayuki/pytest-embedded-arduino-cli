@@ -1,5 +1,7 @@
 # demo_add_library
 
+[日本語版 (Japanese)](README.ja.md)
+
 This is a small Arduino library project used as a realistic test layout example.
 
 Project root:

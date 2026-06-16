@@ -1,5 +1,7 @@
 # 01_basic
 
+[日本語版 (Japanese)](README.ja.md)
+
 This is the smallest sample to try first.
 
 - The default profile is `esp32`

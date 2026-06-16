@@ -1,5 +1,7 @@
 # 10_build_flags
 
+[English](README.md)
+
 このサンプルは、`build_config.toml` の `[flags]` で値なし compile-time define を渡す方法を示します。
 
 ```toml

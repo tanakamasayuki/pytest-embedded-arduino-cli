@@ -1,5 +1,7 @@
 # 08_arduino_ide_project
 
+[English](README.md)
+
 この例は、Arduino IDE でそのまま開ける sketch プロジェクトに近い構成を示します。
 
 - テスト対象コードは通常の Arduino sketch ディレクトリに置きます

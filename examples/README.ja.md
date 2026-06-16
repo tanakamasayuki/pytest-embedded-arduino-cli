@@ -1,5 +1,7 @@
 # examples
 
+[English](README.md)
+
 `examples/` は、この plugin の使い方を確認するためのサンプル集です。
 
 `uv run pytest` は `pyproject.toml` の `testpaths = ["tests"]` に従ってライブラリ自身のテストだけを実行します。

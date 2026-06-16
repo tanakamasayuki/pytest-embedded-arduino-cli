@@ -1,5 +1,7 @@
 # 02_env_define
 
+[English](README.md)
+
 このサンプルは、環境変数から compile-time define を渡す方法を示します。
 
 - デフォルト profile は `esp32` です

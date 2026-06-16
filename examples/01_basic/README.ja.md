@@ -1,5 +1,7 @@
 # 01_basic
 
+[English](README.md)
+
 最初に試すための最小サンプルです。
 
 - デフォルト profile は `esp32` です

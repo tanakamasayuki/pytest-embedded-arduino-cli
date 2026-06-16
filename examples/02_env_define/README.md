@@ -1,5 +1,7 @@
 # 02_env_define
 
+[日本語版 (Japanese)](README.ja.md)
+
 This sample demonstrates compile-time defines loaded from environment variables.
 
 - The default profile is `esp32`
