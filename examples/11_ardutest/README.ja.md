@@ -8,8 +8,8 @@ ArduTest は Arduino 側ライブラリです。sketch は `sketch.yaml` の `li
 
 このディレクトリの例は意図的に最小限にしています。
 
-- `ardutest_basic`: 最小の `TEST_CASE` と `arduino_test.run()` の例
-- `ardutest_metadata`: requirement、config、log、metric、text artifact の短い例
+- `ardutest_basic`: 最小の `TEST_CASE` と `arduino_test.run()` の例。あわせて `arduino_test.reset()` と、HELLO で取得した `device_protocol_version` / `device_library` も示します
+- `ardutest_metadata`: requirement、config、log、metric、text artifact の短い例。あわせて `result.duration` と統合アクセサ `result.artifact_files` も示します
 
 protocol / API の詳細な検証や artifact 保存の integration test は、ArduTest 側の test suite を参照してください。
 

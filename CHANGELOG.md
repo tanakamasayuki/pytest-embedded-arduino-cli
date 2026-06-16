@@ -1,6 +1,14 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Add `arduino_test.reset()`, which sends the protocol `RESET_STATE` command, discards the cached test list, and re-synchronizes with `HELLO` on the next run.
+- (JA) protocol の `RESET_STATE` を送信し、キャッシュした test 一覧を破棄して次回実行時に `HELLO` で再同期する `arduino_test.reset()` を追加。
+- (EN) Add `ArduTestResult.duration`, a host-measured wall-clock time from `RUN` to `RESULT` (approximate; includes serial round-trip latency; `None` for skipped tests).
+- (JA) `RUN` から `RESULT` までを host 側の壁時計時間で計測する `ArduTestResult.duration` を追加（概算で serial 往復遅延を含む。skip 時は `None`）。
+- (EN) Add `ArduTestResult.artifact_files` and `arduino_test.artifact_files`, a unified accessor that lists both text and binary artifacts with filename, content type, `binary` flag, and saved path.
+- (JA) text / binary 両方の artifact を、ファイル名・content type・`binary` flag・保存パス付きで列挙する統合アクセサ `ArduTestResult.artifact_files` / `arduino_test.artifact_files` を追加。
+- (EN) Verify the device protocol version during `HELLO` and abort with an error on mismatch; record `device_protocol_version`, `device_library`, and `device_library_version` on the session.
+- (JA) `HELLO` 時に device の protocol version を検証し、不一致ならエラーで中止。session に `device_protocol_version` / `device_library` / `device_library_version` を記録するように変更。
 
 ## 1.1.6
 - (EN) Sort per-profile `tests` entries in `state.json` by pytest nodeid when saving.
