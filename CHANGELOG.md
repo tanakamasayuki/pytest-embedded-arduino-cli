@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.1.7
 - (EN) Add `arduino_test.reset()`, which sends the protocol `RESET_STATE` command, discards the cached test list, and re-synchronizes with `HELLO` on the next run.
 - (JA) protocol の `RESET_STATE` を送信し、キャッシュした test 一覧を破棄して次回実行時に `HELLO` で再同期する `arduino_test.reset()` を追加。
 - (EN) Add `ArduTestResult.duration`, a host-measured wall-clock time from `RUN` to `RESULT` (approximate; includes serial round-trip latency; `None` for skipped tests).
