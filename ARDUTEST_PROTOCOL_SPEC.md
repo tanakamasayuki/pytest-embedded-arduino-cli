@@ -13,7 +13,7 @@ The goals of this specification are as follows.
 - Allow logs, metrics, artifacts, assertion failures, and final results to be collected mechanically
 - Keep the format simple enough to be implementable even on an Arduino Uno
 
-This specification is a draft and may not match the existing provisional implementation. Implementations should be updated to give priority to this specification.
+This specification describes the protocol as implemented by the shipped [ArduTest](https://github.com/tanakamasayuki/ArduTest) Arduino library (the device side) and the `arduino_test` fixture in this package (the host side). The ArduTest library is the canonical implementation of the device side; when the device behavior and this document disagree, the library is authoritative.
 
 ---
 
@@ -68,7 +68,7 @@ Example:
 
 ```text
 AT > HELLO 1
-AT < HELLO 1 ArduTest 0.1.0
+AT < HELLO 1 ArduTest 0.2.2
 ```
 
 ### 4.2 field encoding
@@ -98,7 +98,7 @@ The interpretation of the payload is defined per message type. `LOG`, `ERROR`, `
 
 - Integers use decimal notation
 - Floating-point numbers use decimal notation equivalent to `Stream.print(value, digits)`
-- The pytest side turns a metric value that cannot be interpreted as an integer or a float into a protocol error
+- The device sends only numeric metric values. On the host side, a metric value is converted to an integer or a float when possible, and otherwise kept as a string (it is not treated as a protocol error)
 
 ---
 
@@ -117,7 +117,7 @@ AT > HELLO 1
 The device returns the protocol version it uses, the library name, and the library version.
 
 ```text
-AT < HELLO 1 ArduTest 0.1.0
+AT < HELLO 1 ArduTest 0.2.2
 ```
 
 If the host receives a protocol version it does not support, it aborts the tests.
@@ -235,7 +235,7 @@ Initializes the execution state of ArduTest.
 AT > RESET_STATE
 ```
 
-Whether config is retained or discarded is an open issue. In the initial proposal, config is retained, and `CLEAR_CONFIG` is used when discarding is required.
+The device clears the current test and failure state and leaves protocol mode. It produces no reply. Config is retained; use `CLEAR_CONFIG` when config also needs to be discarded. Because the device leaves protocol mode, the host re-synchronizes with `HELLO` on the next operation. The host exposes this as `arduino_test.reset()`.
 
 ---
 
@@ -352,7 +352,11 @@ AT < FAIL <test-name> <file> <line> <length>\n
 <payload bytes>
 ```
 
-The payload contains one of the following: the failed expression, the comparison content, or a supplementary message.
+Both plain assertion failures and equality assertion failures use the same `FAIL` event (there is no separate `FAIL_EQ`). The payload is one of:
+
+- a failed expression (e.g. from `ASSERT_TRUE` / `ASSERT_FALSE` / `ASSERT_NE`)
+- an equality comparison from `ASSERT_EQ`, formatted as `<expectedExpr>=<expected> <actualExpr>=<actual>`
+- a supplementary message
 
 ### 8.13 RESULT
 
@@ -379,14 +383,15 @@ AT < ERROR <code> <length>\n
 <payload bytes>
 ```
 
-Representative values of `<code>`:
+The payload is a short human-readable message whose meaning depends on the code. The codes emitted by the device are:
 
-- `unknown_command`
-- `unknown_test`
-- `invalid_state`
-- `invalid_config`
-- `duplicate_test`
-- `internal_error`
+| `<code>` | payload message | meaning |
+| --- | --- | --- |
+| `unknown_command` | the offending line, or `line_too_long` | an unrecognized command, or a command line longer than the receive buffer |
+| `unknown_test` | the test name | `RUN` referenced a test that is not registered |
+| `duplicate_test` | the duplicate test name | two registered tests share the same name (reported during `LIST`) |
+| `invalid_config` | `missing_length` / `invalid_name` / `invalid_length` / `value_too_large` / `payload_timeout` / `store_full` | `SET_CONFIG` was malformed or the config store limit was exceeded |
+| `internal_error` | (implementation-defined) | fallback when no specific code applies |
 
 ---
 
@@ -419,7 +424,7 @@ TEST_CASE_WITH_REQUIREMENTS(test_wifi, "network", "ssid") {
 }
 ```
 
-In the initial proposal, Proposal A is the preferred candidate because of its implementation simplicity and the ease of handling C++ macros.
+Proposal A was adopted. The ArduTest library ships `ARDUTEST_REQUIRE(test, "name")` and `ARDUTEST_REQUIRE_CONFIG(test, "name")`, and the device reports them as `REQUIRE` / `REQUIRE_CONFIG` events during `LIST`.
 
 ### 9.3 Runtime requirement
 
@@ -559,10 +564,7 @@ After a communication interruption, timeout, or protocol error, the host resets 
 
 ## 15. Open Issues
 
-- Whether to use Proposal A or Proposal B for the metadata registration API
-- Whether `RESET_STATE` retains or discards config
-- Whether `READY` should be a required event or an optional event
 - Whether to allow `skipped` as a device result
 - Whether to fix the payload character encoding to UTF-8 or to define it only as binary-safe
-- Whether to include artifact split transmission from the start
+- Whether to include artifact split transmission
 - Whether to include metric units and tags in the protocol

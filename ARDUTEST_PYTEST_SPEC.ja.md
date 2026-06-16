@@ -128,22 +128,38 @@ def test_measurement(arduino_test):
 
 ### 5.6 `arduino_test.reset()`
 
-device reset または protocol 状態 reset を行う。
+`RESET_STATE` を送ることで device 側の ArduTest protocol 状態を reset する。
 
-初期実装では、物理 reset の有無は `pytest-embedded-arduino-cli` の既存 reset 能力に従う。protocol のみの reset が可能な場合は `RESET_STATE` を送る。
+```python
+def test_board(arduino_test):
+    arduino_test.run("test_a")
+    arduino_test.reset()
+    arduino_test.run("test_b")
+```
+
+device は現在のテスト状態 / failure 状態をクリアして protocol mode を抜けるため、キャッシュされたテスト一覧は破棄され、次の `run()` / `list_tests()` で初期同期をやり直す。`RESET_STATE` は応答を返さないため、`reset()` は device から読み取りを行わない。物理的なボード reset は行わない。これは `pytest-embedded` / serial 層の既存 reset 能力の上に構築する、将来的な拡張の可能性として残されている。
 
 ### 5.7 収集データ
 
 実行後、以下を参照できる。
 
 ```python
-arduino_test.results
-arduino_test.logs
-arduino_test.metrics
-arduino_test.artifacts
+arduino_test.results        # list[ArduTestResult]
+arduino_test.logs           # dict[test_name, list[str]]
+arduino_test.metrics        # dict[test_name, dict[metric_name, list[value]]]
+arduino_test.artifacts      # dict[test_name, dict[filename, text]]  (text artifacts)
+arduino_test.artifact_files # dict[test_name, list[ArduTestArtifact]]  (text + binary)
 ```
 
-初期実装では、これらは fixture インスタンス上の属性として保持する。pytest report への添付方式は別途検討する。
+これらは fixture インスタンス（`ArduTestSession`）上の属性として保持する。device の `HELLO` 応答の後、ネゴシエートした protocol version と device のライブラリ名 / version も記録される。
+
+```python
+arduino_test.device_protocol_version  # 例: "1"
+arduino_test.device_library           # 例: "ArduTest"
+arduino_test.device_library_version   # 例: "0.2.2"
+```
+
+pytest report への添付方式は別途検討する。
 
 ---
 
@@ -161,27 +177,50 @@ ArduTestCase(
 
 ### 6.2 Test result
 
+test result は、生の protocol event と、そこから導出されるいくつかのビューを保持する。
+
 ```python
 ArduTestResult(
     name: str,
     status: Literal["passed", "failed", "skipped", "error"],
-    failures: list[ArduTestFailure],
-    logs: list[str],
-    metrics: dict[str, int | float],
-    artifacts: list[ArduTestArtifact],
-    duration: float,
+    events: list[ArduTestEvent],   # 生の LOG / METRIC / ARTIFACT_* / FAIL event
     skip_reason: str | None,
+    duration: float | None,        # RUN..RESULT の host 計測 wall-clock 秒
+)
+```
+
+`duration` は `RUN` 送信から `RESULT` 受信までの wall-clock 時間として host 側で計測するため、serial の往復遅延を含み、device 計測のテスト時間ではなく近似値である。skipped のテストでは `None` となる。
+
+以下は `events` から導出される property として公開する。
+
+- `logs -> list[str]`
+- `metrics -> dict[str, list[int | float | str]]`（metric 名ごとの値を順序どおりに保持）
+- `artifacts -> dict[str, str]`（text artifact のみ: filename -> text）
+- `artifact_files -> list[ArduTestArtifact]`（text と binary）
+
+個々の event は以下のとおり。
+
+```python
+ArduTestEvent(
+    kind: str,                 # "LOG" | "METRIC" | "ARTIFACT_TEXT" | "ARTIFACT_BINARY" | "FAIL"
+    test_name: str | None,
+    message: str,
+    content_type: str | None,  # ARTIFACT_* event で設定される
+    path: str | None,          # ARTIFACT_* event の保存先 file path（artifact dir が設定されている場合）
 )
 ```
 
 ### 6.3 Artifact
 
+`artifact_files` は保存された artifact（text と binary の両方）を、その content type および on-disk path とともに返す。
+
 ```python
 ArduTestArtifact(
-    test_name: str,
+    test_name: str | None,
     filename: str,
     content_type: str,
-    path: Path,
+    binary: bool,
+    path: str | None,   # artifact directory が設定されていない場合は None
 )
 ```
 
@@ -195,7 +234,7 @@ ArduTestArtifact(
 1. pytest fixture setup
 2. arduino-cli build / upload は既存 autouse fixture に従う
 3. dut / serial 接続を確立
-4. protocol HELLO
+4. protocol HELLO（device の protocol version を検証し、不一致なら中止する）
 5. LIST で test metadata を取得
 6. capability / config を評価
 7. device へ config を送信
@@ -240,9 +279,8 @@ ArduTestArtifact(
 `arduino_test.run()` は、失敗時に以下を含む summary を pytest failure message に含める。
 
 - failed / error の test name
-- assertion failure の file / line / expression
-- protocol error の code / message
-- skipped の件数
+- `FAIL` event（assertion failure の file / line / expression）
+- `ERROR` event（protocol error message）
 
 ### 8.3 pytest item 分割
 
@@ -394,11 +432,11 @@ pytest の `-s` や verbose mode で表示するかどうかは別途 option 化
 
 `METRIC` event は test name ごとに保存する。
 
-同じ metric name が複数回送られた場合、初期実装では list として保持するか、最後の値のみ保持するかを未決事項とする。
+同じ metric name の値はすべて、到着順に list として保持する（`metrics[name] -> list`）。整数または float として解釈できる値は変換し、それ以外の値はエラーとせず文字列のまま保持する。
 
 ### 11.3 artifacts
 
-`ARTIFACT_TEXT` / `ARTIFACT_BINARY` はファイルとして保存する。`ARTIFACT_TEXT` は UTF-8 text として保存し、`ARTIFACT_BINARY` は payload bytes を decode せずそのまま保存する。
+`ARTIFACT_TEXT` / `ARTIFACT_BINARY` はファイルとして保存する。`ARTIFACT_TEXT` は UTF-8 text として保存し、`ARTIFACT_BINARY` は payload bytes を decode せずそのまま保存する。どちらの種類も `result.artifact_files`（および `arduino_test.artifact_files`）に、filename、content type、`binary` フラグ、保存先 path とともに列挙される。`artifacts` dict は text artifact を `filename -> text` として公開する。
 
 保存先 root は pytest option で指定できる。
 
@@ -450,17 +488,13 @@ timeout は host 側で判定する。
 - 実行中ではない test の `RESULT`
 - `RUN` 後に timeout まで `RESULT` が来ない
 
-protocol error は pytest error とし、可能であれば reset を試みる。
+protocol error は `ArduTestError`（`RuntimeError` のサブクラス）として送出され、pytest はこれを test error として扱う。
 
 ### 12.3 reset
 
-`arduino_test.reset()` は以下の順で実行できるものとする。
+`arduino_test.reset()` は protocol の `RESET_STATE` command を送る。device は現在のテスト状態 / failure 状態をクリアして protocol mode を抜け、host はキャッシュされたテスト一覧を破棄するため、次の `run()` / `list_tests()` は `HELLO` から再同期する。
 
-1. protocol `RESET_STATE`
-2. 利用可能なら serial / board reset
-3. 必要なら再同期
-
-どこまで実装できるかは既存の `pytest-embedded` / serial 層に依存する。
+serial / ボード（物理）reset は現状行わない。これは既存の `pytest-embedded` / serial 層に依存する、将来的な拡張の可能性として残されている。
 
 ---
 
@@ -490,25 +524,18 @@ option は既存の `arduino-cli` option と衝突しない名前にする。
 ```text
 src/pytest_embedded_arduino_cli/
   ardutest.py
-  ardutest_protocol.py
 ```
 
-### 14.1 `ardutest_protocol.py`
+`ardutest.py` は ArduTest の host ロジックをすべて単一モジュールに含める。
 
-- command の生成
-- event parser
-- payload reader
-- protocol error 定義
-
-### 14.2 `ardutest.py`
-
-- `arduino_test` fixture の実体
-- metadata / result dataclass
+- `ArduTestSession`（`arduino_test` fixture の実体）
+- metadata / result / artifact dataclass（`ArduTestCase`、`ArduTestResult`、`ArduTestEvent`、`ArduTestArtifact`）
+- protocol command の生成、event parser、payload reader
 - capability / config 評価
-- run lifecycle
-- artifact 保存
+- run lifecycle と `reset()`
+- artifact 保存と filename 検証
 
-`plugin.py` には fixture 登録と option 登録だけを置き、詳細ロジックは上記モジュールへ分離する。
+`plugin.py` には fixture 登録と option 登録だけを置き、詳細ロジックは `ardutest.py` に置く。この規模では protocol 層を別モジュールに分離する必要は現状なく、行っていない。
 
 ---
 
@@ -540,8 +567,7 @@ src/pytest_embedded_arduino_cli/
 
 ## 16. 未決事項
 
-- metrics の同名複数値を list にするか最後の値にするか
-- artifact root の既定値
-- protocol error を pytest error と failure のどちらで表現するか
 - `arduino_test.run()` で skipped だけだった場合の pytest result を pass にするか skip にするか
 - pytest item 分割を将来実装するか
+- `LOG` 出力を `-s` / verbose option 経由で公開するか
+- device 計測（host 計測ではない）の test duration を追加するか。これは protocol 拡張を要する
