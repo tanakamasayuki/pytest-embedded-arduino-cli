@@ -792,9 +792,9 @@ pytest tests/foo --save-state --save-state-dir .test-cache
 - `sketch path` や `fqbn` のような override option は必須要件に含めない
 - ログ出力制御は pytest 標準の verbosity に従わせ、専用 option を増やさない
 
-## 14. テスト要件
+## 15. テスト要件
 
-### 14.1 単体テスト
+### 15.1 単体テスト
 
 少なくとも次を検証する。
 
@@ -822,7 +822,7 @@ pytest tests/foo --save-state --save-state-dir .test-cache
 - peer DUT の profile 未決定 / port 未解決による skip
 - `peers` fixture を使わないテストでは peer DUT を準備しないこと
 
-### 14.2 最小統合テスト
+### 15.2 最小統合テスト
 
 少なくとも次を検証する。
 
@@ -830,14 +830,14 @@ pytest tests/foo --save-state --save-state-dir .test-cache
 - `pytest --help` または plugin manager 上で option が見えること
 - fixture が解決できること
 
-### 14.3 テスト方針
+### 15.3 テスト方針
 
 - 実機依存を避ける
 - `subprocess.run` はモック可能な設計にする
 - Arduino CLI 実行の成否よりも、まずは責務分離とインターフェース安定性を検証する
 - verbosity 連携の検証では、標準出力そのものではなく plugin 内のログ分岐を確認してよい
 
-## 15. examples 要件
+## 16. examples 要件
 
 `examples/` には最小利用例を含める。
 
@@ -864,7 +864,7 @@ peer DUT 向けの example では、次を示すこと。
 - `--peer-profile` / `--peer-port` による peer DUT 個別指定
 - `default_profile` を持つ peer は無指定でも動作し、持たない peer は明示 profile 指定時だけ動作すること
 
-## 16. README 要件
+## 17. README 要件
 
 README には少なくとも次を含める。
 
@@ -883,26 +883,26 @@ README には少なくとも次を含める。
 - 設計方針
 - 今後の拡張候補
 
-## 17. 非機能要件
+## 18. 非機能要件
 
-### 17.1 保守性
+### 18.1 保守性
 
 - モジュール境界が明確であること
 - subprocess 実行とコマンド生成が分離されていること
 - board 固有処理を混在させないこと
 
-### 17.2 拡張性
+### 18.2 拡張性
 
 - 将来 service 層や strategy 層へ切り出しやすいこと
 - upload 実装を board family ごとに差し替えやすいこと
 - build property や artifact 解決ルールを追加しやすいこと
 
-### 17.3 可搬性
+### 18.3 可搬性
 
 - 少なくとも Linux / macOS を前提に不自然な前提を持たないこと
 - シリアルポートや CLI パスの扱いで特定環境に強く依存しすぎないこと
 
-## 18. 参考実装から取り込む観点
+## 19. 参考実装から取り込む観点
 
 参照対象:
 
@@ -924,7 +924,7 @@ README には少なくとも次を含める。
 - `pytest-embedded-arduino` 由来の制約を前提とした option 設計
 - conftest にすべて集約する構成
 
-## 19. API / 実装イメージ
+## 20. API / 実装イメージ
 
 実装詳細は後続設計で調整しうるが、次のような薄い構造を想定する。
 
