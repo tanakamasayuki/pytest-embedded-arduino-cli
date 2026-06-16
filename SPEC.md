@@ -792,9 +792,9 @@ The criteria for determining whether test execution was performed on the real bo
 - Override options such as `sketch path` or `fqbn` are not included in the mandatory requirements
 - Log output control follows pytest's standard verbosity, and no dedicated options are added
 
-## 14. Test Requirements
+## 15. Test Requirements
 
-### 14.1 Unit Tests
+### 15.1 Unit Tests
 
 At least the following are verified.
 
@@ -822,7 +822,7 @@ At least the following are verified.
 - Skip due to undetermined profile / unresolved port of peer DUTs
 - Not preparing peer DUTs in tests that do not use the `peers` fixture
 
-### 14.2 Minimal Integration Tests
+### 15.2 Minimal Integration Tests
 
 At least the following are verified.
 
@@ -830,14 +830,14 @@ At least the following are verified.
 - Options being visible in `pytest --help` or on the plugin manager
 - Fixtures being resolvable
 
-### 14.3 Test Policy
+### 15.3 Test Policy
 
 - Avoid real-board dependency
 - Design `subprocess.run` to be mockable
 - Rather than the success or failure of Arduino CLI execution, first verify the separation of responsibilities and interface stability
 - In verifying verbosity integration, it is acceptable to check the log branching within the plugin rather than the standard output itself
 
-## 15. examples Requirements
+## 16. examples Requirements
 
 `examples/` should contain minimal usage examples.
 
@@ -864,7 +864,7 @@ For examples for peer DUTs, show the following.
 - Individual specification of peer DUTs via `--peer-profile` / `--peer-port`
 - That a peer with `default_profile` operates even without specification, and a peer without it operates only when a profile is explicitly specified
 
-## 16. README Requirements
+## 17. README Requirements
 
 The README should contain at least the following.
 
@@ -883,26 +883,26 @@ The README should contain at least the following.
 - Design policy
 - Candidates for future expansion
 
-## 17. Non-Functional Requirements
+## 18. Non-Functional Requirements
 
-### 17.1 Maintainability
+### 18.1 Maintainability
 
 - Module boundaries are clear
 - subprocess execution and command generation are separated
 - Board-specific processing is not mixed in
 
-### 17.2 Extensibility
+### 18.2 Extensibility
 
 - It is easy to carve out into a service layer or strategy layer in the future
 - The upload implementation is easy to swap per board family
 - It is easy to add build properties or artifact resolution rules
 
-### 17.3 Portability
+### 18.3 Portability
 
 - At least, it does not have unnatural premises assuming Linux / macOS
 - It does not depend too strongly on a specific environment in the handling of serial ports or CLI paths
 
-## 18. Perspectives to Incorporate from Reference Implementations
+## 19. Perspectives to Incorporate from Reference Implementations
 
 Reference target:
 
@@ -924,7 +924,7 @@ On the other hand, the policy of not fixing them as-is is as follows.
 - Option design premised on constraints derived from `pytest-embedded-arduino`
 - A structure that consolidates everything into conftest
 
-## 19. API / Implementation Image
+## 20. API / Implementation Image
 
 The implementation details may be adjusted in subsequent design, but a thin structure like the following is assumed.
 
