@@ -1,5 +1,7 @@
 # 04_unity_basic
 
+[English](README.md)
+
 このサンプルは、ESP32 向けの最小 Unity テスト sketch を示します。
 
 - デフォルト profile は `esp32` です

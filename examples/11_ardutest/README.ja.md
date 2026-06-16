@@ -1,5 +1,7 @@
 # 11_ardutest
 
+[English](README.md)
+
 この例では、ArduTest Arduino ライブラリと experimental な `arduino_test` fixture の使い方を示します。
 
 ArduTest は Arduino 側ライブラリです。sketch は `sketch.yaml` の `libraries` で ArduTest を宣言し、Arduino 側 protocol 実装と pytest 側 fixture の互換性を保つために version を固定します。

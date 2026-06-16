@@ -1,5 +1,7 @@
 # 09_host_arduino_core
 
+[日本語版 (Japanese)](README.ja.md)
+
 This sample is intended for a board core that builds and runs Arduino sketches on the host machine.
 
 Target board core:

@@ -1,5 +1,7 @@
 # examples
 
+[日本語版 (Japanese)](README.ja.md)
+
 `examples/` contains runnable samples for this plugin.
 
 `uv run pytest` only runs the library's own test suite because `pyproject.toml` sets `testpaths = ["tests"]`.

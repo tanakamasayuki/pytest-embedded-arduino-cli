@@ -1,5 +1,7 @@
 # 05_nvs_persistent
 
+[English](README.md)
+
 このサンプルは、ESP32 の永続領域が default では消去されないことを示します。
 
 - デフォルト profile は `esp32` です

@@ -1,5 +1,7 @@
 # demo_add_library
 
+[English](README.md)
+
 これは、実プロジェクト向けのテスト構成例として用意した小さな Arduino ライブラリです。
 
 プロジェクトルート:

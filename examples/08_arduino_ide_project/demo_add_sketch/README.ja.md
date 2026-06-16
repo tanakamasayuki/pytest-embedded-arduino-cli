@@ -1,5 +1,7 @@
 # demo_add_sketch
 
+[English](README.md)
+
 これは、Arduino IDE でそのまま開ける sketch プロジェクトを前提にした実プロジェクト例です。
 
 プロジェクトルート:

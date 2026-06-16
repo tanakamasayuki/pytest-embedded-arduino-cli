@@ -1,5 +1,7 @@
 # 05_nvs_persistent
 
+[日本語版 (Japanese)](README.ja.md)
+
 This sample demonstrates that ESP32 persistent storage is not erased by default.
 
 - The default profile is `esp32`

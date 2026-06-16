@@ -1,5 +1,7 @@
 # 07_arduino_library_project
 
+[English](README.md)
+
 この例は、Arduino ライブラリの実プロジェクトに近い構成を示します。
 
 - ライブラリ本体はプロジェクトルートに置きます

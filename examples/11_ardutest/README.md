@@ -1,5 +1,7 @@
 # 11_ardutest
 
+[日本語版 (Japanese)](README.ja.md)
+
 This example demonstrates the experimental `arduino_test` fixture with the ArduTest Arduino library.
 
 ArduTest is an Arduino-side library. The sketch declares it in `sketch.yaml` through `libraries`, with a pinned version so the Arduino-side protocol implementation and the pytest-side fixture stay compatible.

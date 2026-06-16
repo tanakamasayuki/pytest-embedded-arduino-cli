@@ -1,5 +1,7 @@
 # 06_erase_flash
 
+[English](README.md)
+
 このサンプルは、`EraseFlash=all` によって ESP32 の upload 挙動がどう変わるかを示します。
 
 - デフォルト profile は `esp32` です

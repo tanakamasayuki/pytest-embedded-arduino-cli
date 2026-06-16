@@ -1,5 +1,7 @@
 # 09_host_arduino_core
 
+[English](README.md)
+
 このサンプルは、host machine 上で Arduino sketch をビルド・実行する board core を使う想定のサンプルです。
 
 対象 board core:

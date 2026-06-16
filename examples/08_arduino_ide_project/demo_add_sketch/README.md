@@ -1,5 +1,7 @@
 # demo_add_sketch
 
+[日本語版 (Japanese)](README.ja.md)
+
 This is a practical project example based on a sketch that can still be opened directly in Arduino IDE.
 
 Project root:

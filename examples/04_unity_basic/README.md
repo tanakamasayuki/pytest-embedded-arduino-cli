@@ -1,5 +1,7 @@
 # 04_unity_basic
 
+[日本語版 (Japanese)](README.ja.md)
+
 This sample demonstrates a minimal Unity-based test sketch for ESP32.
 
 - The default profile is `esp32`

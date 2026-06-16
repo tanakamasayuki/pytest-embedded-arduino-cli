@@ -1,5 +1,7 @@
 # ArduTest 通信プロトコル仕様（ドラフト）
 
+[English](ARDUTEST_PROTOCOL_SPEC.md)
+
 ## 1. 概要
 
 本仕様は、Arduino 側ライブラリ `ArduTest` と `pytest-embedded-arduino-cli` 側 fixture `arduino_test` が、`Stream` 互換の通信路を通じて実機テストを制御するための通信プロトコルを定義する。
