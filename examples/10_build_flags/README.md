@@ -27,3 +27,5 @@ Projects opt in by declaring the flags explicitly in `build_config.toml` when th
 
 Keep these flags small and deliberate.
 If a test flag switches to a substantially different code path, the test may no longer represent production behavior.
+
+Because this sample targets the `host` profile (where `build.extra_flags` is empty), the plugin automatically injects the flags through `build.extra_flags`. See the commented `build_property` line at the top of `build_flag_switch/build_config.toml` to pin it explicitly.

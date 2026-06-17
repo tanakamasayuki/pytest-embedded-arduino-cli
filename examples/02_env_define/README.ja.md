@@ -52,4 +52,6 @@ cp examples/.env.example .env
 
 コピーしたあとは、利用する環境に合わせて `.env` の値を書き換えてください。
 
+このサンプルは ESP32 向けなので、plugin は defines を `build.defines` で自動注入します（ESP32 では platform が値を入れている `build.extra_flags` を上書きするとビルドが壊れるため）。明示指定したい場合は `wifi_env_define/build_config.toml` 冒頭のコメント `build_property` 行を参照してください。
+
 実際の sketch は `wifi_env_define/` 配下にあります。

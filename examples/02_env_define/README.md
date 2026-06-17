@@ -52,4 +52,6 @@ cp examples/.env.example .env
 
 After copying, update the values in `.env` to match your environment.
 
+Because this sample targets ESP32, the plugin automatically injects the defines through `build.defines` (overwriting ESP32's platform-populated `build.extra_flags` would break the build). See the commented `build_property` line at the top of `wifi_env_define/build_config.toml` to pin it explicitly.
+
 The actual sketch lives under `wifi_env_define/`.

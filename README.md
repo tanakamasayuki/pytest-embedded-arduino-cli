@@ -333,6 +333,15 @@ This allows the test or sketch code to decide how to handle missing settings.
 The plugin does not add test flags such as `PYTEST_BUILD` automatically.
 Projects that need them should declare them explicitly under `[flags]`.
 
+The plugin injects these defines/flags through `arduino-cli compile --build-property <property>=...` and auto-selects the property: it uses `build.extra_flags` when the platform leaves it empty (host / AVR) and `build.defines` on ESP32 (where `build.extra_flags` is platform-populated, so overwriting it would break the build). You can pin the property explicitly to skip the detection probe (about one second faster):
+
+```toml
+build_property = "build.defines"        # all profiles
+
+[profiles.esp32]
+build_property = "build.defines"        # per-profile override
+```
+
 For command visibility, follow pytest's standard verbosity:
 
 - `-v` shows the `arduino-cli compile` / `arduino-cli upload` command line
