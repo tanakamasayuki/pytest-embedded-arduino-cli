@@ -27,3 +27,5 @@ uv run pytest examples/10_build_flags
 
 ただし、テスト用 flag で本番と大きく異なる code path を作ると、本番の動作を確認できなくなることがあります。
 この仕組みは、テスト用の小さな hook やログを有効にする程度に使うのが安全です。
+
+このサンプルは `host` profile 向け（`build.extra_flags` が空）なので、plugin は flag を `build.extra_flags` で自動注入します。明示指定したい場合は `build_flag_switch/build_config.toml` 冒頭のコメント `build_property` 行を参照してください。

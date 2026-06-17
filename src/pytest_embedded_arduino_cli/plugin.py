@@ -13,8 +13,10 @@ from .app import (
     ArduinoCliBuildConfig,
     SketchConfigError,
     UnsupportedProfileError,
+    detect_build_property,
     resolve_sketch_dir,
     resolve_test_path,
+    run_show_properties,
 )
 from .flasher import ArduinoCliUploadConfig
 from .serial import (
@@ -367,6 +369,18 @@ def _build_config_from_request(
         return None
 
 
+def _resolve_build_property(app: ArduinoCliBuildConfig) -> ArduinoCliBuildConfig:
+    """Auto-select the injection property for build_config.toml defines/flags.
+
+    Probes ``arduino-cli compile --show-properties`` only when there are flags
+    to inject and no explicit override was given. Runs at compile time only.
+    """
+    if not app.needs_build_property_detection():
+        return app
+    properties = run_show_properties(app.cli_path, app.sketch_dir, app.profile)
+    return app.with_build_property(detect_build_property(properties))
+
+
 @pytest.fixture(scope="module")
 def arduino_cli_app(request: pytest.FixtureRequest) -> ArduinoCliBuildConfig:
     try:
@@ -439,6 +453,8 @@ def arduino_cli_build(
     # Record profile for state cache
     if arduino_cli_app.profile:
         _set_current_profile(request.config, arduino_cli_app.profile)
+
+    arduino_cli_app = _resolve_build_property(arduino_cli_app)
 
     _log_command(
         request.config,
@@ -531,6 +547,7 @@ def _prepare_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
     for target in targets:
         app = target.app
         if _should_build(run_mode):
+            app = _resolve_build_property(app)
             _log_peer_command(
                 request.config,
                 peer=target.name,

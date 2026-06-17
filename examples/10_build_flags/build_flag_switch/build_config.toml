@@ -1,3 +1,11 @@
+# build_property: where the defines/flags below are injected, via
+#   `arduino-cli compile --build-property <property>=...`.
+# Normally auto-selected: ESP32 -> build.defines, others -> build.extra_flags.
+# Setting it explicitly skips the `--show-properties` probe (~1s faster).
+# 通常は自動選択（ESP32 は build.defines、それ以外は build.extra_flags）。
+# 明示指定すると --show-properties の検査を省けて約1秒速くなります。
+# build_property = "build.extra_flags"
+
 [flags]
 PYTEST_BUILD = true
 ENABLE_TEST_HOOKS = true

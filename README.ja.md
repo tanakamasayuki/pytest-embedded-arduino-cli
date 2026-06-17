@@ -334,6 +334,15 @@ uv run --env-file .env pytest tests/my_app --port=/dev/ttyACM0
 `PYTEST_BUILD` のようなテスト用 flag は plugin が自動では付与しません。
 必要な project が `build_config.toml` の `[flags]` で明示してください。
 
+これらの defines/flags は `arduino-cli compile --build-property <property>=...` で渡され、plugin が投入先プロパティを自動選択します。platform が空にしている host / AVR では `build.extra_flags`、ESP32 では `build.defines` を使います（ESP32 の `build.extra_flags` は platform が値を入れており、上書きするとビルドが壊れるため）。検出プローブを省いて約1秒速くしたい場合は、投入先を明示できます。
+
+```toml
+build_property = "build.defines"        # 全 profile 共通
+
+[profiles.esp32]
+build_property = "build.defines"        # profile 別の override
+```
+
 ## verbosity とログ
 
 コマンド表示には pytest 標準の verbosity を使います。

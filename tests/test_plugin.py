@@ -948,3 +948,172 @@ def test_set_optional_metadata_ignores_missing_pytest_metadata(monkeypatch: pyte
     config = DummyConfig(verbose=0, reporter=None)
 
     _set_optional_metadata(config)
+
+
+# --- build_config.toml build-property auto-selection (plugin layer) ---
+
+def _build_property_conftest(show_props_body: str) -> str:
+    return (
+        "import json\n"
+        "from pathlib import Path\n"
+        "import pytest_embedded_arduino_cli.plugin as plugin_module\n"
+        "from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig\n"
+        "from pytest_embedded_arduino_cli.flasher import ArduinoCliUploadConfig\n"
+        "\n\n"
+        "def _fake_show_properties(cli_path, sketch_dir, profile, **kwargs):\n"
+        f"{show_props_body}\n"
+        "\n\n"
+        "plugin_module.run_show_properties = _fake_show_properties\n"
+        "\n\n"
+        "def _fake_compile(self, *, check=True):\n"
+        "    Path(__file__).parent.joinpath('compile_cmd.json').write_text(json.dumps(self.build_command()))\n"
+        "    return None\n"
+        "\n\n"
+        "def _fake_upload(self, *, check=True):\n"
+        "    return None\n"
+        "\n\n"
+        "ArduinoCliBuildConfig.compile = _fake_compile\n"
+        "ArduinoCliUploadConfig.upload = _fake_upload\n"
+    )
+
+
+def _make_build_property_sketch(
+    pytester: pytest.Pytester,
+    *,
+    profile: str,
+    build_config: str,
+) -> Path:
+    test_dir = pytester.path / "sample_app"
+    test_dir.mkdir()
+    (test_dir / "build" / profile).mkdir(parents=True)
+    (test_dir / "sample_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text(
+        f"default_profile: {profile}\nprofiles:\n  {profile}: {{}}\n",
+        encoding="utf-8",
+    )
+    (test_dir / "build_config.toml").write_text(build_config, encoding="utf-8")
+    (test_dir / "test_sample.py").write_text("def test_ok(arduino_cli_app):\n    pass\n", encoding="utf-8")
+    return test_dir
+
+
+def _recorded_compile_command(pytester: pytest.Pytester) -> list[str]:
+    import json
+
+    return json.loads((pytester.path / "compile_cmd.json").read_text())
+
+
+def test_plugin_autodetects_build_defines_for_esp32(pytester: pytest.Pytester) -> None:
+    pytester.makeconftest(
+        _build_property_conftest(
+            "    return {'build.extra_flags': '-DARDUINO_USB_MODE=1', 'build.defines': ''}"
+        )
+    )
+    test_dir = _make_build_property_sketch(
+        pytester, profile="esp32", build_config='[defines]\nTEST_SSID = "WIFI_SSID"\n'
+    )
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=build",
+        "-p", "no:embedded-arduino-cli",
+        "-p", "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(skipped=1)
+    command = _recorded_compile_command(pytester)
+    assert "--build-property" in command
+    assert any(arg.startswith("build.defines=") for arg in command)
+    assert not any(arg.startswith("build.extra_flags=") for arg in command)
+
+
+def test_plugin_uses_extra_flags_for_host(pytester: pytest.Pytester) -> None:
+    pytester.makeconftest(
+        _build_property_conftest("    return {'build.extra_flags': ''}")
+    )
+    test_dir = _make_build_property_sketch(
+        pytester, profile="host", build_config="[flags]\nPYTEST_BUILD = true\n"
+    )
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=build",
+        "-p", "no:embedded-arduino-cli",
+        "-p", "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(skipped=1)
+    command = _recorded_compile_command(pytester)
+    assert any(arg == "build.extra_flags=-DPYTEST_BUILD" for arg in command)
+
+
+def test_plugin_manual_override_skips_probe(pytester: pytest.Pytester) -> None:
+    pytester.makeconftest(
+        _build_property_conftest("    raise AssertionError('show-properties should not be called')")
+    )
+    test_dir = _make_build_property_sketch(
+        pytester,
+        profile="esp32",
+        build_config='build_property = "build.defines"\n\n[defines]\nTEST_SSID = "WIFI_SSID"\n',
+    )
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=build",
+        "-p", "no:embedded-arduino-cli",
+        "-p", "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(skipped=1)
+    command = _recorded_compile_command(pytester)
+    assert any(arg.startswith("build.defines=") for arg in command)
+
+
+def test_plugin_per_profile_override_wins(pytester: pytest.Pytester) -> None:
+    pytester.makeconftest(
+        _build_property_conftest("    raise AssertionError('show-properties should not be called')")
+    )
+    test_dir = _make_build_property_sketch(
+        pytester,
+        profile="esp32",
+        build_config=(
+            'build_property = "build.extra_flags"\n\n'
+            '[profiles.esp32]\nbuild_property = "build.defines"\n\n'
+            '[defines]\nTEST_SSID = "WIFI_SSID"\n'
+        ),
+    )
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=build",
+        "-p", "no:embedded-arduino-cli",
+        "-p", "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(skipped=1)
+    command = _recorded_compile_command(pytester)
+    assert any(arg.startswith("build.defines=") for arg in command)
+
+
+def test_plugin_build_property_detection_failure_is_clear(pytester: pytest.Pytester) -> None:
+    pytester.makeconftest(
+        _build_property_conftest("    return {'build.extra_flags': '-DARDUINO_USB_MODE=1'}")
+    )
+    test_dir = _make_build_property_sketch(
+        pytester, profile="esp32", build_config='[defines]\nTEST_SSID = "WIFI_SSID"\n'
+    )
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=build",
+        "-p", "no:embedded-arduino-cli",
+        "-p", "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(errors=1)
+    assert "cannot auto-select a build property" in result.stdout.str()
+
+
+def test_plugin_no_probe_in_test_run_mode(pytester: pytest.Pytester) -> None:
+    pytester.makeconftest(
+        _build_property_conftest("    raise AssertionError('show-properties should not be called')")
+    )
+    test_dir = _make_build_property_sketch(
+        pytester, profile="esp32", build_config='[defines]\nTEST_SSID = "WIFI_SSID"\n'
+    )
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=test",
+        "-p", "no:embedded-arduino-cli",
+        "-p", "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(passed=1)

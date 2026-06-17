@@ -1,6 +1,10 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Auto-select the `--build-property` target for `build_config.toml` defines/flags by probing `arduino-cli compile --show-properties`: use `build.extra_flags` when empty (host / AVR) and `build.defines` on ESP32, instead of overwriting ESP32's platform-populated `build.extra_flags`. Fail with a clear error when no candidate is empty.
+- (JA) `build_config.toml` の defines/flags を渡す `--build-property` の対象を `arduino-cli compile --show-properties` の検査で自動選択。空なら `build.extra_flags`（host / AVR）、ESP32 では platform が値を入れた `build.extra_flags` を上書きせず `build.defines` を使用。どの候補も空でない場合は明確なエラーで停止。
+- (EN) Add a `build_property` override in `build_config.toml` (top-level and per-profile `[profiles.<name>].build_property`) to pin the injection target and skip the detection probe.
+- (JA) 注入先を固定して検出プローブを省ける `build_property` override を `build_config.toml` に追加（トップレベルおよび profile 別 `[profiles.<name>].build_property`）。
 
 ## 1.1.7
 - (EN) Add `arduino_test.reset()`, which sends the protocol `RESET_STATE` command, discards the cached test list, and re-synchronizes with `HELLO` on the next run.

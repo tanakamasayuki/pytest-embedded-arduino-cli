@@ -2,17 +2,24 @@ from pathlib import Path
 
 import pytest
 
+import subprocess
+
 from pytest_embedded_arduino_cli.app import (
     ArduinoCliBuildConfig,
     SketchConfigError,
     UnsupportedProfileError,
+    detect_build_property,
     find_sketch_yaml,
     load_sketch_yaml,
+    parse_show_properties,
+    resolve_build_flags,
     resolve_build_properties,
     resolve_build_path,
     resolve_profile_name,
     resolve_profile_port,
     resolve_sketch_dir,
+    run_show_properties,
+    select_build_property_override,
 )
 
 
@@ -229,3 +236,139 @@ def test_build_command_includes_build_config_defines(tmp_path: Path, monkeypatch
         'build.extra_flags=-DWIFI_SSID="test-ap"',
         str(sketch_dir),
     ]
+
+
+def test_resolve_build_flags_returns_raw_tokens(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(
+        sketch_dir / "build_config.toml",
+        '[defines]\nTEST_API_URL = "API_URL"\n\n[flags]\nPYTEST_BUILD = true\nOFF = false\n',
+    )
+    monkeypatch.setenv("TEST_API_URL", "https://example.test")
+
+    assert resolve_build_flags(sketch_dir) == (
+        '-DAPI_URL="https://example.test"',
+        "-DPYTEST_BUILD",
+    )
+
+
+def test_resolve_build_properties_respects_build_property_arg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(sketch_dir / "build_config.toml", '[defines]\nTEST_SSID = "WIFI_SSID"\n')
+    monkeypatch.setenv("TEST_SSID", "ap")
+
+    assert resolve_build_properties(sketch_dir, build_property="build.defines") == (
+        'build.defines=-DWIFI_SSID="ap"',
+    )
+
+
+def test_parse_show_properties_handles_empty_and_trailing_whitespace() -> None:
+    text = "build.extra_flags=-DARDUINO=1 \r\nbuild.defines=\nbuild.core=esp32\nnoise line\n"
+    props = parse_show_properties(text)
+
+    assert props["build.extra_flags"] == "-DARDUINO=1"
+    assert props["build.defines"] == ""
+    assert props["build.core"] == "esp32"
+    assert "noise line" not in props
+
+
+def test_detect_build_property_picks_extra_flags_when_empty() -> None:
+    props = {"build.extra_flags": "", "build.defines": ""}
+    assert detect_build_property(props) == "build.extra_flags"
+
+
+def test_detect_build_property_falls_back_to_defines_for_esp32() -> None:
+    props = {"build.extra_flags": "-DARDUINO_USB_MODE=1", "build.defines": ""}
+    assert detect_build_property(props) == "build.defines"
+
+
+def test_detect_build_property_raises_when_no_candidate_empty() -> None:
+    props = {"build.extra_flags": "-DARDUINO_USB_MODE=1"}
+    with pytest.raises(SketchConfigError) as exc:
+        detect_build_property(props)
+
+    message = str(exc.value)
+    assert "-DARDUINO_USB_MODE=1" in message
+    assert "build.defines not present" in message
+
+
+def test_run_show_properties_uses_profile_and_parses(tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_runner(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(command, 0, stdout="build.extra_flags=\n", stderr="")
+
+    props = run_show_properties("arduino-cli", tmp_path, "esp32", runner=fake_runner)
+
+    assert props == {"build.extra_flags": ""}
+    assert captured["command"] == [
+        "arduino-cli",
+        "compile",
+        "--show-properties",
+        "--profile",
+        "esp32",
+        str(tmp_path),
+    ]
+    assert captured["kwargs"]["capture_output"] is True
+
+
+def test_run_show_properties_omits_profile_when_none(tmp_path: Path) -> None:
+    def fake_runner(command, **kwargs):
+        assert "--profile" not in command
+        return subprocess.CompletedProcess(command, 0, stdout="build.extra_flags=\n", stderr="")
+
+    run_show_properties("arduino-cli", tmp_path, None, runner=fake_runner)
+
+
+def test_select_build_property_override_precedence() -> None:
+    config = {
+        "build_property": "build.extra_flags",
+        "profiles": {"esp32": {"build_property": "build.defines"}},
+    }
+
+    assert select_build_property_override(config, "esp32") == "build.defines"
+    assert select_build_property_override(config, "uno") == "build.extra_flags"
+    assert select_build_property_override({}, "esp32") is None
+
+
+def test_select_build_property_override_rejects_non_string() -> None:
+    with pytest.raises(SketchConfigError):
+        select_build_property_override({"build_property": 1}, None)
+
+
+def test_manual_override_applied_in_from_test_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(sketch_dir / "sample.ino", "void setup() {}\nvoid loop() {}\n")
+    write_text(sketch_dir / "sketch.yaml", "default_profile: esp32\nprofiles:\n  esp32: {}\n")
+    write_text(
+        sketch_dir / "build_config.toml",
+        '[profiles.esp32]\nbuild_property = "build.defines"\n\n[defines]\nTEST_SSID = "WIFI_SSID"\n',
+    )
+    monkeypatch.setenv("TEST_SSID", "ap")
+
+    config = ArduinoCliBuildConfig.from_test_path(sketch_dir / "test_sample.py")
+
+    assert config.manual_build_property == "build.defines"
+    assert config.needs_build_property_detection() is False
+    assert '--build-property' in config.build_command()
+    assert 'build.defines=-DWIFI_SSID="ap"' in config.build_command()
+
+
+def test_with_build_property_reformats_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(sketch_dir / "sample.ino", "void setup() {}\nvoid loop() {}\n")
+    write_text(sketch_dir / "sketch.yaml", "default_profile: esp32\nprofiles:\n  esp32: {}\n")
+    write_text(sketch_dir / "build_config.toml", '[defines]\nTEST_SSID = "WIFI_SSID"\n')
+    monkeypatch.setenv("TEST_SSID", "ap")
+
+    config = ArduinoCliBuildConfig.from_test_path(sketch_dir / "test_sample.py")
+    assert config.needs_build_property_detection() is True
+
+    switched = config.with_build_property("build.defines")
+    assert switched.build_properties == ('build.defines=-DWIFI_SSID="ap"',)
+    # original is unchanged (frozen dataclass)
+    assert config.build_properties == ('build.extra_flags=-DWIFI_SSID="ap"',)

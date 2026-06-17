@@ -314,7 +314,7 @@ ENABLE_TEST_HOOKS = true
 ```
 
 `[defines]` は、左辺を環境変数名、右辺を C/C++ 側の define 名として扱う。
-plugin は指定された環境変数を読み、`-D<define名>="<環境変数値>"` の形で `arduino-cli compile --build-property build.extra_flags=...` に変換して渡す。
+plugin は指定された環境変数を読み、`-D<define名>="<環境変数値>"` の形で `arduino-cli compile --build-property <property>=...` に変換して渡す。
 環境変数が未設定でも、その define には空文字を渡す。
 
 `[flags]` は、値なし define を明示するために使う。
@@ -324,6 +324,29 @@ boolean 以外の値は設定不備としてエラーにする。
 
 `PYTEST_BUILD` のようなテスト用 flag は、plugin が自動付与しない。
 本番 code path と異なるものを暗黙にテストすることを避けるため、必要な project が `build_config.toml` の `[flags]` で明示する。
+
+#### 投入先プロパティの選択
+
+`--build-property X=Y` は追記ではなく**置換**なので、投入先には platform が空にしているプロパティを選ぶ必要がある（さもないと platform 定義の flag を消してしまう）。host / AVR では `build.extra_flags` が空だが、ESP32 では platform が値を入れている。
+
+そこで plugin は、defines/flags がある時だけ、かつ compile する時（`--run-mode=all` / `build`）だけ、投入先を自動選択する。
+
+1. ビルド対象と同じ sketch / profile に対し `arduino-cli compile --show-properties` で展開済みプロパティを調べる。
+2. `build.extra_flags` → `build.defines` の順に、**存在して空の最初の候補**を採用する。これにより host / AVR は `build.extra_flags`、ESP32 は `build.defines` を使う。
+3. どの候補も空でなければ、クローバーを起こすビルドを cryptic に失敗させず、compile 前に（非空の値を提示して）明確なエラーを出す。
+
+defines/flags が無い場合、手動 override がある場合（下記）、`--run-mode=test` の場合はプローブを行わない。
+
+project は `build_config.toml` で投入先を明示でき、その場合プローブを省略する（約1秒速くなる）。
+
+```toml
+build_property = "build.defines"        # 全 profile 共通の既定
+
+[profiles.esp32]
+build_property = "build.defines"        # profile 別の override（解決後 profile 名）
+```
+
+優先順位: profile 別 `[profiles.<name>].build_property` > トップレベル `build_property` > 自動検出。
 
 `.env` ファイルの自動読込は本仕様には含めない。
 

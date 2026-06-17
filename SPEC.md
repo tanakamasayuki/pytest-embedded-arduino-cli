@@ -314,7 +314,7 @@ ENABLE_TEST_HOOKS = true
 ```
 
 `[defines]` treats the left side as the environment variable name and the right side as the C/C++ define name.
-The plugin reads the specified environment variable and converts it to the form `-D<define_name>="<environment_variable_value>"`, passing it to `arduino-cli compile --build-property build.extra_flags=...`.
+The plugin reads the specified environment variable and converts it to the form `-D<define_name>="<environment_variable_value>"`, passing it through `arduino-cli compile --build-property <property>=...`.
 Even if the environment variable is not set, an empty string is passed to that define.
 
 `[flags]` is used to explicitly specify defines without values.
@@ -324,6 +324,29 @@ Non-boolean values are treated as a configuration error and raise an error.
 
 Test flags like `PYTEST_BUILD` are not automatically added by the plugin.
 To avoid implicitly testing something different from the production code path, the project that needs them explicitly specifies them in the `[flags]` of `build_config.toml`.
+
+#### Injection property selection
+
+Because `--build-property X=Y` *replaces* the property rather than appending, the target property must be one the platform leaves empty (otherwise platform-defined flags would be discarded). On host / AVR boards `build.extra_flags` is empty, but on ESP32 it is platform-populated.
+
+The plugin therefore selects the injection property automatically, only when there are defines/flags to inject and only at compile time (`--run-mode=all` / `build`):
+
+1. It probes the resolved (expanded) properties with `arduino-cli compile --show-properties` for the same sketch / profile that will be built.
+2. It picks the first candidate that exists and is empty, in the order `build.extra_flags`, then `build.defines`. So host / AVR use `build.extra_flags` and ESP32 uses `build.defines`.
+3. If no candidate is empty, it raises a clear error (showing the non-empty value) before compiling, instead of letting a clobbered build fail cryptically.
+
+The probe is skipped entirely when there are no defines/flags, when a manual override is set (below), and in `--run-mode=test`.
+
+A project can override the property explicitly in `build_config.toml`, which also skips the probe (about one second faster):
+
+```toml
+build_property = "build.defines"        # top-level default for all profiles
+
+[profiles.esp32]
+build_property = "build.defines"        # per-profile override (resolved profile name)
+```
+
+Precedence: per-profile `[profiles.<name>].build_property` > top-level `build_property` > auto-detection.
 
 Automatic loading of `.env` files is not included in this specification.
 

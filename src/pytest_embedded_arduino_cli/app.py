@@ -1,13 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 import subprocess
 import os
 import tomllib
-from typing import Any
+from typing import Any, Callable
 
 import yaml
+
+
+#: Default property used to inject build_config.toml defines/flags when no
+#: explicit override is given and auto-detection has not run.
+DEFAULT_BUILD_PROPERTY = "build.extra_flags"
+
+#: Auto-detection candidates, in priority order. The first candidate that
+#: exists and is empty for the target is used. On host / AVR boards
+#: ``build.extra_flags`` is empty; on ESP32 it is platform-populated, so the
+#: empty ``build.defines`` is selected instead.
+BUILD_PROPERTY_CANDIDATES = ("build.extra_flags", "build.defines")
 
 
 class SketchConfigError(ValueError):
@@ -144,20 +155,21 @@ def _format_define_value(value: str) -> str:
     return f'"{escaped}"'
 
 
-def resolve_build_properties(
+def resolve_build_flags(
     sketch_dir: str | Path,
     build_config: dict[str, Any] | None = None,
 ) -> tuple[str, ...]:
+    """Return the raw ``-D...`` tokens from build_config.toml defines/flags."""
     config = build_config if build_config is not None else load_build_config(sketch_dir)
     defines = config.get("defines") or {}
-    extra_flags: list[str] = []
+    flag_tokens: list[str] = []
 
     for env_name, define_name in defines.items():
         if not isinstance(env_name, str) or not isinstance(define_name, str):
             raise SketchConfigError("build_config.toml defines keys and values must be strings")
 
         value = os.getenv(env_name, "")
-        extra_flags.append(f"-D{define_name}={_format_define_value(value)}")
+        flag_tokens.append(f"-D{define_name}={_format_define_value(value)}")
 
     flags = config.get("flags") or {}
     for flag_name, enabled in flags.items():
@@ -166,12 +178,108 @@ def resolve_build_properties(
                 "build_config.toml flags keys must be strings and values must be booleans"
             )
         if enabled:
-            extra_flags.append(f"-D{flag_name}")
+            flag_tokens.append(f"-D{flag_name}")
 
-    if not extra_flags:
+    return tuple(flag_tokens)
+
+
+def format_build_property(
+    flags: tuple[str, ...],
+    build_property: str = DEFAULT_BUILD_PROPERTY,
+) -> tuple[str, ...]:
+    """Wrap raw ``-D`` tokens into a single ``<property>=...`` build property."""
+    if not flags:
         return ()
+    return (f"{build_property}={' '.join(flags)}",)
 
-    return (f"build.extra_flags={' '.join(extra_flags)}",)
+
+def resolve_build_properties(
+    sketch_dir: str | Path,
+    build_config: dict[str, Any] | None = None,
+    *,
+    build_property: str = DEFAULT_BUILD_PROPERTY,
+) -> tuple[str, ...]:
+    return format_build_property(resolve_build_flags(sketch_dir, build_config), build_property)
+
+
+def select_build_property_override(
+    build_config: dict[str, Any] | None,
+    profile: str | None,
+) -> str | None:
+    """Return the explicit build_property override, per-profile first then top-level."""
+    config = build_config or {}
+
+    if profile is not None:
+        profiles = config.get("profiles") or {}
+        profile_data = profiles.get(profile)
+        if isinstance(profile_data, dict) and "build_property" in profile_data:
+            value = profile_data["build_property"]
+            if not isinstance(value, str) or not value:
+                raise SketchConfigError(
+                    "build_config.toml [profiles.*].build_property must be a non-empty string"
+                )
+            return value
+
+    if "build_property" in config:
+        value = config["build_property"]
+        if not isinstance(value, str) or not value:
+            raise SketchConfigError("build_config.toml build_property must be a non-empty string")
+        return value
+
+    return None
+
+
+def parse_show_properties(text: str) -> dict[str, str]:
+    """Parse ``arduino-cli compile --show-properties`` output into a dict."""
+    properties: dict[str, str] = {}
+    for line in text.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        properties[key.strip()] = value.strip()
+    return properties
+
+
+def detect_build_property(
+    properties: dict[str, str],
+    candidates: tuple[str, ...] = BUILD_PROPERTY_CANDIDATES,
+) -> str:
+    """Pick the first candidate property that exists and is empty.
+
+    Raises SketchConfigError if none qualify, so a clobbering build fails
+    early with a clear message instead of a cryptic compile error.
+    """
+    for candidate in candidates:
+        if candidate in properties and properties[candidate] == "":
+            return candidate
+
+    states = []
+    for candidate in candidates:
+        if candidate not in properties:
+            states.append(f"{candidate} not present")
+        else:
+            states.append(f"{candidate} is non-empty ({properties[candidate]!r})")
+    raise SketchConfigError(
+        "cannot auto-select a build property for build_config.toml defines/flags; "
+        f"{', '.join(states)}. Set 'build_property' in build_config.toml "
+        "(top-level or under [profiles.<profile>]) to choose explicitly."
+    )
+
+
+def run_show_properties(
+    cli_path: str,
+    sketch_dir: str | Path,
+    profile: str | None,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> dict[str, str]:
+    """Probe the resolved (expanded) build properties for a sketch/profile."""
+    command = [cli_path, "compile", "--show-properties"]
+    if profile:
+        command.extend(["--profile", profile])
+    command.append(str(sketch_dir))
+    result = runner(command, cwd=sketch_dir, text=True, capture_output=True, check=True)
+    return parse_show_properties(result.stdout)
 
 
 @dataclass(frozen=True)
@@ -185,6 +293,10 @@ class ArduinoCliBuildConfig:
     extra_args: tuple[str, ...] = field(default_factory=tuple)
     clean: bool = False
     cli_path: str = "arduino-cli"
+    build_flags: tuple[str, ...] = field(default_factory=tuple)
+    build_property: str = DEFAULT_BUILD_PROPERTY
+    manual_build_property: str | None = None
+    extra_build_properties: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_test_path(
@@ -210,7 +322,11 @@ class ArduinoCliBuildConfig:
         )
         resolved_profile_port = resolve_profile_port(sketch_data, resolved_profile)
         resolved_build_path = resolve_build_path(sketch_dir, resolved_profile, build_path)
-        resolved_build_properties = tuple(build_properties) + resolve_build_properties(sketch_dir, build_config)
+        build_flags = resolve_build_flags(sketch_dir, build_config)
+        manual_build_property = select_build_property_override(build_config, resolved_profile)
+        chosen_property = manual_build_property or DEFAULT_BUILD_PROPERTY
+        extra = tuple(build_properties)
+        resolved_build_properties = extra + format_build_property(build_flags, chosen_property)
         return cls(
             sketch_dir=sketch_dir,
             sketch_yaml=sketch_yaml,
@@ -221,6 +337,22 @@ class ArduinoCliBuildConfig:
             extra_args=tuple(extra_args),
             clean=clean,
             cli_path=cli_path,
+            build_flags=build_flags,
+            build_property=chosen_property,
+            manual_build_property=manual_build_property,
+            extra_build_properties=extra,
+        )
+
+    def needs_build_property_detection(self) -> bool:
+        """True when there are flags to inject and no explicit override was set."""
+        return bool(self.build_flags) and self.manual_build_property is None
+
+    def with_build_property(self, name: str) -> "ArduinoCliBuildConfig":
+        """Return a copy that injects build_flags into the given property."""
+        return replace(
+            self,
+            build_property=name,
+            build_properties=self.extra_build_properties + format_build_property(self.build_flags, name),
         )
 
     def build_command(self) -> list[str]:
