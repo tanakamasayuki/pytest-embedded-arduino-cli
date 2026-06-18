@@ -347,6 +347,29 @@ For command visibility, follow pytest's standard verbosity:
 - `-v` shows the `arduino-cli compile` / `arduino-cli upload` command line
 - `-vv` also shows execution context such as `cwd`, `sketch_dir`, `build_path`, `profile`, and `port`
 
+### Capturing the full serial log
+
+`dut.expect(...)` stops reading as soon as the pattern matches, so bytes the device sends *after* the matched line are not guaranteed to reach the `dut.log` file — it can end mid-line. This is a capture-timing effect, not a device fault: the log file and the live `-s` console are fed from the same stream, and the tail in flight can be lost when the DUT is closed.
+
+The plugin already drains the receive buffer on a best-effort basis when the serial connection closes, which usually brings `dut.log` up to roughly what `-s` shows. It is not a full guarantee. When you need the complete trailing output deterministically:
+
+- Have the device print an end-of-output marker as its last line and `expect` it, so reading naturally extends to the true end:
+
+  ```python
+  dut.expect_exact("=== END ===")
+  ```
+
+- Or drain explicitly before the test finishes:
+
+  ```python
+  import pexpect
+
+  dut.expect_exact("last line I care about")
+  dut.expect(pexpect.TIMEOUT, timeout=2)  # read whatever still arrives
+  ```
+
+Note that `arduino_test.run()` stops reading at the ArduTest `RESULT` event, so any `LOG` / tick lines the device emits after `RESULT` are not collected unless you drain afterwards.
+
 ## ArduTest Fixture
 
 This package includes an experimental `arduino_test` fixture for sketches that use the separate Arduino-side ArduTest library.

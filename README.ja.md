@@ -352,6 +352,29 @@ build_property = "build.defines"        # profile 別の override
 - `-vv`
   - 上記に加えて `cwd`、`sketch_dir`、`build_path`、`profile`、`port` なども表示
 
+### シリアルログを最後まで残す
+
+`dut.expect(...)` は pattern がマッチした時点で読み取りを終えるため、マッチした行の**後**にデバイスが送るバイトは `dut.log` に届く保証がなく、**行の途中で切れる**ことがあります。これはデバイス異常ではなく取り込みのタイミングの問題です。ログファイルとライブの `-s` コンソールは同じ流れから書かれており、close 時に流れ切らなかった末尾が落ちます。
+
+plugin はシリアル close 時に受信バッファをベストエフォートでドレインするため、通常は `dut.log` が `-s` とほぼ同じところまで埋まります。ただし完全保証ではありません。末尾出力を確実に残したいときは:
+
+- デバイスが最終行に終端マーカーを出し、それを `expect` する（読み取りが本当の終端まで伸びる）:
+
+  ```python
+  dut.expect_exact("=== END ===")
+  ```
+
+- もしくはテスト終了前に明示的にドレインする:
+
+  ```python
+  import pexpect
+
+  dut.expect_exact("確認したい最後の行")
+  dut.expect(pexpect.TIMEOUT, timeout=2)  # 残りを読み切る
+  ```
+
+なお `arduino_test.run()` は ArduTest の `RESULT` event で読み取りを止めるため、`RESULT` 後に出る `LOG` / tick 行は、あとからドレインしない限り収集されません。
+
 ## ArduTest fixture
 
 この package には、別管理の Arduino 側 ArduTest ライブラリを使う sketch 向けの実験的な `arduino_test` fixture も含まれます。
