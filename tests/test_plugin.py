@@ -1117,3 +1117,75 @@ def test_plugin_no_probe_in_test_run_mode(pytester: pytest.Pytester) -> None:
         "-p", "pytest_embedded_arduino_cli.plugin",
     )
     result.assert_outcomes(passed=1)
+
+
+# --- serial redirect thread: best-effort tail drain on terminate ---
+
+def test_fast_socket_redirect_drains_remaining_serial() -> None:
+    from pytest_embedded_arduino_cli.serial import FastSocketSerialRedirectThread
+
+    class FakeQueue:
+        def __init__(self) -> None:
+            self.items: list[bytes] = []
+
+        def put(self, data: bytes) -> None:
+            self.items.append(data)
+
+    class FakeSerial:
+        port = "/dev/ttyFAKE"
+
+        def __init__(self, chunks: list[bytes]) -> None:
+            self._chunks = list(chunks)
+
+        def read_all(self) -> bytes:
+            return self._chunks.pop(0) if self._chunks else b""
+
+    q = FakeQueue()
+    thread = FastSocketSerialRedirectThread(q, FakeSerial([b"tail-1", b"tail-2"]))
+    thread._drain_remaining()
+
+    assert b"".join(q.items) == b"tail-1tail-2"
+
+
+def test_fast_socket_redirect_drains_socket_reads() -> None:
+    from pytest_embedded_arduino_cli.serial import FastSocketSerialRedirectThread
+
+    class FakeQueue:
+        def __init__(self) -> None:
+            self.items: list[bytes] = []
+
+        def put(self, data: bytes) -> None:
+            self.items.append(data)
+
+    class FakeSocket:
+        port = "socket://localhost:5000"
+
+        def __init__(self, chunks: list[bytes]) -> None:
+            self._chunks = list(chunks)
+
+        def read(self, size: int) -> bytes:
+            return self._chunks.pop(0) if self._chunks else b""
+
+    q = FakeQueue()
+    thread = FastSocketSerialRedirectThread(q, FakeSocket([b"abc"]))
+    thread._drain_remaining()
+
+    assert b"".join(q.items) == b"abc"
+
+
+def test_fast_socket_redirect_drain_survives_read_error() -> None:
+    from pytest_embedded_arduino_cli.serial import FastSocketSerialRedirectThread
+
+    class FakeQueue:
+        def put(self, data: bytes) -> None:
+            raise AssertionError("nothing should be queued on read error")
+
+    class BrokenSerial:
+        port = "/dev/ttyFAKE"
+
+        def read_all(self) -> bytes:
+            raise OSError("port closed")
+
+    thread = FastSocketSerialRedirectThread(FakeQueue(), BrokenSerial())
+    # must not raise
+    thread._drain_remaining()

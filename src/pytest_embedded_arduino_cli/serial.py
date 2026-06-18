@@ -97,6 +97,33 @@ class FastSocketSerialRedirectThread(threading.Thread):
     def terminate(self) -> None:
         self._event_q.put("end")
         self.join()
+        # Best-effort: after the read loop has stopped (and before the serial
+        # port is closed by Serial.close), drain any bytes that arrived since
+        # the last loop read and push them onto the message queue. dut.log and
+        # the `-s` console are fed from the same queue, so this brings the log
+        # file up to roughly `-s` completeness instead of cutting mid-line.
+        # It is not a full guarantee: bytes that arrive after this final read,
+        # or after the listener stops draining the queue, are still lost.
+        self._drain_remaining()
+
+    def _drain_remaining(self) -> None:
+        consecutive_empty = 0
+        for _ in range(50):  # hard cap so teardown cannot hang
+            try:
+                data = self._read_available()
+            except Exception:
+                return
+            if data:
+                try:
+                    self._q.put(data)
+                except Exception:
+                    return
+                consecutive_empty = 0
+                continue
+            consecutive_empty += 1
+            if consecutive_empty >= 3:
+                return
+            time.sleep(0.01)
 
 
 def normalize_profile_name(profile: str) -> str:

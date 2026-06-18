@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Drain any remaining received serial bytes when the connection closes, so `dut.log` is not cut mid-line and reaches roughly `-s` console completeness (best-effort, not a full guarantee). Document how to capture the full trailing output deterministically (device end marker or a `pexpect.TIMEOUT` drain).
+- (JA) シリアル接続を閉じる際に受信済みの残りバイトをドレインし、`dut.log` が行の途中で切れず `-s` コンソール相当まで埋まるように改善（ベストエフォートで完全保証ではない）。末尾出力を確実に残す方法（終端マーカー / `pexpect.TIMEOUT` ドレイン）も README に追記。
 
 ## 1.2.0
 - (EN) Auto-select the `--build-property` target for `build_config.toml` defines/flags by probing `arduino-cli compile --show-properties`: use `build.extra_flags` when empty (host / AVR) and `build.defines` on ESP32, instead of overwriting ESP32's platform-populated `build.extra_flags`. Fail with a clear error when no candidate is empty.
