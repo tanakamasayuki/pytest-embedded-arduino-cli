@@ -14,11 +14,16 @@ import yaml
 #: explicit override is given and auto-detection has not run.
 DEFAULT_BUILD_PROPERTY = "build.extra_flags"
 
-#: Auto-detection candidates, in priority order. The first candidate that
-#: exists and is empty for the target is used. On host / AVR boards
-#: ``build.extra_flags`` is empty; on ESP32 it is platform-populated, so the
-#: empty ``build.defines`` is selected instead.
-BUILD_PROPERTY_CANDIDATES = ("build.extra_flags", "build.defines")
+#: Auto-detection candidates, in priority order. Each group is selected only
+#: when all properties in that group exist and are empty. The C/C++ fallback is
+#: useful for ESP32 boards where both ``build.extra_flags`` and ``build.defines``
+#: are populated by board options such as PSRAM.
+BUILD_PROPERTY_CANDIDATES = (
+    ("build.extra_flags",),
+    ("build.defines",),
+    ("compiler.cpp.extra_flags", "compiler.c.extra_flags"),
+    ("compiler.cpp.extra_flags",),
+)
 
 
 class SketchConfigError(ValueError):
@@ -193,6 +198,16 @@ def format_build_property(
     return (f"{build_property}={' '.join(flags)}",)
 
 
+def format_build_properties(
+    flags: tuple[str, ...],
+    build_properties: tuple[str, ...] = (DEFAULT_BUILD_PROPERTY,),
+) -> tuple[str, ...]:
+    """Wrap raw ``-D`` tokens into one or more ``<property>=...`` values."""
+    if not flags:
+        return ()
+    return tuple(f"{build_property}={' '.join(flags)}" for build_property in build_properties)
+
+
 def resolve_build_properties(
     sketch_dir: str | Path,
     build_config: dict[str, Any] | None = None,
@@ -240,30 +255,43 @@ def parse_show_properties(text: str) -> dict[str, str]:
     return properties
 
 
-def detect_build_property(
+def detect_build_properties(
     properties: dict[str, str],
-    candidates: tuple[str, ...] = BUILD_PROPERTY_CANDIDATES,
-) -> str:
-    """Pick the first candidate property that exists and is empty.
+    candidates: tuple[tuple[str, ...], ...] = BUILD_PROPERTY_CANDIDATES,
+) -> tuple[str, ...]:
+    """Pick the first candidate property group that exists and is empty.
 
     Raises SketchConfigError if none qualify, so a clobbering build fails
     early with a clear message instead of a cryptic compile error.
     """
-    for candidate in candidates:
-        if candidate in properties and properties[candidate] == "":
-            return candidate
+    for candidate_group in candidates:
+        if all(candidate in properties and properties[candidate] == "" for candidate in candidate_group):
+            return candidate_group
 
     states = []
-    for candidate in candidates:
-        if candidate not in properties:
-            states.append(f"{candidate} not present")
-        else:
-            states.append(f"{candidate} is non-empty ({properties[candidate]!r})")
+    seen: set[str] = set()
+    for candidate_group in candidates:
+        for candidate in candidate_group:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            if candidate not in properties:
+                states.append(f"{candidate} not present")
+            else:
+                states.append(f"{candidate} is non-empty ({properties[candidate]!r})")
     raise SketchConfigError(
         "cannot auto-select a build property for build_config.toml defines/flags; "
         f"{', '.join(states)}. Set 'build_property' in build_config.toml "
         "(top-level or under [profiles.<profile>]) to choose explicitly."
     )
+
+
+def detect_build_property(
+    properties: dict[str, str],
+    candidates: tuple[str, ...] = tuple(group[0] for group in BUILD_PROPERTY_CANDIDATES),
+) -> str:
+    """Backward-compatible single-property wrapper for older callers."""
+    return detect_build_properties(properties, tuple((candidate,) for candidate in candidates))[0]
 
 
 def run_show_properties(
@@ -349,10 +377,14 @@ class ArduinoCliBuildConfig:
 
     def with_build_property(self, name: str) -> "ArduinoCliBuildConfig":
         """Return a copy that injects build_flags into the given property."""
+        return self.with_build_properties((name,))
+
+    def with_build_properties(self, names: tuple[str, ...]) -> "ArduinoCliBuildConfig":
+        """Return a copy that injects build_flags into the given properties."""
         return replace(
             self,
-            build_property=name,
-            build_properties=self.extra_build_properties + format_build_property(self.build_flags, name),
+            build_property=names[0],
+            build_properties=self.extra_build_properties + format_build_properties(self.build_flags, names),
         )
 
     def build_command(self) -> list[str]:

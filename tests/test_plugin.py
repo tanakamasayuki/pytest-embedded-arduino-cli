@@ -1024,6 +1024,36 @@ def test_plugin_autodetects_build_defines_for_esp32(pytester: pytest.Pytester) -
     assert not any(arg.startswith("build.extra_flags=") for arg in command)
 
 
+def test_plugin_autodetects_c_and_cpp_extra_flags_for_esp32_when_build_flags_are_occupied(
+    pytester: pytest.Pytester,
+) -> None:
+    pytester.makeconftest(
+        _build_property_conftest(
+            "    return {\n"
+            "        'build.extra_flags': '-DARDUINO_USB_CDC_ON_BOOT=0',\n"
+            "        'build.defines': '-DBOARD_HAS_PSRAM',\n"
+            "        'compiler.cpp.extra_flags': '',\n"
+            "        'compiler.c.extra_flags': '',\n"
+            "    }"
+        )
+    )
+    test_dir = _make_build_property_sketch(
+        pytester, profile="esp32", build_config='[defines]\nTEST_SSID = "WIFI_SSID"\n'
+    )
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=build",
+        "-p", "no:embedded-arduino-cli",
+        "-p", "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(skipped=1)
+    command = _recorded_compile_command(pytester)
+    assert any(arg.startswith("compiler.cpp.extra_flags=") for arg in command)
+    assert any(arg.startswith("compiler.c.extra_flags=") for arg in command)
+    assert not any(arg.startswith("build.defines=") for arg in command)
+    assert not any(arg.startswith("build.extra_flags=") for arg in command)
+
+
 def test_plugin_uses_extra_flags_for_host(pytester: pytest.Pytester) -> None:
     pytester.makeconftest(
         _build_property_conftest("    return {'build.extra_flags': ''}")

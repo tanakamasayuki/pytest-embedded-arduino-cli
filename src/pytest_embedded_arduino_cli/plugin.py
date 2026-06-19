@@ -13,7 +13,7 @@ from .app import (
     ArduinoCliBuildConfig,
     SketchConfigError,
     UnsupportedProfileError,
-    detect_build_property,
+    detect_build_properties,
     resolve_sketch_dir,
     resolve_test_path,
     run_show_properties,
@@ -378,7 +378,7 @@ def _resolve_build_property(app: ArduinoCliBuildConfig) -> ArduinoCliBuildConfig
     if not app.needs_build_property_detection():
         return app
     properties = run_show_properties(app.cli_path, app.sketch_dir, app.profile)
-    return app.with_build_property(detect_build_property(properties))
+    return app.with_build_properties(detect_build_properties(properties))
 
 
 @pytest.fixture(scope="module")
