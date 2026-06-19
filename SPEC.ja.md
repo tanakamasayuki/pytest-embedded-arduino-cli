@@ -327,13 +327,13 @@ boolean 以外の値は設定不備としてエラーにする。
 
 #### 投入先プロパティの選択
 
-`--build-property X=Y` は追記ではなく**置換**なので、投入先には platform が空にしているプロパティを選ぶ必要がある（さもないと platform 定義の flag を消してしまう）。host / AVR では `build.extra_flags` が空だが、ESP32 では platform が値を入れている。
+`--build-property X=Y` は追記ではなく**置換**なので、投入先には platform が空にしているプロパティを選ぶ必要がある（さもないと platform 定義の flag を消してしまう）。host / AVR では `build.extra_flags` が空であることが多いが、ESP32 では platform が値を入れており、さらに一部の ESP32 board option は `build.defines` にも値を入れる。
 
 そこで plugin は、defines/flags がある時だけ、かつ compile する時（`--run-mode=all` / `build`）だけ、投入先を自動選択する。
 
 1. ビルド対象と同じ sketch / profile に対し `arduino-cli compile --show-properties` で展開済みプロパティを調べる。
-2. `build.extra_flags` → `build.defines` の順に、**存在して空の最初の候補**を採用する。これにより host / AVR は `build.extra_flags`、ESP32 は `build.defines` を使う。
-3. どの候補も空でなければ、クローバーを起こすビルドを cryptic に失敗させず、compile 前に（非空の値を提示して）明確なエラーを出す。
+2. `build.extra_flags` → `build.defines` → `compiler.cpp.extra_flags` と `compiler.c.extra_flags` の両方 → `compiler.cpp.extra_flags` の順に、**存在して空の最初の候補グループ**を採用する。広い範囲に効く build-level property が安全ならそれを使い、ESP32 の board 設定で埋まっている場合は C/C++ compile flags に fallback する。
+3. どの候補グループも空でなければ、clobber を起こすビルドを cryptic に失敗させず、compile 前に（非空の値を提示して）明確なエラーを出す。
 
 defines/flags が無い場合、手動 override がある場合（下記）、`--run-mode=test` の場合はプローブを行わない。
 

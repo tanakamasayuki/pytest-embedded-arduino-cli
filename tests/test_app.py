@@ -9,6 +9,7 @@ from pytest_embedded_arduino_cli.app import (
     SketchConfigError,
     UnsupportedProfileError,
     detect_build_property,
+    detect_build_properties,
     find_sketch_yaml,
     load_sketch_yaml,
     parse_show_properties,
@@ -277,21 +278,46 @@ def test_parse_show_properties_handles_empty_and_trailing_whitespace() -> None:
 def test_detect_build_property_picks_extra_flags_when_empty() -> None:
     props = {"build.extra_flags": "", "build.defines": ""}
     assert detect_build_property(props) == "build.extra_flags"
+    assert detect_build_properties(props) == ("build.extra_flags",)
 
 
 def test_detect_build_property_falls_back_to_defines_for_esp32() -> None:
     props = {"build.extra_flags": "-DARDUINO_USB_MODE=1", "build.defines": ""}
     assert detect_build_property(props) == "build.defines"
+    assert detect_build_properties(props) == ("build.defines",)
+
+
+def test_detect_build_properties_falls_back_to_c_and_cpp_extra_flags() -> None:
+    props = {
+        "build.extra_flags": "-DARDUINO_USB_MODE=1",
+        "build.defines": "-DBOARD_HAS_PSRAM",
+        "compiler.cpp.extra_flags": "",
+        "compiler.c.extra_flags": "",
+    }
+
+    assert detect_build_properties(props) == ("compiler.cpp.extra_flags", "compiler.c.extra_flags")
+
+
+def test_detect_build_properties_allows_cpp_only_fallback() -> None:
+    props = {
+        "build.extra_flags": "-DARDUINO_USB_MODE=1",
+        "build.defines": "-DBOARD_HAS_PSRAM",
+        "compiler.cpp.extra_flags": "",
+        "compiler.c.extra_flags": "-DC_ONLY=1",
+    }
+
+    assert detect_build_properties(props) == ("compiler.cpp.extra_flags",)
 
 
 def test_detect_build_property_raises_when_no_candidate_empty() -> None:
     props = {"build.extra_flags": "-DARDUINO_USB_MODE=1"}
     with pytest.raises(SketchConfigError) as exc:
-        detect_build_property(props)
+        detect_build_properties(props)
 
     message = str(exc.value)
     assert "-DARDUINO_USB_MODE=1" in message
     assert "build.defines not present" in message
+    assert "compiler.cpp.extra_flags not present" in message
 
 
 def test_run_show_properties_uses_profile_and_parses(tmp_path: Path) -> None:
@@ -372,3 +398,22 @@ def test_with_build_property_reformats_flags(tmp_path: Path, monkeypatch: pytest
     assert switched.build_properties == ('build.defines=-DWIFI_SSID="ap"',)
     # original is unchanged (frozen dataclass)
     assert config.build_properties == ('build.extra_flags=-DWIFI_SSID="ap"',)
+
+
+def test_with_build_properties_reformats_flags_for_multiple_targets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(sketch_dir / "sample.ino", "void setup() {}\nvoid loop() {}\n")
+    write_text(sketch_dir / "sketch.yaml", "default_profile: esp32\nprofiles:\n  esp32: {}\n")
+    write_text(sketch_dir / "build_config.toml", '[defines]\nTEST_SSID = "WIFI_SSID"\n')
+    monkeypatch.setenv("TEST_SSID", "ap")
+
+    config = ArduinoCliBuildConfig.from_test_path(sketch_dir / "test_sample.py")
+
+    switched = config.with_build_properties(("compiler.cpp.extra_flags", "compiler.c.extra_flags"))
+
+    assert switched.build_properties == (
+        'compiler.cpp.extra_flags=-DWIFI_SSID="ap"',
+        'compiler.c.extra_flags=-DWIFI_SSID="ap"',
+    )

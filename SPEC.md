@@ -327,13 +327,13 @@ To avoid implicitly testing something different from the production code path, t
 
 #### Injection property selection
 
-Because `--build-property X=Y` *replaces* the property rather than appending, the target property must be one the platform leaves empty (otherwise platform-defined flags would be discarded). On host / AVR boards `build.extra_flags` is empty, but on ESP32 it is platform-populated.
+Because `--build-property X=Y` *replaces* the property rather than appending, the target property must be one the platform leaves empty (otherwise platform-defined flags would be discarded). On host / AVR boards `build.extra_flags` is often empty, but on ESP32 it is platform-populated, and some ESP32 board options also populate `build.defines`.
 
 The plugin therefore selects the injection property automatically, only when there are defines/flags to inject and only at compile time (`--run-mode=all` / `build`):
 
 1. It probes the resolved (expanded) properties with `arduino-cli compile --show-properties` for the same sketch / profile that will be built.
-2. It picks the first candidate that exists and is empty, in the order `build.extra_flags`, then `build.defines`. So host / AVR use `build.extra_flags` and ESP32 uses `build.defines`.
-3. If no candidate is empty, it raises a clear error (showing the non-empty value) before compiling, instead of letting a clobbered build fail cryptically.
+2. It picks the first candidate group that exists and is empty, in this order: `build.extra_flags`, `build.defines`, then both `compiler.cpp.extra_flags` and `compiler.c.extra_flags`, then `compiler.cpp.extra_flags` alone. This keeps broad properties when they are safe, and falls back to C/C++ compile flags when ESP32 board settings occupy the build-level properties.
+3. If no candidate group is empty, it raises a clear error (showing the non-empty values) before compiling, instead of letting a clobbered build fail cryptically.
 
 The probe is skipped entirely when there are no defines/flags, when a manual override is set (below), and in `--run-mode=test`.
 
