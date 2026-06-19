@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.2.2
 - (EN) Fall back to empty C/C++ compile properties (`compiler.cpp.extra_flags` and `compiler.c.extra_flags`) when auto-selecting the `build_config.toml` injection target, so ESP32 boards that populate both `build.extra_flags` and `build.defines` (for example PSRAM-enabled boards) no longer fail detection.
 - (JA) `build_config.toml` の注入先自動選択で、`build.extra_flags` と `build.defines` の両方が埋まっている ESP32 board（PSRAM 有効 board など）向けに、空の C/C++ compile property（`compiler.cpp.extra_flags` / `compiler.c.extra_flags`）へ fallback するように変更。
 
