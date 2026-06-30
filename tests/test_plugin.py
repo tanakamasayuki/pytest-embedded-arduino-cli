@@ -197,6 +197,68 @@ def test_peer_device_lock_is_held_until_module_release(tmp_path: Path) -> None:
     competing_lock.release()
 
 
+def test_primary_device_lock_is_held_during_test_call(pytester: pytest.Pytester) -> None:
+    test_dir = pytester.path / "sample_app"
+    lock_dir = pytester.path / "locks"
+    test_dir.mkdir()
+    (test_dir / "build" / "uno").mkdir(parents=True)
+    (test_dir / "sample_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text(
+        "default_profile: uno\nprofiles:\n  uno: {}\n",
+        encoding="utf-8",
+    )
+    pytester.makeconftest(
+        """
+from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
+from pytest_embedded_arduino_cli.flasher import ArduinoCliUploadConfig
+
+
+def _fake_compile(self, *, check=True):
+    self.build_path.mkdir(parents=True, exist_ok=True)
+    return None
+
+
+def _fake_upload(self, *, check=True):
+    return None
+
+
+ArduinoCliBuildConfig.compile = _fake_compile
+ArduinoCliUploadConfig.upload = _fake_upload
+"""
+    )
+    (test_dir / "test_sample.py").write_text(
+        f"""
+import pytest
+from pathlib import Path
+
+from pytest_embedded_arduino_cli.device_lock import DeviceLock, DeviceLockError, DeviceLockInfo
+
+
+def test_primary_lock_still_held():
+    competing_lock = DeviceLock(
+        DeviceLockInfo(key="/dev/ttyUSB0", port="/dev/ttyUSB0"),
+        lock_dir=Path({str(lock_dir)!r}),
+        timeout=0.01,
+    )
+    with pytest.raises(DeviceLockError):
+        competing_lock.acquire()
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--port=/dev/ttyUSB0",
+        f"--device-lock-dir={lock_dir}",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+
+    result.assert_outcomes(passed=1)
+
+
 def test_make_peer_dut_uses_serial_dut() -> None:
     source = inspect.getsource(plugin_module._make_peer_dut)
 

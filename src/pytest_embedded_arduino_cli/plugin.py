@@ -590,6 +590,14 @@ def arduino_cli_build(
 def arduino_cli_device_locks(request: pytest.FixtureRequest) -> None:
     yield
 
+    primary_lock_set = getattr(request.module, "_arduino_cli_primary_device_lock_set", None)
+    if primary_lock_set is not None:
+        primary_lock_set.release()
+    if hasattr(request.module, "_arduino_cli_primary_device_lock_set"):
+        delattr(request.module, "_arduino_cli_primary_device_lock_set")
+    if hasattr(request.config, "_arduino_cli_primary_device_lock_key"):
+        delattr(request.config, "_arduino_cli_primary_device_lock_key")
+
     lock_set = getattr(request.module, "_arduino_cli_peer_device_lock_set", None)
     if lock_set is not None:
         lock_set.release()
@@ -637,39 +645,34 @@ def arduino_cli_upload(
     lock_set = _acquire_device_locks(request.config, [lock_info] if lock_info else [])
     if lock_info is not None:
         request.config._arduino_cli_primary_device_lock_key = lock_info.key
+        request.module._arduino_cli_primary_device_lock_set = lock_set
 
-    try:
-        _log_command(
-            request.config,
-            action="upload",
-            command=arduino_cli_flasher.upload_command(),
-            details={
-                "cwd": str(arduino_cli_flasher.sketch_dir),
-                "sketch_dir": str(arduino_cli_flasher.sketch_dir),
-                "build_path": str(arduino_cli_flasher.build_path),
-                "profile": arduino_cli_flasher.profile,
-                "port": arduino_cli_flasher.port,
-            },
+    _log_command(
+        request.config,
+        action="upload",
+        command=arduino_cli_flasher.upload_command(),
+        details={
+            "cwd": str(arduino_cli_flasher.sketch_dir),
+            "sketch_dir": str(arduino_cli_flasher.sketch_dir),
+            "build_path": str(arduino_cli_flasher.build_path),
+            "profile": arduino_cli_flasher.profile,
+            "port": arduino_cli_flasher.port,
+        },
+    )
+    arduino_cli_flasher.upload()
+
+    # Record profile for state cache after successful upload
+    if arduino_cli_flasher.profile:
+        _set_current_profile(request.config, arduino_cli_flasher.profile)
+
+    runtime_port = resolve_port(request.config, profile=arduino_cli_app.profile)
+    if socket_url_needs_port_completion(runtime_port):
+        request.config.option.port = complete_host_arduino_socket_url(
+            runtime_port,
+            arduino_cli_app.build_path,
         )
-        arduino_cli_flasher.upload()
-
-        # Record profile for state cache after successful upload
-        if arduino_cli_flasher.profile:
-            _set_current_profile(request.config, arduino_cli_flasher.profile)
-
-        runtime_port = resolve_port(request.config, profile=arduino_cli_app.profile)
-        if socket_url_needs_port_completion(runtime_port):
-            request.config.option.port = complete_host_arduino_socket_url(
-                runtime_port,
-                arduino_cli_app.build_path,
-            )
-            wait_for_socket_url(request.config.option.port)
-        yield
-    finally:
-        if lock_set is not None:
-            lock_set.release()
-        if lock_info is not None and hasattr(request.config, "_arduino_cli_primary_device_lock_key"):
-            delattr(request.config, "_arduino_cli_primary_device_lock_key")
+        wait_for_socket_url(request.config.option.port)
+    yield
 
 
 def _log_peer_command(
