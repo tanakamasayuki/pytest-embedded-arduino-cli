@@ -587,10 +587,24 @@ def arduino_cli_build(
 
 
 @pytest.fixture(scope="module", autouse=True)
+def arduino_cli_device_locks(request: pytest.FixtureRequest) -> None:
+    yield
+
+    lock_set = getattr(request.module, "_arduino_cli_peer_device_lock_set", None)
+    if lock_set is not None:
+        lock_set.release()
+    if hasattr(request.module, "_arduino_cli_peer_device_lock_set"):
+        delattr(request.module, "_arduino_cli_peer_device_lock_set")
+    if hasattr(request.module, "_arduino_cli_peer_device_lock_ready"):
+        delattr(request.module, "_arduino_cli_peer_device_lock_ready")
+
+
+@pytest.fixture(scope="module", autouse=True)
 def arduino_cli_upload(
     request: pytest.FixtureRequest,
     arduino_cli_build: None,
     arduino_cli_resolved_port: None,
+    arduino_cli_device_locks: None,
 ) -> None:
     run_mode = request.config.getoption("run_mode")
     if not _should_upload(run_mode):
@@ -750,14 +764,16 @@ def _lock_peer_targets_for_request(
 ) -> None:
     if request.config.getoption("run_mode") == "build":
         return
+    if getattr(request.module, "_arduino_cli_peer_device_lock_ready", False):
+        return
 
     infos = _peer_device_lock_infos(targets)
     if request.config.getoption("device_lock") == "required" and not infos and targets:
         raise pytest.UsageError("device lock is required, but no peer physical serial port was resolved")
 
     lock_set = _acquire_device_locks(request.config, infos)
-    if lock_set is not None:
-        request.addfinalizer(lock_set.release)
+    request.module._arduino_cli_peer_device_lock_set = lock_set
+    request.module._arduino_cli_peer_device_lock_ready = True
 
 
 def _make_peer_dut(request: pytest.FixtureRequest, target: PeerTarget) -> tuple[Any, Callable[[], None]]:

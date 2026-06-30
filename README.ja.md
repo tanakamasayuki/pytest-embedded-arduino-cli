@@ -173,8 +173,8 @@ peer test（複数 DUT）の場合、primary DUT の状態のみ記録されま�
 lock は DUT を使い終わるまで保持されるため、テスト実行中の board に別 pytest process が新しい firmware を upload することを防ぎます。
 
 device lock は profile ではなく、解決済みの物理 serial port を key にします。
-primary DUT の lock は primary upload の前に取得します。
-peer DUT はそれぞれの解決済み port を使い、`peers` fixture が要求された時点で peer upload の前に決定的な順序で lock します。
+primary DUT の lock は primary upload の前に取得し、module teardown まで保持します。
+peer DUT はそれぞれの解決済み port を使い、`peers` fixture が要求された時点で peer upload の前に決定的な順序で lock し、module teardown まで保持します。
 `socket://...` target は通常 host process または TCP/IP DUT を表すため、既定では lock しません。
 lock を無効化する場合は `--device-lock=off`、lock key が解決できない場合に失敗させたい場合は `--device-lock=required`、port 文字列が物理 device identity として安定しない特殊環境では `--device-lock-key=KEY` を使います。
 lock file は既定で user runtime/cache directory に置かれ、OS file lock を使う想定です。そのため、強制終了後に lock file が残っていても、それだけで device が lock され続けることはありません。

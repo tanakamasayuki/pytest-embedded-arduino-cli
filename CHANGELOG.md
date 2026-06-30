@@ -1,6 +1,10 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Fix peer DUT device locks so they are held until module teardown instead of being released at the end of the `peers` fixture call.
+- (JA) peer DUT の device lock が `peers` fixture 呼び出し終了時に解放されず、module teardown まで保持されるように修正。
+- (EN) Document the default device lock directory resolution order and how to override it with `--device-lock-dir`.
+- (JA) device lock directory の既定解決順と、`--device-lock-dir` による上書き方法をドキュメントに追記。
 
 ## 1.3.0
 - (EN) Add device locking for physical serial DUTs. The default `--device-lock=auto` lets builds run first, then waits before upload and holds each lock until that DUT use finishes; peer DUTs are locked by their resolved serial ports when the `peers` fixture is requested, and `socket://...` targets are left unlocked by default.
