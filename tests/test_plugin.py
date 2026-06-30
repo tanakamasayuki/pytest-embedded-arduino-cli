@@ -9,6 +9,7 @@ import pytest_embedded_arduino_cli.plugin as plugin_module
 from pytest_embedded_arduino_cli.plugin import (
     _ardutest_artifact_dir,
     _log_command,
+    _lock_peer_targets_for_request,
     _peer_device_lock_infos,
     _primary_device_lock_info,
     _set_optional_metadata,
@@ -17,6 +18,7 @@ from pytest_embedded_arduino_cli.plugin import (
     PeerTarget,
 )
 from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
+from pytest_embedded_arduino_cli.device_lock import DeviceLock, DeviceLockError, DeviceLockInfo
 from pytest_embedded_arduino_cli.serial import (
     complete_host_arduino_socket_url,
     ensure_default_embedded_services,
@@ -62,6 +64,11 @@ class DummyConfig:
                 "arduino_test_artifact_dir": "ardutest",
                 "arduino_test_missing_config": "skip",
                 "clean": False,
+                "run_mode": "all",
+                "device_lock": "auto",
+                "device_lock_timeout": 0.1,
+                "device_lock_dir": None,
+                "device_lock_key": None,
             },
         )()
         self.pluginmanager = DummyPluginManager(reporter)
@@ -156,6 +163,38 @@ def test_peer_device_lock_infos_ignore_socket_ports(tmp_path: Path) -> None:
     )
 
     assert [info.key for info in infos] == ["/dev/ttyUSB1"]
+
+
+class DummyRequest:
+    def __init__(self, config: DummyConfig) -> None:
+        self.config = config
+        self.module = type("Module", (), {})()
+
+
+def test_peer_device_lock_is_held_until_module_release(tmp_path: Path) -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.option.device_lock_dir = str(tmp_path)
+    request = DummyRequest(config)
+    app = ArduinoCliBuildConfig(
+        sketch_dir=tmp_path / "peer",
+        sketch_yaml=tmp_path / "peer" / "sketch.yaml",
+        build_path=tmp_path / "peer" / "build" / "esp32",
+        profile="esp32",
+    )
+
+    _lock_peer_targets_for_request(request, [PeerTarget("echo", app, "/dev/ttyUSB1")])
+
+    competing_lock = DeviceLock(
+        DeviceLockInfo(key="/dev/ttyUSB1", port="/dev/ttyUSB1"),
+        lock_dir=tmp_path,
+        timeout=0.01,
+    )
+    with pytest.raises(DeviceLockError):
+        competing_lock.acquire()
+
+    request.module._arduino_cli_peer_device_lock_set.release()
+    competing_lock.acquire()
+    competing_lock.release()
 
 
 def test_make_peer_dut_uses_serial_dut() -> None:
