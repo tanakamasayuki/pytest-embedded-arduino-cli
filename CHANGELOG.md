@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.3.1
 - (EN) Fix peer DUT device locks so they are held until module teardown instead of being released at the end of the `peers` fixture call.
 - (JA) peer DUT の device lock が `peers` fixture 呼び出し終了時に解放されず、module teardown まで保持されるように修正。
 - (EN) Document the default device lock directory resolution order and how to override it with `--device-lock-dir`.
