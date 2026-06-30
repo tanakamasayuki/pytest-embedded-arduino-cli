@@ -72,6 +72,7 @@
 - pytest plugin entry point の定義
 - `arduino-cli compile` を呼ぶ build 機構
 - `arduino-cli upload` を呼ぶ upload 機構
+- 同じ物理 serial device の upload / test 同時利用を防ぐ device lock 機構
 - pytest option の追加
 - `pytest-embedded` の core / serial / expect を前提とした DUT 接続設計
 - コマンド生成と option 解釈を検証する単体テスト
@@ -89,7 +90,7 @@
 - 複雑な board ごとの専用 upload strategy
 - `arduino-cli board list` 連携や自動ポート解決の高度化
 - ボード定義ごとの artifact 自動探索の最適化
-- 並列デバイス制御や device farm 機能
+- 同一 device 排他を超える device farm 機能
 
 ### 5.3 関連仕様
 
@@ -384,27 +385,111 @@ build_property = "build.defines"        # profile 別の override（解決後 pr
 - `--port=socket://...` のような runtime 接続先は、`arduino-cli upload --port` には渡さない
 - upload 後に runtime 接続先の補完が必要な場合は、DUT / Serial 連携層で扱う
 
-## 12. DUT / Serial 連携要件
+## 12. Device Lock 要件
 
-### 12.1 基本方針
+### 12.1 目的
+
+複数の pytest process が 1 つまたは複数の project から同時に実行された場合でも、同じ物理 DUT に対して同時に upload したり、テスト実行中の DUT を別 process が書き換えたりしないようにする。
+
+この lock は物理 device 利用のためのものであり、compile のためのものではない。
+build は device lock 待機より前に実行できる状態を維持する。
+
+### 12.2 lock 対象
+
+既定の lock key は、解決済みの物理 serial port とする。
+
+- primary DUT では、通常の `--flash-port`、`--port`、環境変数の優先順位に従って解決された upload / runtime 用 serial port を使う
+- peer DUT では、各 peer の解決済み runtime / upload 用 serial port を使う
+- profile 名は既定の lock key にしない。同じ profile 名でも project によって別 device を指すことがあり、逆に異なる profile でも同じ物理 device を指すことがあるため
+- `socket://...` は通常 host process または TCP/IP DUT を表し、共有物理 serial device ではないため、既定では lock しない
+
+1 つのテストで複数 DUT を使う場合は、primary と peer DUT が必要とする全ての物理 serial lock key を収集する。
+同じテスト構成内で物理 serial key が重複した場合は設定エラーとして扱う。
+
+### 12.3 lock の取得タイミングと保持期間
+
+plugin は compile 完了後、device を必要とする最初の upload の直前に device lock を取得する。
+
+lock は upload、runtime serial 接続、テスト実行、primary / peer DUT の teardown を含む module 単位の DUT 利用が終わるまで保持する。
+upload 直後に lock を解放すると、別 pytest process がテスト中の DUT へ新しい firmware を upload できてしまうため不十分である。
+
+`--run-mode=build` では device lock を取得しない。
+`--run-mode=all` と `--run-mode=test` では、lock 可能な物理 serial target が解決できた場合に lock を取得する。
+
+複数 DUT テストでは、process 間の deadlock を避けるため、lock key のソート順で決定的に lock を取得する。
+
+### 12.4 lock の保存先と stale lock
+
+device lock は project directory 配下ではなく、user 単位の runtime または cache directory に保存する。
+これにより、同じ machine 上の別 project も同じ排他 domain を共有する。
+既定 directory は `platformdirs` などを使い、platform ごとの user runtime/cache location から決める。
+
+lock file 名は raw path text をそのまま使わず、正規化または hash 化した lock key に基づくものとする。
+
+lock file が存在することだけで device 使用中とは判断しない。
+実装は `portalocker` などの OS file lock に基づくものとし、process が強制終了された場合は OS が file descriptor を閉じることで実 lock が解放されるようにする。
+強制終了後に lock file が残っていても、それは再利用可能な metadata file として扱う。
+
+lock 保持中は、診断用 metadata を lock file に書いてよい。
+
+- process id
+- hostname
+- lock key
+- port
+- profile
+- sketch directory
+- start time
+
+この metadata は log や timeout 診断用であり、排他判定の authoritative な情報としては使わない。
+
+### 12.5 lock option
+
+device lock を制御するため、次の pytest option を追加する。
+
+- `--device-lock=auto|off|required`
+- `--device-lock-timeout=SECONDS`
+- `--device-lock-dir=PATH`
+- `--device-lock-key=KEY`
+
+既定値は `--device-lock=auto` とする。
+
+各 mode の意味は次の通り。
+
+- `auto`: 物理 serial lock key が解決できた場合に lock を取得する。既定の socket URL など lock 対象外では lock せず続行する
+- `off`: device lock を取得しない
+- `required`: upload/test run で lock key が必須。lock key を解決できない場合は usage/configuration error とする
+
+`--device-lock-timeout` は、既に取得されている lock を何秒待つかを制御する。
+timeout 時の error message には、要求した key と、既存 lock file から読める診断 metadata を含めることが望ましい。
+
+`--device-lock-dir` は既定の user runtime/cache lock directory を上書きする。
+CI の分離や、共有 lab machine で明示的な調整が必要な場合に使う。
+
+`--device-lock-key` は primary DUT の自動 key 解決を上書きする。
+serial port 文字列が物理 device identity として安定しない特殊環境向けである。
+peer DUT は、将来 peer 専用 override を追加するまでは、それぞれの解決済み port key を使う。
+
+## 13. DUT / Serial 連携要件
+
+### 13.1 基本方針
 
 - DUT・serial・expect は `pytest-embedded` の既存 generic 機能を活用する
 - `EspSerial` や ESP 向け専用クラスには依存しない
 
-### 12.2 設計意図
+### 13.2 設計意図
 
 - build / upload と test runtime を分離する
 - テストランタイム側はできるだけ board 非依存で保つ
 - 将来、必要に応じて board family ごとの差分を upload strategy または service 層へ切り出せるようにする
 
-### 12.3 到達点
+### 13.3 到達点
 
 - generic serial で接続できる前提のボードでテスト可能
 - `pytest-embedded` 標準 DUT を使った `expect` ベースの基本テストが成立する
 - profile ごとに異なる serial port を環境変数から解決できる
 - host machine 上で動作する board core では、pyserial の `socket://` URL を使って TCP/IP 経由で DUT に接続できる
 
-### 12.4 host Arduino core の socket 接続
+### 13.4 host Arduino core の socket 接続
 
 host machine 上で Arduino sketch を実行する board core では、`--port=socket://localhost` のような port 番号なし socket URL を指定できるものとする。
 
@@ -442,7 +527,7 @@ OS、gcc などの toolchain version、host core の `Serial` class 実装差に
 peripheral、timing、割り込み、Flash/NVS、board 固有 API は実機で確認する。
 また、本番で使う board profile での build test は別途行うことを推奨する。
 
-### 12.5 skip の責務分担
+### 13.5 skip の責務分担
 
 本プラグインは、profile 非対応による skip を build 前に判定できるべきである。
 
@@ -452,7 +537,7 @@ peripheral、timing、割り込み、Flash/NVS、board 固有 API は実機で�
 一方で、同じ profile でも実機状態や外部条件によって実行不能になるケースはテスト側で `pytest.skip()` を使ってよい。
 例えば Wi-Fi 接続条件や外部サービス条件のような runtime 条件は、Python テスト側で扱ってよい。
 
-### 12.6 peer DUT の profile 解決
+### 13.6 peer DUT の profile 解決
 
 peer DUT の profile は、各 `peer_<name>/sketch.yaml` を基準に解決する。
 
@@ -471,7 +556,7 @@ peer DUT では、profile が 1 つだけの場合でも自動選択しない。
 peer DUT は重い複数台テストで使われることが多いため、無指定で動かしたくない peer sketch では `default_profile` を定義しない。
 この場合、`--peer-profile` が指定されなければ、`peers` fixture を使うテストは skip される。
 
-### 12.7 peer DUT の port 解決
+### 13.7 peer DUT の port 解決
 
 `--port` と `--flash-port` は primary DUT 専用とする。
 peer DUT の port は peer 名に基づいて解決し、primary DUT の port 指定を暗黙に流用しない。
@@ -493,7 +578,7 @@ peer DUT の upload port 解決では、runtime port が `socket://...` URL の�
 peer DUT でも host Arduino core の port 番号なし socket URL を使える。
 `socket://localhost` のような URL は、該当 peer DUT の upload 後に、その peer DUT の build 出力ディレクトリ配下の `*.host-arduino.json` から `port` を読み取って補完する。
 
-### 12.8 peer DUT の build / upload / connect
+### 13.8 peer DUT の build / upload / connect
 
 peer DUT の build path は、各 peer sketch ディレクトリ配下の `<peer_dir>/build/<profile or default>` とする。
 primary DUT の build path と peer DUT の build path は分離する。
@@ -521,11 +606,11 @@ peer DUT の構造不備は設定エラーとして扱う。
 例えば `.ino` がない、`.ino` が複数ある、`sketch.yaml` が壊れている場合は error とする。
 一方で、profile 非対応、profile 未決定、port 未解決のように実行条件が揃わない場合は skip とする。
 
-## 13. pytest option 要件
+## 14. pytest option 要件
 
 少なくとも次のカテゴリの option を対象とする。
 
-### 13.1 実行モード
+### 14.1 実行モード
 
 - build するか
 - upload するか
@@ -541,7 +626,7 @@ peer DUT の構造不備は設定エラーとして扱う。
 - `build`: build のみ
 - `test`: 既存 build artifact を使って upload → test
 
-### 13.2 Arduino CLI compile 関連
+### 14.2 Arduino CLI compile 関連
 
 - profile
 
@@ -550,13 +635,13 @@ build path は `<sketch_dir>/build/<profile or default>` に固定し、MVP で�
 
 build 実行前に profile 対応可否を判定し、非対応 profile の sketch では compile を行わない。
 
-### 13.3 Arduino CLI upload 関連
+### 14.3 Arduino CLI upload 関連
 
 本プラグイン固有の upload 関連 option は追加しない。
 upload に必要な port 指定は `pytest-embedded` 標準の `--flash-port` または `--port` を使う。
 ただし、`--port=socket://...` は runtime 接続先を表すため、`arduino-cli upload --port` には渡さない。
 
-### 13.4 peer DUT 関連
+### 14.4 peer DUT 関連
 
 peer DUT 個別指定のため、次の option を追加する。
 
@@ -586,7 +671,7 @@ pytest tests/foo \
 `--peer-port` は該当 peer DUT の runtime port / upload port 解決だけに影響する。
 primary DUT の `--profile`、`--port`、`--flash-port` の挙動は既存通り維持する。
 
-### 13.5 serial / DUT 関連
+### 14.5 serial / DUT 関連
 
 - `pytest-embedded` 標準 option を活かす
 - 必要に応じて plugin 側で橋渡しする
@@ -606,7 +691,19 @@ profile ごとの環境変数名は、例えば `TEST_SERIAL_PORT_ESP32S3` の�
 port 番号なしの socket URL は、upload 後に build 出力ディレクトリの `*.host-arduino.json` から `port` を読み取って補完する。
 port 番号ありの socket URL は補完せず、そのまま使う。
 
-### 13.6 pytest 標準 verbosity 連携
+### 14.6 Device Lock 関連
+
+共有物理 DUT を複数 pytest process から保護するため、device lock option を追加する。
+
+- `--device-lock=auto|off|required`
+- `--device-lock-timeout=SECONDS`
+- `--device-lock-dir=PATH`
+- `--device-lock-key=KEY`
+
+既定値は `auto` とする。
+これにより、通常の実機 upload/test run は追加設定なしで保護され、build only や既定の socket based host run では物理 device lock の待機を行わない。
+
+### 14.7 pytest 標準 verbosity 連携
 
 - 追加の専用 verbose option は設けない
 - pytest 標準の `-v` / `-vv` に従って build / upload のログ出力量を変える
@@ -616,17 +713,17 @@ port 番号ありの socket URL は補完せず、そのまま使う。
 build 前 skip が発生した場合、`-v` 以上では非対応 profile により skip したことが分かる出力を持つことが望ましい。
 peer DUT の build / upload でも、`-v` / `-vv` のログには peer 名が分かる情報を含める。
 
-### 13.7 option 設計方針
+### 14.8 option 設計方針
 
 - 命名は `arduino-cli` の用語を優先する
 - ESP 固有用語を option 名に持ち込まない
 - pytest-embedded 既存 option と競合しにくい名前にする
 - build / upload / runtime の責務境界が option 名から見えるようにする
-- plugin 固有 option は、基本実行用の `--run-mode` / `--profile` と、peer DUT 用の `--peer-profile` / `--peer-port` に絞る
+- plugin 固有 option は、実行 mode、profile 選択、peer DUT、device lock、ArduTest、local state cache の範囲に絞る
 
-## 14. テスト状態保存要件
+## 15. テスト状態保存要件
 
-### 14.1 目的と位置付け
+### 15.1 目的と位置付け
 
 pytest で実行したマイコン向け実機テストについて、各テストの検証状態をローカルファイルに保存する。
 
@@ -641,7 +738,7 @@ pytest で実行したマイコン向け実機テストについて、各テス�
 
 state cache は実行環境に応じてリセットしてもテスト本体やビルドに影響しない disposable なファイルである。
 
-### 14.2 基本方針
+### 15.2 基本方針
 
 - state は実機上で実際に verification が行われた場合のみ更新する
 - 認識単位は `(profile_name, nodeid)` の組とする
@@ -650,9 +747,9 @@ state cache は実行環境に応じてリセットしてもテスト本体や�
 - pytest collection との完全一致を保証しない
 - stale entry が残ることを許容する
 
-### 14.3 保存先と構成
+### 15.3 保存先と構成
 
-#### 14.3.1 ディレクトリ設定
+#### 15.3.1 ディレクトリ設定
 
 状態保存ディレクトリは CLI option で指定可能とする。
 
@@ -661,13 +758,13 @@ state cache は実行環境に応じてリセットしてもテスト本体や�
 - absolute path または relative path（pytest rootdir 基準）を指定可能
 - git 管理外とすることを推奨し、`.gitignore` への追加を推奨する
 
-#### 14.3.2 ファイル構成
+#### 15.3.2 ファイル構成
 
 - state は `<save_state_dir>/state.json` に保存する
 - `<save_state_dir>/` はローカル状態保存用ディレクトリとして扱う
 - 将来の拡張用に他のキャッシュファイルを置ける構造を想定するが、初期仕様では `state.json` のみ
 
-#### 14.3.3 state.json 構造
+#### 15.3.3 state.json 構造
 
 ```json
 {
@@ -702,7 +799,7 @@ state cache は実行環境に応じてリセットしてもテスト本体や�
 - profile 未指定実行でも、内部選択された最終 profile 名を使用する
 - synthetic/default profile 名は使用しない
 
-### 14.4 保存内容
+### 15.4 保存内容
 
 各テストについて、少なくとも以下を保存する。
 
@@ -714,7 +811,7 @@ state cache は実行環境に応じてリセットしてもテスト本体や�
 - 未実行テストは `state.json` に entry が存在しないことで表現する
 - JSON は人間にも読みやすく、機械にも処理しやすい形式とする
 
-### 14.5 保存対象の判定
+### 15.5 保存対象の判定
 
 state を更新するのは、実機上で実際に verification が行われた場合のみである。
 
@@ -730,7 +827,7 @@ state を更新する場合：
 - `pass`/`fail`/`error` など、実際にボード上でテストが開始された結果のみ更新対象
 - upload 成功後にテスト実行へ到達した場合のみ更新対象
 
-### 14.6 結果更新動作
+### 15.6 結果更新動作
 
 - 実行されたテストだけを upsert する
 - 実行されなかったテストの entry は変更しない
@@ -744,7 +841,7 @@ state を更新する場合：
 テストの削除、rename、対象外化によって古い entry が残ってもよい。
 stale entry の cleanup は初期仕様に含めない。
 
-### 14.7 peer DUT の扱い
+### 15.7 peer DUT の扱い
 
 peer DUT を使うテストでも、state cache には primary DUT（親ディレクトリの sketch）のみの結果を保存する。
 
@@ -752,7 +849,7 @@ peer DUT を使うテストでも、state cache には primary DUT（親ディ�
 - `nodeid` は peer 名を含まない
 - 同じ `nodeid` を持つテストが複数台で実行されても、state には primary DUT の結果のみ反映される
 
-### 14.8 ArduTest との独立性
+### 15.8 ArduTest との独立性
 
 state cache 機能は ArduTest に依存しない。
 
@@ -760,7 +857,7 @@ state cache 機能は ArduTest に依存しない。
 - ArduTest fixture の有無にかかわらず、テスト実行がボード上で行われた結果が記録される
 - `pytest-embedded` 標準の expect による basic テストでも state cache に entry が作成される
 
-### 14.9 CLI option 追加
+### 15.9 CLI option 追加
 
 state cache 機能を制御するため、pytest option に次を追加する。
 
@@ -776,9 +873,9 @@ pytest tests/foo --save-state --save-state-dir .test-cache
 
 `--save-state-dir` が指定されても `--save-state` がない場合、state は保存されない。
 
-### 14.10 実装上の考慮
+### 15.10 実装上の考慮
 
-#### 14.10.1 plugin 層の責務
+#### 15.10.1 plugin 層の責務
 
 - pytest hook（`pytest_runtest_logreport` など）を使ってテスト結果を捕捉
 - build / upload 成功の確認（失敗時は state 更新をスキップ）
@@ -787,26 +884,26 @@ pytest tests/foo --save-state --save-state-dir .test-cache
 - nodeid の取得
 - state.json の読み書き（ファイル I/O）
 
-#### 14.10.2 ファイル I/O 設計
+#### 15.10.2 ファイル I/O 設計
 
 - state.json が存在しないとき、初期構造を自動生成する
 - `<save_state_dir>/` ディレクトリが存在しないとき、自動作成する
 - 複数テストの同時実行（pytest-xdist など）による race condition は、初期仕様では対応外とする
 - ユーザーが state.json を削除または手動編集してもテスト本体に影響しない
 
-#### 14.10.3 テストの判定
+#### 15.10.3 テストの判定
 
 テスト実行が実機上で行われたかの判定基準：
 
 - upload フェーズが成功した後、test フェーズの execution に到達したこと
 - この判定は `pytest_runtest_logreport` で `when == "call"` の report を使う
 
-#### 14.10.4 profile 名の確定
+#### 15.10.4 profile 名の確定
 
 - `--profile` が明示指定された場合はその値を使用
 - 自動選択（`--profile` 未指定で profile 1 つの場合）された場合、選択された profile 名を使用
 
-### 14.11 スコープ外
+### 15.11 スコープ外
 
 - state.json の content versioning や migration 機構は初期仕様に含めない
 - stale entry の自動検出・削除は行わない
@@ -815,9 +912,9 @@ pytest tests/foo --save-state --save-state-dir .test-cache
 - `sketch path` や `fqbn` のような override option は必須要件に含めない
 - ログ出力制御は pytest 標準の verbosity に従わせ、専用 option を増やさない
 
-## 15. テスト要件
+## 16. テスト要件
 
-### 15.1 単体テスト
+### 16.1 単体テスト
 
 少なくとも次を検証する。
 
@@ -844,8 +941,14 @@ pytest tests/foo --save-state --save-state-dir .test-cache
 - peer DUT の port 解決順
 - peer DUT の profile 未決定 / port 未解決による skip
 - `peers` fixture を使わないテストでは peer DUT を準備しないこと
+- device lock mode option の解釈と既定値 `auto`
+- 物理 serial port からの device lock key 解決
+- `socket://...` target を既定では lock しないこと
+- compile 後、upload 前に lock を取得すること
+- 複数 DUT lock の決定的な取得順
+- OS lock が保持されていない stale lock file を許容すること
 
-### 15.2 最小統合テスト
+### 16.2 最小統合テスト
 
 少なくとも次を検証する。
 
@@ -853,14 +956,14 @@ pytest tests/foo --save-state --save-state-dir .test-cache
 - `pytest --help` または plugin manager 上で option が見えること
 - fixture が解決できること
 
-### 15.3 テスト方針
+### 16.3 テスト方針
 
 - 実機依存を避ける
 - `subprocess.run` はモック可能な設計にする
 - Arduino CLI 実行の成否よりも、まずは責務分離とインターフェース安定性を検証する
 - verbosity 連携の検証では、標準出力そのものではなく plugin 内のログ分岐を確認してよい
 
-## 16. examples 要件
+## 17. examples 要件
 
 `examples/` には最小利用例を含める。
 
@@ -887,7 +990,7 @@ peer DUT 向けの example では、次を示すこと。
 - `--peer-profile` / `--peer-port` による peer DUT 個別指定
 - `default_profile` を持つ peer は無指定でも動作し、持たない peer は明示 profile 指定時だけ動作すること
 
-## 17. README 要件
+## 18. README 要件
 
 README には少なくとも次を含める。
 
@@ -902,30 +1005,31 @@ README には少なくとも次を含める。
 - 基本的な使い方
 - 最小のテスト例
 - 主要 option
+- device lock の挙動と既定値 `auto`
 - `-v` / `-vv` 時のログ挙動
 - 設計方針
 - 今後の拡張候補
 
-## 18. 非機能要件
+## 19. 非機能要件
 
-### 18.1 保守性
+### 19.1 保守性
 
 - モジュール境界が明確であること
 - subprocess 実行とコマンド生成が分離されていること
 - board 固有処理を混在させないこと
 
-### 18.2 拡張性
+### 19.2 拡張性
 
 - 将来 service 層や strategy 層へ切り出しやすいこと
 - upload 実装を board family ごとに差し替えやすいこと
 - build property や artifact 解決ルールを追加しやすいこと
 
-### 18.3 可搬性
+### 19.3 可搬性
 
 - 少なくとも Linux / macOS を前提に不自然な前提を持たないこと
 - シリアルポートや CLI パスの扱いで特定環境に強く依存しすぎないこと
 
-## 19. 参考実装から取り込む観点
+## 20. 参考実装から取り込む観点
 
 参照対象:
 
@@ -947,7 +1051,7 @@ README には少なくとも次を含める。
 - `pytest-embedded-arduino` 由来の制約を前提とした option 設計
 - conftest にすべて集約する構成
 
-## 20. API / 実装イメージ
+## 21. API / 実装イメージ
 
 実装詳細は後続設計で調整しうるが、次のような薄い構造を想定する。
 
@@ -968,7 +1072,7 @@ README には少なくとも次を含める。
 
 この段階では API 名は仮であり、実装時に Python パッケージとして自然な形へ調整してよい。
 
-## 21. 受け入れ条件
+## 22. 受け入れ条件
 
 本仕様の受け入れ条件は次の通り。
 
@@ -983,14 +1087,17 @@ README には少なくとも次を含める。
 9. `sketch.yaml` に存在しない profile を指定した sketch は build 前に skip される
 10. `peer_*` ディレクトリを使った複数 DUT テスト仕様が定義されている
 11. peer DUT の profile / port を名前付きで指定できる
-12. `--save-state` option で state cache 保存の有効/無効を制御できる
-13. `--save-state-dir` option で state.json の保存先を指定できる
-14. state.json に `(profile_name, nodeid)` 単位でテスト状態が記録される
-15. 実機上で実行されたテストのみ state.json に entry が作成される
-16. peer DUT の state は記録されず、primary DUT のみ記録される
-17. ArduTest に依存せず、基本的な pytest-embedded テストでも state cache が機能する
+12. device lock は物理 serial upload/test run に対して既定で `auto` mode として有効である
+13. device lock は compile 後 upload 前に待機し、DUT 利用終了まで保持される
+14. `--device-lock=off` で device lock を無効化できる
+15. `--save-state` option で state cache 保存の有効/無効を制御できる
+16. `--save-state-dir` option で state.json の保存先を指定できる
+17. state.json に `(profile_name, nodeid)` 単位でテスト状態が記録される
+18. 実機上で実行されたテストのみ state.json に entry が作成される
+19. peer DUT の state は記録されず、primary DUT のみ記録される
+20. ArduTest に依存せず、基本的な pytest-embedded テストでも state cache が機能する
 
-## 22. 今後の拡張候補
+## 23. 今後の拡張候補
 
 - board family ごとの upload strategy 差し替え
 - `arduino-cli board list` 連携によるポート解決支援
