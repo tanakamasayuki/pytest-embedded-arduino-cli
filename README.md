@@ -275,15 +275,17 @@ def test_with_peer(dut, peers):
     echo.expect_exact("ECHO_READY")
 ```
 
-Peer DUTs are prepared only for tests that request the `peers` fixture.
-If a test uses only `dut`, `peer_*` directories are ignored for that test.
-Requesting `peers` enables all detected peer DUTs; `peers["<name>"]` is the mapping API for accessing the connected peer.
+Peer DUTs are uploaded and connected only for tests that request the `peers` fixture.
+If a `peer_*` directory exists, its sketch is compiled before primary upload so all compile work finishes before any upload begins.
+Requesting `peers` enables upload / connect for all detected peer DUTs; `peers["<name>"]` is the mapping API for accessing the connected peer.
 
 Startup order is fixed:
 
-1. the primary DUT is built and uploaded first
-2. peer DUTs are built and uploaded later, in peer name order
-3. peer DUTs are connected and exposed through `peers`
+1. the primary DUT is built first
+2. peer DUTs are built in peer name order
+3. the primary DUT is uploaded
+4. when `peers` is requested, peer DUTs are uploaded in peer name order
+5. peer DUTs are connected and exposed through `peers`
 4. the primary DUT is connected and exposed as `dut`
 
 On real serial hardware, short boot-time messages can be missed if a sketch prints them immediately after reset or upload.

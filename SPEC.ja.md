@@ -172,8 +172,8 @@ def test_round_trip(dut, peers):
     echo.expect_exact("echo ready")
 ```
 
-peer DUT の準備は、原則として `peers` fixture を要求したテストでのみ行う。
-同じ module 内に `dut` だけを使うテストがある場合、そのテストのために peer DUT を build / upload / connect しない。
+peer DUT の upload / connect は、原則として `peers` fixture を要求したテストでのみ行う。
+`peer_*` ディレクトリが存在する場合、すべての compile を upload より前に終えるため、primary upload より前に peer sketch を compile してよい。
 `peers` fixture を要求した時点で peer DUT を使うテストとみなし、`peers["<name>"]` がテスト関数内で参照されるかどうかは有効化条件にしない。
 これは、peer DUT が自律的に動作し、primary DUT 側からの観測だけで検証するテストを許容するためである。
 
@@ -591,7 +591,8 @@ peer DUT でも host Arduino core の port 番号なし socket URL を使える�
 peer DUT の build path は、各 peer sketch ディレクトリ配下の `<peer_dir>/build/<profile or default>` とする。
 primary DUT の build path と peer DUT の build path は分離する。
 
-`peers` fixture が要求された場合、plugin は検出された peer DUT について build / upload / runtime port 補完 / 接続を行う。
+peer directory が存在する場合、build が有効な実行では primary upload より前に peer DUT を compile する。
+`peers` fixture が要求された場合、plugin は検出された peer DUT について upload / runtime port 補完 / 接続を行う。
 `peers["<name>"]` は接続済み peer DUT を参照するための mapping API であり、参照された peer だけを遅延起動する仕様にはしない。
 
 - `--run-mode=all`: peer DUT を build し、upload してから test を実行する
@@ -600,11 +601,13 @@ primary DUT の build path と peer DUT の build path は分離する。
 
 upload / connect の順序は次の通りとする。
 
-1. primary DUT を build / upload する
-2. `peers` fixture が要求された場合、検出された peer DUT を名前順で build / upload する
-3. peer DUT の runtime port 補完を行う
-4. peer DUT に接続し、`peers["<name>"]` として提供する
-5. pytest-embedded の通常処理により primary DUT に接続し、`dut` として提供する
+1. primary DUT を build する
+2. 検出された peer DUT を名前順で build する
+3. primary DUT を upload する
+4. `peers` fixture が要求された場合、検出された peer DUT を名前順で upload する
+5. peer DUT の runtime port 補完を行う
+6. peer DUT に接続し、`peers["<name>"]` として提供する
+7. pytest-embedded の通常処理により primary DUT に接続し、`dut` として提供する
 
 この順序では、実機 DUT が upload 直後に短時間だけ出力する起動メッセージを Python 側が取りこぼす可能性がある。
 host Arduino core のように出力が socket 接続まで保持される環境では問題になりにくいが、一般の実機 serial では sketch 側で十分な待機、再送、または Python 側からの入力を待つ handshake を用意することを推奨する。

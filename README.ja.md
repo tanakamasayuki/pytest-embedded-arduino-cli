@@ -275,16 +275,18 @@ def test_with_peer(dut, peers):
     echo.expect_exact("ECHO_READY")
 ```
 
-peer DUT は `peers` fixture を要求したテストでだけ準備されます。
-`dut` だけを使うテストでは、`peer_*` ディレクトリは無視されます。
-`peers` を要求すると、検出されたすべての peer DUT が有効化されます。
+peer DUT は `peers` fixture を要求したテストでだけ upload / connect されます。
+`peer_*` ディレクトリが存在する場合、その sketch は primary upload より前に compile され、すべての compile が終わってから upload に進みます。
+`peers` を要求すると、検出されたすべての peer DUT の upload / connect が有効化されます。
 `peers["<name>"]` は、接続済み peer を参照するための mapping API です。
 
 起動順は固定です。
 
-1. primary DUT を先に build / upload する
-2. peer DUT を peer 名順で build / upload する
-3. peer DUT に接続し、`peers` から参照できるようにする
+1. primary DUT を先に build する
+2. peer DUT を peer 名順で build する
+3. primary DUT を upload する
+4. `peers` が要求された場合、peer DUT を peer 名順で upload する
+5. peer DUT に接続し、`peers` から参照できるようにする
 4. primary DUT に接続し、`dut` として参照できるようにする
 
 実機 serial では、reset や upload 直後に sketch が短時間だけ出力する起動メッセージを Python 側が取りこぼす可能性があります。

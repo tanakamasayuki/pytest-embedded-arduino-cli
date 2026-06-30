@@ -172,8 +172,8 @@ def test_round_trip(dut, peers):
     echo.expect_exact("echo ready")
 ```
 
-In principle, peer DUTs are prepared only in tests that request the `peers` fixture.
-If there is a test in the same module that uses only `dut`, peer DUTs are not built / uploaded / connected for that test.
+In principle, peer DUTs are uploaded and connected only in tests that request the `peers` fixture.
+If `peer_*` directories exist, their sketches may be compiled before primary upload so all compile work finishes before any upload begins.
 Once the `peers` fixture is requested, the test is considered to use peer DUTs, and whether `peers["<name>"]` is actually referenced within the test function is not used as an activation condition.
 This is to allow tests where the peer DUT operates autonomously and verification is performed only by observation from the primary DUT side.
 
@@ -587,7 +587,8 @@ A URL such as `socket://localhost` is completed by reading the `port` from the `
 The build path of a peer DUT is `<peer_dir>/build/<profile or default>` under each peer sketch directory.
 The build path of the primary DUT and the build path of the peer DUT are separated.
 
-When the `peers` fixture is requested, the plugin performs build / upload / runtime port completion / connection for the detected peer DUTs.
+When peer directories are present, the plugin compiles peer DUTs before primary upload when build is enabled.
+When the `peers` fixture is requested, the plugin performs upload / runtime port completion / connection for the detected peer DUTs.
 `peers["<name>"]` is a mapping API for referencing connected peer DUTs, and the specification is not to lazily start only the referenced peer.
 
 - `--run-mode=all`: Build the peer DUT, upload, and then run the test
@@ -596,11 +597,13 @@ When the `peers` fixture is requested, the plugin performs build / upload / runt
 
 The order of upload / connect is as follows.
 
-1. Build / upload the primary DUT
-2. When the `peers` fixture is requested, build / upload the detected peer DUTs in name order
-3. Perform runtime port completion of the peer DUTs
-4. Connect to the peer DUTs and provide them as `peers["<name>"]`
-5. Connect to the primary DUT through the normal processing of pytest-embedded and provide it as `dut`
+1. Build the primary DUT
+2. Build detected peer DUTs in name order
+3. Upload the primary DUT
+4. When the `peers` fixture is requested, upload the detected peer DUTs in name order
+5. Perform runtime port completion of the peer DUTs
+6. Connect to the peer DUTs and provide them as `peers["<name>"]`
+7. Connect to the primary DUT through the normal processing of pytest-embedded and provide it as `dut`
 
 In this order, the Python side may miss the startup message that the real-board DUT outputs only briefly immediately after upload.
 In environments where the output is retained until the socket connection, such as the host Arduino core, this is unlikely to be a problem, but for general real-board serial, it is recommended to prepare sufficient waiting, retransmission, or a handshake on the sketch side that waits for input from the Python side.
