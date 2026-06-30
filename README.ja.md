@@ -110,6 +110,10 @@ uv run pytest
 - `--peer-profile=NAME:PROFILE`
 - `--peer-port=NAME:PORT`
 - `--clean`
+- `--device-lock=auto|off|required`
+- `--device-lock-timeout=SECONDS`
+- `--device-lock-dir=PATH`
+- `--device-lock-key=KEY`
 - `--save-state`
 - `--save-state-dir=PATH`
 - `--arduino-test-timeout=SECONDS`
@@ -162,6 +166,17 @@ peer test（複数 DUT）の場合、primary DUT の状態のみ記録されま�
 
 `--arduino-test-missing-config` は、ArduTest の必須 config が未指定だった場合の扱いを指定します。
 既定値は `skip` です。未指定 config を pytest error にしたい場合は `error` を指定します。
+
+`--device-lock` は、物理 DUT の process 間排他を制御します。
+既定値は `auto` です。
+`auto` では compile を先に完了させ、`/dev/ttyUSB0`、`/dev/ttyACM0`、`COM3` のような物理 serial port が解決できた場合に、upload 直前で device lock を待ちます。
+lock は DUT を使い終わるまで保持されるため、テスト実行中の board に別 pytest process が新しい firmware を upload することを防ぎます。
+
+device lock は profile ではなく、解決済みの物理 serial port を key にします。
+peer DUT はそれぞれの解決済み port を使い、primary DUT とまとめて決定的な順序で lock します。
+`socket://...` target は通常 host process または TCP/IP DUT を表すため、既定では lock しません。
+lock を無効化する場合は `--device-lock=off`、lock key が解決できない場合に失敗させたい場合は `--device-lock=required`、port 文字列が物理 device identity として安定しない特殊環境では `--device-lock-key=KEY` を使います。
+lock file は既定で user runtime/cache directory に置かれ、OS file lock を使う想定です。そのため、強制終了後に lock file が残っていても、それだけで device が lock され続けることはありません。
 
 実行時の制御には `pytest-embedded` 標準 option を使います。主なものは次です。
 

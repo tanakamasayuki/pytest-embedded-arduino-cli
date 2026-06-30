@@ -110,6 +110,10 @@ uv run pytest
 - `--peer-profile=NAME:PROFILE`
 - `--peer-port=NAME:PORT`
 - `--clean`
+- `--device-lock=auto|off|required`
+- `--device-lock-timeout=SECONDS`
+- `--device-lock-dir=PATH`
+- `--device-lock-key=KEY`
 - `--save-state`
 - `--save-state-dir=PATH`
 - `--arduino-test-timeout=SECONDS`
@@ -162,6 +166,17 @@ The directory is created only when an artifact is saved.
 
 `--arduino-test-missing-config` controls required ArduTest config that is not provided.
 The default is `skip`; use `error` when missing config should fail the pytest run.
+
+`--device-lock` controls cross-process exclusion for physical DUTs.
+The default is `auto`.
+In `auto` mode, this plugin lets compile finish first, then waits for a device lock immediately before upload when a physical serial port such as `/dev/ttyUSB0`, `/dev/ttyACM0`, or `COM3` is resolved.
+The lock is held until the DUT is no longer in use, so another pytest process cannot upload new firmware while a test is still running on that board.
+
+Device locks are keyed by the resolved physical serial port, not by profile.
+Peer DUTs use their own resolved ports and are locked together with the primary DUT in a deterministic order.
+`socket://...` targets are not locked by default because they usually represent host-process or TCP/IP DUTs.
+Use `--device-lock=off` to disable locking, `--device-lock=required` to fail when no lock key can be resolved, and `--device-lock-key=KEY` for unusual environments where the port string is not a stable physical-device identity.
+The lock files live in a user runtime/cache directory by default and use OS file locking, so a leftover lock file after a forced termination does not by itself keep the device locked.
 
 Use `pytest-embedded` standard options for runtime control, such as:
 

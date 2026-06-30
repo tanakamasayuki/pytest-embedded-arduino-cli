@@ -72,6 +72,7 @@ This plugin clearly separates at least the following responsibilities.
 - Definition of a pytest plugin entry point
 - A build mechanism that calls `arduino-cli compile`
 - An upload mechanism that calls `arduino-cli upload`
+- Device locking that prevents concurrent upload / test use of the same physical serial device
 - Adding pytest options
 - DUT connection design premised on the core / serial / expect of `pytest-embedded`
 - Unit tests that verify command generation and option interpretation
@@ -89,7 +90,7 @@ This plugin clearly separates at least the following responsibilities.
 - Complex board-specific dedicated upload strategies
 - Advanced `arduino-cli board list` integration or automatic port resolution
 - Optimization of automatic artifact discovery per board definition
-- Parallel device control or device farm features
+- Device farm features beyond same-device exclusion
 
 ### 5.3 Related Specifications
 
@@ -384,27 +385,108 @@ Organize the information needed to run `arduino-cli upload` and separate the upl
 - A runtime connection target such as `--port=socket://...` is not passed to `arduino-cli upload --port`
 - If runtime connection target completion is needed after upload, it is handled in the DUT / Serial integration layer
 
-## 12. DUT / Serial Integration Requirements
+## 12. Device Lock Requirements
 
-### 12.1 Basic Policy
+### 12.1 Purpose
+
+When multiple pytest processes are run across one or more projects, the plugin should prevent two processes from uploading to or testing with the same physical DUT at the same time.
+
+The lock is for physical device use, not for compilation. Build steps must remain able to run before waiting for the device lock.
+
+### 12.2 Lock Target
+
+The default lock key is the resolved physical serial port.
+
+- For the primary DUT, use the resolved upload / runtime serial port, following the normal `--flash-port`, `--port`, and environment variable priority.
+- For peer DUTs, use each peer's resolved runtime / upload serial port.
+- Profile name is not the default lock key because two projects can use the same profile name for different devices, and two different profiles can still address the same physical device.
+- `socket://...` targets are not locked by default because they normally represent host-process or TCP/IP DUTs rather than a shared physical serial device.
+
+If multiple DUTs are used in one test, all physical serial lock keys required by the primary and peer DUTs are collected. Duplicate physical serial keys in the same test configuration are treated as a configuration error.
+
+### 12.3 Lock Timing and Lifetime
+
+The plugin acquires device locks after compilation has completed and immediately before the first upload that needs the device.
+
+The lock is held until the module-level DUT use is finished, including upload, runtime serial connection, test execution, and teardown of primary / peer DUTs.
+Releasing the lock immediately after upload is not sufficient because another pytest process could upload new firmware while the first test is still interacting with the DUT.
+
+`--run-mode=build` does not acquire device locks.
+`--run-mode=all` and `--run-mode=test` acquire locks when a lockable physical serial target is resolved.
+
+For multi-DUT tests, locks are acquired in a deterministic sorted order by lock key to avoid deadlocks across processes.
+
+### 12.4 Lock Storage and Stale Locks
+
+Device locks are stored in a user-level runtime or cache directory, not under the project directory, so separate projects on the same machine share the same exclusion domain.
+The default directory should be derived from the platform's user runtime/cache location, for example via `platformdirs`.
+
+Lock file names should be based on a normalized or hashed lock key, not on raw path text.
+
+The presence of a lock file alone must not mean the device is busy.
+The implementation must rely on an operating-system file lock, such as one provided by `portalocker`, so process termination releases the actual lock when the OS closes the file descriptor.
+The lock file may remain after a forced termination and is treated as reusable metadata.
+
+While holding the lock, the plugin may write diagnostic metadata to the lock file, such as:
+
+- process id
+- hostname
+- lock key
+- port
+- profile
+- sketch directory
+- start time
+
+This metadata is for logging and timeout diagnostics only, not for the authoritative exclusion check.
+
+### 12.5 Lock Options
+
+The following pytest options control device locking.
+
+- `--device-lock=auto|off|required`
+- `--device-lock-timeout=SECONDS`
+- `--device-lock-dir=PATH`
+- `--device-lock-key=KEY`
+
+The default is `--device-lock=auto`.
+
+Mode meanings:
+
+- `auto`: acquire a lock when a physical serial lock key can be resolved; continue without a lock for non-lockable targets such as default socket URLs.
+- `off`: do not acquire device locks.
+- `required`: require a lock key for upload/test runs; fail with a usage/configuration error if no lock key can be resolved.
+
+`--device-lock-timeout` controls how long to wait for an already-held lock before failing.
+On timeout, the error message should include the requested key and any readable diagnostic metadata from the existing lock file.
+
+`--device-lock-dir` overrides the default user runtime/cache lock directory.
+It is intended for CI isolation or shared lab machines with explicit coordination requirements.
+
+`--device-lock-key` overrides automatic key resolution for the primary DUT.
+It is intended for unusual environments where the serial port string is not a stable physical-device identity.
+Peer DUTs continue to use their own resolved port keys unless a future peer-specific override is added.
+
+## 13. DUT / Serial Integration Requirements
+
+### 13.1 Basic Policy
 
 - DUT, serial, and expect leverage the existing generic features of `pytest-embedded`
 - Do not depend on `EspSerial` or ESP-specific classes
 
-### 12.2 Design Intent
+### 13.2 Design Intent
 
 - Separate build / upload from the test runtime
 - Keep the test runtime side as board-independent as possible
 - Make it possible in the future to carve out per-board-family differences into an upload strategy or service layer as needed
 
-### 12.3 Goals
+### 13.3 Goals
 
 - Testing is possible on boards that can be connected with generic serial
 - Basic `expect`-based tests using the standard DUT of `pytest-embedded` are established
 - A different serial port per profile can be resolved from environment variables
 - On board cores that run on the host machine, the DUT can be connected via TCP/IP using pyserial's `socket://` URL
 
-### 12.4 Socket Connection of the host Arduino core
+### 13.4 Socket Connection of the host Arduino core
 
 On board cores that run the Arduino sketch on the host machine, a socket URL without a port number, such as `--port=socket://localhost`, may be specified.
 
@@ -442,7 +524,7 @@ Results may vary due to the OS, the toolchain version such as gcc, and implement
 Peripherals, timing, interrupts, Flash/NVS, and board-specific APIs are verified on the real board.
 In addition, it is recommended to separately perform a build test with the board profile used in production.
 
-### 12.5 Division of Responsibilities for skip
+### 13.5 Division of Responsibilities for skip
 
 This plugin should be able to determine skip due to unsupported profiles before build.
 
@@ -452,7 +534,7 @@ This plugin should be able to determine skip due to unsupported profiles before 
 On the other hand, cases where execution becomes impossible due to real-board state or external conditions even with the same profile may use `pytest.skip()` on the test side.
 For example, runtime conditions such as Wi-Fi connection conditions or external service conditions may be handled on the Python test side.
 
-### 12.6 Profile Resolution of Peer DUTs
+### 13.6 Profile Resolution of Peer DUTs
 
 The profile of a peer DUT is resolved based on each `peer_<name>/sketch.yaml`.
 
@@ -471,7 +553,7 @@ If the profile specified with `--peer-profile` does not exist in the peer DUT's 
 Since peer DUTs are often used in heavy multi-board tests, do not define `default_profile` for peer sketches that you do not want to run without specification.
 In this case, if `--peer-profile` is not specified, tests that use the `peers` fixture are skipped.
 
-### 12.7 Port Resolution of Peer DUTs
+### 13.7 Port Resolution of Peer DUTs
 
 `--port` and `--flash-port` are exclusive to the primary DUT.
 The port of a peer DUT is resolved based on the peer name, and does not implicitly reuse the primary DUT's port specification.
@@ -493,7 +575,7 @@ This is to treat the socket URL as the runtime connection target, just like the 
 Peer DUTs can also use the host Arduino core's socket URL without a port number.
 A URL such as `socket://localhost` is completed by reading the `port` from the `*.host-arduino.json` under that peer DUT's build output directory after that peer DUT's upload.
 
-### 12.8 Build / Upload / Connect of Peer DUTs
+### 13.8 Build / Upload / Connect of Peer DUTs
 
 The build path of a peer DUT is `<peer_dir>/build/<profile or default>` under each peer sketch directory.
 The build path of the primary DUT and the build path of the peer DUT are separated.
@@ -521,11 +603,11 @@ Structural defects of peer DUTs are treated as configuration errors.
 For example, if there is no `.ino`, there are multiple `.ino` files, or the `sketch.yaml` is broken, it is treated as an error.
 On the other hand, if the execution conditions are not met, such as unsupported profile, undetermined profile, or unresolved port, it is treated as skip.
 
-## 13. pytest option Requirements
+## 14. pytest option Requirements
 
 At least the following categories of options are targeted.
 
-### 13.1 Execution Mode
+### 14.1 Execution Mode
 
 - Whether to build
 - Whether to upload
@@ -541,7 +623,7 @@ The meanings are as follows.
 - `build`: build only
 - `test`: use the existing build artifact to upload → test
 
-### 13.2 Arduino CLI compile Related
+### 14.2 Arduino CLI compile Related
 
 - profile
 
@@ -550,13 +632,13 @@ The build path is fixed to `<sketch_dir>/build/<profile or default>`, and the MV
 
 Before build execution, determine whether the profile is supported, and do not compile sketches with unsupported profiles.
 
-### 13.3 Arduino CLI upload Related
+### 14.3 Arduino CLI upload Related
 
 No upload-related options specific to this plugin are added.
 For the port specification needed for upload, use the standard `--flash-port` or `--port` of `pytest-embedded`.
 However, since `--port=socket://...` represents the runtime connection target, it is not passed to `arduino-cli upload --port`.
 
-### 13.4 Peer DUT Related
+### 14.4 Peer DUT Related
 
 To individually specify peer DUTs, the following options are added.
 
@@ -586,7 +668,7 @@ If a nonexistent peer name is specified, it is also treated as an error.
 `--peer-port` only affects the runtime port / upload port resolution of the corresponding peer DUT.
 The behavior of the primary DUT's `--profile`, `--port`, and `--flash-port` is maintained as before.
 
-### 13.5 serial / DUT Related
+### 14.5 serial / DUT Related
 
 - Leverage the standard options of `pytest-embedded`
 - Bridge on the plugin side as needed
@@ -606,7 +688,19 @@ If a socket URL such as `socket://localhost` is specified in `--port` or an envi
 A socket URL without a port number is completed by reading the `port` from the `*.host-arduino.json` in the build output directory after upload.
 A socket URL with a port number is used directly without completion.
 
-### 13.6 pytest Standard Verbosity Integration
+### 14.6 Device Lock Related
+
+The plugin adds device-lock options to protect shared physical DUTs across concurrent pytest processes.
+
+- `--device-lock=auto|off|required`
+- `--device-lock-timeout=SECONDS`
+- `--device-lock-dir=PATH`
+- `--device-lock-key=KEY`
+
+The default is `auto`.
+This means normal real-board upload/test runs are protected without additional configuration, while build-only and default socket-based host runs do not wait for a physical-device lock.
+
+### 14.7 pytest Standard Verbosity Integration
 
 - No additional dedicated verbose option is provided
 - Vary the amount of build / upload log output according to pytest's standard `-v` / `-vv`
@@ -616,17 +710,17 @@ A socket URL with a port number is used directly without completion.
 When a pre-build skip occurs, it is desirable to have output at `-v` or higher that makes it clear that the skip was due to an unsupported profile.
 For peer DUT build / upload as well, include information in the `-v` / `-vv` logs that identifies the peer name.
 
-### 13.7 Option Design Policy
+### 14.8 Option Design Policy
 
 - Prioritize the terminology of `arduino-cli` for naming
 - Do not bring ESP-specific terminology into option names
 - Use names that are unlikely to conflict with existing pytest-embedded options
 - Make the responsibility boundaries of build / upload / runtime visible from the option names
-- Limit plugin-specific options to `--run-mode` / `--profile` for basic execution and `--peer-profile` / `--peer-port` for peer DUTs
+- Keep plugin-specific options small and scoped to execution mode, profile selection, peer DUTs, device locking, ArduTest, and local state cache
 
-## 14. Test State Saving Requirements
+## 15. Test State Saving Requirements
 
-### 14.1 Purpose and Positioning
+### 15.1 Purpose and Positioning
 
 For real-board microcontroller tests run with pytest, save the verification state of each test to a local file.
 
@@ -641,7 +735,7 @@ This feature is treated as a "real-board verification state cache", and the foll
 
 The state cache is a disposable file that does not affect the test body or build even if reset according to the execution environment.
 
-### 14.2 Basic Policy
+### 15.2 Basic Policy
 
 - The state is updated only when verification is actually performed on the real board
 - The unit of recognition is the pair `(profile_name, nodeid)`
@@ -650,9 +744,9 @@ The state cache is a disposable file that does not affect the test body or build
 - It does not guarantee an exact match with pytest collection
 - It allows stale entries to remain
 
-### 14.3 Save Destination and Structure
+### 15.3 Save Destination and Structure
 
-#### 14.3.1 Directory Setting
+#### 15.3.1 Directory Setting
 
 The state save directory can be specified with a CLI option.
 
@@ -661,13 +755,13 @@ The state save directory can be specified with a CLI option.
 - An absolute path or a relative path (based on the pytest rootdir) can be specified
 - It is recommended to keep it out of git management, and adding it to `.gitignore` is recommended
 
-#### 14.3.2 File Structure
+#### 15.3.2 File Structure
 
 - The state is saved to `<save_state_dir>/state.json`
 - `<save_state_dir>/` is treated as a directory for local state saving
 - A structure that can hold other cache files for future expansion is assumed, but the initial specification has only `state.json`
 
-#### 14.3.3 state.json Structure
+#### 15.3.3 state.json Structure
 
 ```json
 {
@@ -702,7 +796,7 @@ The state save directory can be specified with a CLI option.
 - Even in an execution without profile specification, the internally selected final profile name is used
 - Synthetic/default profile names are not used
 
-### 14.4 Saved Content
+### 15.4 Saved Content
 
 For each test, save at least the following.
 
@@ -714,7 +808,7 @@ For each test, save at least the following.
 - An unexecuted test is expressed by the absence of an entry in `state.json`
 - The JSON is in a format that is both human-readable and machine-processable
 
-### 14.5 Determining Save Targets
+### 15.5 Determining Save Targets
 
 The state is updated only when verification is actually performed on the real board.
 
@@ -730,7 +824,7 @@ When the state is updated:
 - Only results where the test actually started on the board, such as `pass`/`fail`/`error`, are update targets
 - Only when test execution is reached after a successful upload is it an update target
 
-### 14.6 Result Update Behavior
+### 15.6 Result Update Behavior
 
 - Upsert only the tests that were executed
 - Do not change the entries of tests that were not executed
@@ -744,7 +838,7 @@ On failure (`fail`/`error`, etc.):
 It is acceptable for old entries to remain due to deletion, rename, or exclusion of tests.
 Cleanup of stale entries is not included in the initial specification.
 
-### 14.7 Handling of Peer DUTs
+### 15.7 Handling of Peer DUTs
 
 Even in tests that use peer DUTs, only the result of the primary DUT (the sketch in the parent directory) is saved to the state cache.
 
@@ -752,7 +846,7 @@ Even in tests that use peer DUTs, only the result of the primary DUT (the sketch
 - The `nodeid` does not include the peer name
 - Even if a test with the same `nodeid` is executed on multiple boards, only the result of the primary DUT is reflected in the state
 
-### 14.8 Independence from ArduTest
+### 15.8 Independence from ArduTest
 
 The state cache feature does not depend on ArduTest.
 
@@ -760,7 +854,7 @@ The state cache feature does not depend on ArduTest.
 - Regardless of the presence of the ArduTest fixture, the result of test execution performed on the board is recorded
 - An entry is created in the state cache even for basic tests using the standard expect of `pytest-embedded`
 
-### 14.9 CLI Option Additions
+### 15.9 CLI Option Additions
 
 To control the state cache feature, add the following to the pytest options.
 
@@ -776,9 +870,9 @@ pytest tests/foo --save-state --save-state-dir .test-cache
 
 If `--save-state-dir` is specified but `--save-state` is not, the state is not saved.
 
-### 14.10 Implementation Considerations
+### 15.10 Implementation Considerations
 
-#### 14.10.1 Responsibilities of the plugin Layer
+#### 15.10.1 Responsibilities of the plugin Layer
 
 - Capture test results using pytest hooks (such as `pytest_runtest_logreport`)
 - Confirmation of build / upload success (skip the state update on failure)
@@ -787,26 +881,26 @@ If `--save-state-dir` is specified but `--save-state` is not, the state is not s
 - Acquisition of the nodeid
 - Reading and writing state.json (file I/O)
 
-#### 14.10.2 File I/O Design
+#### 15.10.2 File I/O Design
 
 - When state.json does not exist, automatically generate the initial structure
 - When the `<save_state_dir>/` directory does not exist, automatically create it
 - Race conditions due to concurrent execution of multiple tests (such as pytest-xdist) are out of scope in the initial specification
 - Even if the user deletes or manually edits state.json, the test body is not affected
 
-#### 14.10.3 Test Determination
+#### 15.10.3 Test Determination
 
 The criteria for determining whether test execution was performed on the real board:
 
 - After the upload phase succeeds, the execution of the test phase is reached
 - This determination uses the report where `when == "call"` in `pytest_runtest_logreport`
 
-#### 14.10.4 Finalization of the profile Name
+#### 15.10.4 Finalization of the profile Name
 
 - If `--profile` is explicitly specified, use that value
 - If automatically selected (when `--profile` is not specified and there is one profile), use the selected profile name
 
-### 14.11 Out of Scope
+### 15.11 Out of Scope
 
 - Content versioning or migration mechanisms for state.json are not included in the initial specification
 - Automatic detection / deletion of stale entries is not performed
@@ -815,9 +909,9 @@ The criteria for determining whether test execution was performed on the real bo
 - Override options such as `sketch path` or `fqbn` are not included in the mandatory requirements
 - Log output control follows pytest's standard verbosity, and no dedicated options are added
 
-## 15. Test Requirements
+## 16. Test Requirements
 
-### 15.1 Unit Tests
+### 16.1 Unit Tests
 
 At least the following are verified.
 
@@ -844,8 +938,14 @@ At least the following are verified.
 - Port resolution order of peer DUTs
 - Skip due to undetermined profile / unresolved port of peer DUTs
 - Not preparing peer DUTs in tests that do not use the `peers` fixture
+- Device lock mode option parsing and default `auto`
+- Device lock key resolution from physical serial ports
+- Not locking `socket://...` targets by default
+- Lock acquisition after compile and before upload
+- Deterministic multi-DUT lock ordering
+- Stale lock-file tolerance when the OS lock is not held
 
-### 15.2 Minimal Integration Tests
+### 16.2 Minimal Integration Tests
 
 At least the following are verified.
 
@@ -853,14 +953,14 @@ At least the following are verified.
 - Options being visible in `pytest --help` or on the plugin manager
 - Fixtures being resolvable
 
-### 15.3 Test Policy
+### 16.3 Test Policy
 
 - Avoid real-board dependency
 - Design `subprocess.run` to be mockable
 - Rather than the success or failure of Arduino CLI execution, first verify the separation of responsibilities and interface stability
 - In verifying verbosity integration, it is acceptable to check the log branching within the plugin rather than the standard output itself
 
-## 16. examples Requirements
+## 17. examples Requirements
 
 `examples/` should contain minimal usage examples.
 
@@ -887,7 +987,7 @@ For examples for peer DUTs, show the following.
 - Individual specification of peer DUTs via `--peer-profile` / `--peer-port`
 - That a peer with `default_profile` operates even without specification, and a peer without it operates only when a profile is explicitly specified
 
-## 17. README Requirements
+## 18. README Requirements
 
 The README should contain at least the following.
 
@@ -902,30 +1002,31 @@ The README should contain at least the following.
 - Basic usage
 - A minimal test example
 - Main options
+- Device lock behavior and default `auto` mode
 - Log behavior with `-v` / `-vv`
 - Design policy
 - Candidates for future expansion
 
-## 18. Non-Functional Requirements
+## 19. Non-Functional Requirements
 
-### 18.1 Maintainability
+### 19.1 Maintainability
 
 - Module boundaries are clear
 - subprocess execution and command generation are separated
 - Board-specific processing is not mixed in
 
-### 18.2 Extensibility
+### 19.2 Extensibility
 
 - It is easy to carve out into a service layer or strategy layer in the future
 - The upload implementation is easy to swap per board family
 - It is easy to add build properties or artifact resolution rules
 
-### 18.3 Portability
+### 19.3 Portability
 
 - At least, it does not have unnatural premises assuming Linux / macOS
 - It does not depend too strongly on a specific environment in the handling of serial ports or CLI paths
 
-## 19. Perspectives to Incorporate from Reference Implementations
+## 20. Perspectives to Incorporate from Reference Implementations
 
 Reference target:
 
@@ -947,7 +1048,7 @@ On the other hand, the policy of not fixing them as-is is as follows.
 - Option design premised on constraints derived from `pytest-embedded-arduino`
 - A structure that consolidates everything into conftest
 
-## 20. API / Implementation Image
+## 21. API / Implementation Image
 
 The implementation details may be adjusted in subsequent design, but a thin structure like the following is assumed.
 
@@ -968,7 +1069,7 @@ The implementation details may be adjusted in subsequent design, but a thin stru
 
 At this stage, the API names are provisional, and may be adjusted into a form that is natural as a Python package at implementation time.
 
-## 21. Acceptance Criteria
+## 22. Acceptance Criteria
 
 The acceptance criteria of this specification are as follows.
 
@@ -983,14 +1084,17 @@ The acceptance criteria of this specification are as follows.
 9. A sketch that specifies a profile not present in `sketch.yaml` is skipped before build
 10. A multi-DUT test specification using `peer_*` directories is defined
 11. The profile / port of peer DUTs can be specified by name
-12. The enable/disable of state cache saving can be controlled with the `--save-state` option
-13. The save destination of state.json can be specified with the `--save-state-dir` option
-14. Test state is recorded in state.json per `(profile_name, nodeid)`
-15. An entry is created in state.json only for tests executed on the real board
-16. The state of peer DUTs is not recorded, and only the primary DUT is recorded
-17. The state cache functions without depending on ArduTest, even for basic pytest-embedded tests
+12. Device lock is enabled by default in `auto` mode for physical serial upload/test runs
+13. Device lock waits after compile and before upload, and is held until DUT use finishes
+14. Device lock can be disabled with `--device-lock=off`
+15. The enable/disable of state cache saving can be controlled with the `--save-state` option
+16. The save destination of state.json can be specified with the `--save-state-dir` option
+17. Test state is recorded in state.json per `(profile_name, nodeid)`
+18. An entry is created in state.json only for tests executed on the real board
+19. The state of peer DUTs is not recorded, and only the primary DUT is recorded
+20. The state cache functions without depending on ArduTest, even for basic pytest-embedded tests
 
-## 22. Candidates for Future Expansion
+## 23. Candidates for Future Expansion
 
 - Swapping the upload strategy per board family
 - Port resolution support via `arduino-cli board list` integration
