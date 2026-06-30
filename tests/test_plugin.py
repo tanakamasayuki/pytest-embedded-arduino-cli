@@ -9,10 +9,14 @@ import pytest_embedded_arduino_cli.plugin as plugin_module
 from pytest_embedded_arduino_cli.plugin import (
     _ardutest_artifact_dir,
     _log_command,
+    _peer_device_lock_infos,
+    _primary_device_lock_info,
     _set_optional_metadata,
     _should_build,
     _should_upload,
+    PeerTarget,
 )
+from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
 from pytest_embedded_arduino_cli.serial import (
     complete_host_arduino_socket_url,
     ensure_default_embedded_services,
@@ -84,9 +88,74 @@ def test_plugin_help_lists_options(pytester: pytest.Pytester) -> None:
     assert "--arduino-test-timeout=ARDUINO_TEST_TIMEOUT" in stdout
     assert "--arduino-test-artifact-dir=ARDUINO_TEST_ARTIFACT_DIR" in stdout
     assert "--arduino-test-missing-config={skip,error}" in stdout
+    assert "--device-lock={auto,off,required}" in stdout
+    assert "--device-lock-timeout=DEVICE_LOCK_TIMEOUT" in stdout
+    assert "--device-lock-dir=DEVICE_LOCK_DIR" in stdout
+    assert "--device-lock-key=DEVICE_LOCK_KEY" in stdout
     assert "--clean" in stdout
     assert "--arduino-cli-build-path" not in stdout
     assert "--arduino-cli-upload-port" not in stdout
+
+
+def test_primary_device_lock_uses_physical_upload_port(tmp_path: Path) -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.option.device_lock = "auto"
+    config.option.device_lock_key = None
+    config.option.port = "/dev/ttyUSB9"
+    config.option.flash_port = None
+    app = ArduinoCliBuildConfig(
+        sketch_dir=tmp_path,
+        sketch_yaml=tmp_path / "sketch.yaml",
+        build_path=tmp_path / "build" / "esp32",
+        profile="esp32",
+    )
+
+    info = _primary_device_lock_info(config, app, "/dev/ttyUSB0")
+
+    assert info is not None
+    assert info.key == "/dev/ttyUSB0"
+    assert info.port == "/dev/ttyUSB0"
+    assert info.profile == "esp32"
+
+
+def test_primary_device_lock_ignores_socket_port_in_auto(tmp_path: Path) -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.option.device_lock = "auto"
+    config.option.device_lock_key = None
+    config.option.port = "socket://localhost"
+    config.option.flash_port = None
+    app = ArduinoCliBuildConfig(
+        sketch_dir=tmp_path,
+        sketch_yaml=tmp_path / "sketch.yaml",
+        build_path=tmp_path / "build" / "host",
+        profile="host",
+    )
+
+    assert _primary_device_lock_info(config, app, None) is None
+
+
+def test_peer_device_lock_infos_ignore_socket_ports(tmp_path: Path) -> None:
+    serial_app = ArduinoCliBuildConfig(
+        sketch_dir=tmp_path / "serial",
+        sketch_yaml=tmp_path / "serial" / "sketch.yaml",
+        build_path=tmp_path / "serial" / "build" / "esp32",
+        profile="esp32",
+    )
+    socket_app = ArduinoCliBuildConfig(
+        sketch_dir=tmp_path / "socket",
+        sketch_yaml=tmp_path / "socket" / "sketch.yaml",
+        build_path=tmp_path / "socket" / "build" / "host",
+        profile="host",
+    )
+
+    infos = _peer_device_lock_infos(
+        [
+            PeerTarget("serial", serial_app, "/dev/ttyUSB1"),
+            PeerTarget("socket", socket_app, "socket://localhost"),
+        ]
+    )
+
+    assert [info.key for info in infos] == ["/dev/ttyUSB1"]
 
 
 def test_make_peer_dut_uses_serial_dut() -> None:

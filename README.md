@@ -173,10 +173,19 @@ In `auto` mode, this plugin lets compile finish first, then waits for a device l
 The lock is held until the DUT is no longer in use, so another pytest process cannot upload new firmware while a test is still running on that board.
 
 Device locks are keyed by the resolved physical serial port, not by profile.
-Peer DUTs use their own resolved ports and are locked together with the primary DUT in a deterministic order.
+The primary DUT lock is acquired before the primary upload.
+Peer DUTs use their own resolved ports and, when the `peers` fixture is requested, their locks are acquired in a deterministic order before peer upload.
 `socket://...` targets are not locked by default because they usually represent host-process or TCP/IP DUTs.
 Use `--device-lock=off` to disable locking, `--device-lock=required` to fail when no lock key can be resolved, and `--device-lock-key=KEY` for unusual environments where the port string is not a stable physical-device identity.
 The lock files live in a user runtime/cache directory by default and use OS file locking, so a leftover lock file after a forced termination does not by itself keep the device locked.
+Default lock directories are:
+
+- Windows: `%LOCALAPPDATA%\pytest-embedded-arduino-cli\locks` (or `%APPDATA%`, then `~/AppData/Local`, as fallbacks)
+- Linux/macOS with `XDG_RUNTIME_DIR`: `$XDG_RUNTIME_DIR/pytest-embedded-arduino-cli/locks`
+- Linux/macOS with `XDG_CACHE_HOME`: `$XDG_CACHE_HOME/pytest-embedded-arduino-cli/locks`
+- Linux/macOS fallback: `~/.cache/pytest-embedded-arduino-cli/locks`
+
+Use `--device-lock-dir=PATH` to override this location.
 
 Use `pytest-embedded` standard options for runtime control, such as:
 
@@ -487,7 +496,7 @@ If you want to suppress it in your project, add a warning filter in `pytest.ini`
 - Smarter artifact discovery
 - Serial reset / monitor helpers
 - TCP/IP connection helpers for host Arduino cores
-- Multi-device support
+- Device farm scheduling beyond same-device exclusion
 - Optional `fqbn` or sketch path overrides
 
 ## Release

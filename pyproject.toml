@@ -17,6 +17,7 @@ dependencies = [
   "pytest-embedded>=2.0",
   "pytest-embedded-serial>=2.0",
   "PyYAML>=6.0",
+  "portalocker>=2.8",
 ]
 
 [project.entry-points.pytest11]

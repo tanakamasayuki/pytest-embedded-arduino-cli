@@ -18,6 +18,7 @@ from .app import (
     resolve_test_path,
     run_show_properties,
 )
+from .device_lock import DeviceLockError, DeviceLockInfo, DeviceLockSet, default_lock_dir
 from .flasher import ArduinoCliUploadConfig
 from .serial import (
     complete_host_arduino_socket_url,
@@ -106,6 +107,32 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         default=False,
         help="Pass --clean to arduino-cli compile and remove ArduTest artifacts before running.",
+    )
+    group.addoption(
+        "--device-lock",
+        action="store",
+        choices=("auto", "off", "required"),
+        default="auto",
+        help="Control physical device locking before upload.",
+    )
+    group.addoption(
+        "--device-lock-timeout",
+        action="store",
+        type=float,
+        default=300.0,
+        help="Seconds to wait for a physical device lock.",
+    )
+    group.addoption(
+        "--device-lock-dir",
+        action="store",
+        default=None,
+        help="Directory for device lock files. Defaults to a user runtime/cache directory.",
+    )
+    group.addoption(
+        "--device-lock-key",
+        action="store",
+        default=None,
+        help="Override the primary DUT device lock key.",
     )
     group.addoption(
         "--save-state",
@@ -323,6 +350,95 @@ def _log_skip(config: pytest.Config, reason: str) -> None:
     reporter.write_line(f"[arduino-cli] skip: {reason}")
 
 
+def _device_lock_dir(config: pytest.Config) -> Path:
+    value = config.getoption("device_lock_dir")
+    if value:
+        return Path(value).expanduser().resolve()
+    return default_lock_dir()
+
+
+def _device_lock_enabled(config: pytest.Config) -> bool:
+    return config.getoption("device_lock") != "off"
+
+
+def _is_lockable_port(port: str | None) -> bool:
+    return bool(port and not is_socket_url(port))
+
+
+def _primary_device_lock_info(
+    config: pytest.Config,
+    app: ArduinoCliBuildConfig,
+    upload_port: str | None,
+) -> DeviceLockInfo | None:
+    mode = config.getoption("device_lock")
+    if mode == "off":
+        return None
+
+    override = config.getoption("device_lock_key")
+    runtime_port = resolve_port(config, profile=app.profile)
+    key = override
+    port = upload_port if _is_lockable_port(upload_port) else runtime_port
+    if key is None and _is_lockable_port(upload_port):
+        key = upload_port
+    if key is None and _is_lockable_port(runtime_port):
+        key = runtime_port
+
+    if key is None:
+        if mode == "required":
+            raise pytest.UsageError("device lock is required, but no primary physical serial port was resolved")
+        return None
+
+    return DeviceLockInfo(
+        key=key,
+        port=port,
+        profile=app.profile,
+        sketch_dir=str(app.sketch_dir),
+        role="primary",
+    )
+
+
+def _peer_device_lock_infos(targets: list[PeerTarget]) -> list[DeviceLockInfo]:
+    infos: list[DeviceLockInfo] = []
+    for target in targets:
+        if not _is_lockable_port(target.runtime_port):
+            continue
+        infos.append(
+            DeviceLockInfo(
+                key=str(target.runtime_port),
+                port=target.runtime_port,
+                profile=target.app.profile,
+                sketch_dir=str(target.app.sketch_dir),
+                role=f"peer:{target.name}",
+            )
+        )
+    return infos
+
+
+def _acquire_device_locks(
+    config: pytest.Config,
+    infos: list[DeviceLockInfo],
+) -> DeviceLockSet | None:
+    if not infos or not _device_lock_enabled(config):
+        return None
+
+    primary_key = getattr(config, "_arduino_cli_primary_device_lock_key", None)
+    if primary_key is not None:
+        for info in infos:
+            if info.key == primary_key:
+                raise pytest.UsageError(f"duplicate device lock key already used by primary DUT: {info.key}")
+
+    try:
+        lock_set = DeviceLockSet(
+            infos,
+            lock_dir=_device_lock_dir(config),
+            timeout=config.getoption("device_lock_timeout"),
+        )
+        lock_set.acquire()
+    except (DeviceLockError, ValueError) as e:
+        raise pytest.UsageError(str(e)) from e
+    return lock_set
+
+
 @pytest.fixture
 def app_path(request: pytest.FixtureRequest) -> str:
     if not _request_has_sketch(request):
@@ -478,6 +594,7 @@ def arduino_cli_upload(
 ) -> None:
     run_mode = request.config.getoption("run_mode")
     if not _should_upload(run_mode):
+        yield
         return
     try:
         arduino_cli_app = _build_config_from_request(request, required=False)
@@ -485,6 +602,7 @@ def arduino_cli_upload(
         _log_skip(request.config, str(e))
         pytest.skip(str(e))
     if arduino_cli_app is None:
+        yield
         return
     if not arduino_cli_app.build_path.is_dir():
         raise FileNotFoundError(
@@ -497,31 +615,47 @@ def arduino_cli_upload(
         port=resolve_upload_port(request.config, profile=arduino_cli_app.profile),
     )
 
-    _log_command(
+    lock_info = _primary_device_lock_info(
         request.config,
-        action="upload",
-        command=arduino_cli_flasher.upload_command(),
-        details={
-            "cwd": str(arduino_cli_flasher.sketch_dir),
-            "sketch_dir": str(arduino_cli_flasher.sketch_dir),
-            "build_path": str(arduino_cli_flasher.build_path),
-            "profile": arduino_cli_flasher.profile,
-            "port": arduino_cli_flasher.port,
-        },
+        arduino_cli_app,
+        arduino_cli_flasher.port,
     )
-    arduino_cli_flasher.upload()
+    lock_set = _acquire_device_locks(request.config, [lock_info] if lock_info else [])
+    if lock_info is not None:
+        request.config._arduino_cli_primary_device_lock_key = lock_info.key
 
-    # Record profile for state cache after successful upload
-    if arduino_cli_flasher.profile:
-        _set_current_profile(request.config, arduino_cli_flasher.profile)
-
-    runtime_port = resolve_port(request.config, profile=arduino_cli_app.profile)
-    if socket_url_needs_port_completion(runtime_port):
-        request.config.option.port = complete_host_arduino_socket_url(
-            runtime_port,
-            arduino_cli_app.build_path,
+    try:
+        _log_command(
+            request.config,
+            action="upload",
+            command=arduino_cli_flasher.upload_command(),
+            details={
+                "cwd": str(arduino_cli_flasher.sketch_dir),
+                "sketch_dir": str(arduino_cli_flasher.sketch_dir),
+                "build_path": str(arduino_cli_flasher.build_path),
+                "profile": arduino_cli_flasher.profile,
+                "port": arduino_cli_flasher.port,
+            },
         )
-        wait_for_socket_url(request.config.option.port)
+        arduino_cli_flasher.upload()
+
+        # Record profile for state cache after successful upload
+        if arduino_cli_flasher.profile:
+            _set_current_profile(request.config, arduino_cli_flasher.profile)
+
+        runtime_port = resolve_port(request.config, profile=arduino_cli_app.profile)
+        if socket_url_needs_port_completion(runtime_port):
+            request.config.option.port = complete_host_arduino_socket_url(
+                runtime_port,
+                arduino_cli_app.build_path,
+            )
+            wait_for_socket_url(request.config.option.port)
+        yield
+    finally:
+        if lock_set is not None:
+            lock_set.release()
+        if lock_info is not None and hasattr(request.config, "_arduino_cli_primary_device_lock_key"):
+            delattr(request.config, "_arduino_cli_primary_device_lock_key")
 
 
 def _log_peer_command(
@@ -539,6 +673,7 @@ def _log_peer_command(
 def _prepare_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
     cached = getattr(request.module, "_arduino_cli_peer_targets", None)
     if cached is not None:
+        _lock_peer_targets_for_request(request, cached)
         return cached
 
     targets = _peer_targets_from_request(request)
@@ -562,15 +697,22 @@ def _prepare_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
             )
             app.compile()
 
-        if not _should_upload(run_mode):
-            continue
+    if not _should_upload(run_mode):
+        request.module._arduino_cli_peer_targets = targets
+        return targets
 
+    for target in targets:
+        app = target.app
         if not app.build_path.is_dir():
             raise FileNotFoundError(
                 f"peer {target.name}: build output directory not found: {app.build_path}. "
                 "Run with --run-mode=all first, or build the sketch before --run-mode=test."
             )
 
+    _lock_peer_targets_for_request(request, targets)
+
+    for target in targets:
+        app = target.app
         flasher = ArduinoCliUploadConfig.from_build_config(
             app,
             port=resolve_peer_upload_port(target.runtime_port),
@@ -600,6 +742,22 @@ def _prepare_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
 
     request.module._arduino_cli_peer_targets = completed
     return completed
+
+
+def _lock_peer_targets_for_request(
+    request: pytest.FixtureRequest,
+    targets: list[PeerTarget],
+) -> None:
+    if request.config.getoption("run_mode") == "build":
+        return
+
+    infos = _peer_device_lock_infos(targets)
+    if request.config.getoption("device_lock") == "required" and not infos and targets:
+        raise pytest.UsageError("device lock is required, but no peer physical serial port was resolved")
+
+    lock_set = _acquire_device_locks(request.config, infos)
+    if lock_set is not None:
+        request.addfinalizer(lock_set.release)
 
 
 def _make_peer_dut(request: pytest.FixtureRequest, target: PeerTarget) -> tuple[Any, Callable[[], None]]:

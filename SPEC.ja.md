@@ -403,8 +403,8 @@ build は device lock 待機より前に実行できる状態を維持する。
 - profile 名は既定の lock key にしない。同じ profile 名でも project によって別 device を指すことがあり、逆に異なる profile でも同じ物理 device を指すことがあるため
 - `socket://...` は通常 host process または TCP/IP DUT を表し、共有物理 serial device ではないため、既定では lock しない
 
-1 つのテストで複数 DUT を使う場合は、primary と peer DUT が必要とする全ての物理 serial lock key を収集する。
-同じテスト構成内で物理 serial key が重複した場合は設定エラーとして扱う。
+1 つのテストで複数 peer DUT を使う場合は、`peers` fixture が要求された時点で、その peer DUT 群が必要とする全ての物理 serial lock key を収集する。
+同じ peer 群の中で物理 serial key が重複した場合は設定エラーとして扱う。peer の lock key が既に保持している primary DUT の lock key と重複した場合も設定エラーとして扱う。
 
 ### 12.3 lock の取得タイミングと保持期間
 
@@ -416,13 +416,21 @@ upload 直後に lock を解放すると、別 pytest process がテスト中の
 `--run-mode=build` では device lock を取得しない。
 `--run-mode=all` と `--run-mode=test` では、lock 可能な物理 serial target が解決できた場合に lock を取得する。
 
-複数 DUT テストでは、process 間の deadlock を避けるため、lock key のソート順で決定的に lock を取得する。
+peer DUT 群では、process 間の deadlock を避けるため、lock key のソート順で決定的に lock を取得する。
+primary DUT の lock は、peer DUT が `peers` fixture を要求したテストでのみ準備される構造のため、それより前の primary upload 直前に取得する。
 
 ### 12.4 lock の保存先と stale lock
 
 device lock は project directory 配下ではなく、user 単位の runtime または cache directory に保存する。
 これにより、同じ machine 上の別 project も同じ排他 domain を共有する。
-既定 directory は `platformdirs` などを使い、platform ごとの user runtime/cache location から決める。
+既定 directory は次の順で解決する。
+
+1. Windows では、`LOCALAPPDATA` が設定されている場合 `%LOCALAPPDATA%\pytest-embedded-arduino-cli\locks`
+2. Windows では、`APPDATA` が設定されている場合 `%APPDATA%\pytest-embedded-arduino-cli\locks`
+3. Windows fallback は `~/AppData/Local/pytest-embedded-arduino-cli/locks`
+4. Windows 以外では、`XDG_RUNTIME_DIR` が設定されている場合 `$XDG_RUNTIME_DIR/pytest-embedded-arduino-cli/locks`
+5. Windows 以外では、`XDG_CACHE_HOME` が設定されている場合 `$XDG_CACHE_HOME/pytest-embedded-arduino-cli/locks`
+6. Windows 以外の fallback は `~/.cache/pytest-embedded-arduino-cli/locks`
 
 lock file 名は raw path text をそのまま使わず、正規化または hash 化した lock key に基づくものとする。
 
