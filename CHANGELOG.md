@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.3.3
 - (EN) Compile detected peer DUT sketches before primary upload so all compile work completes before any upload begins; peer upload/connect still only runs when the `peers` fixture is requested.
 - (JA) 検出された peer DUT sketch を primary upload 前に compile し、すべての compile が終わってから upload に進むように変更。peer の upload / connect は引き続き `peers` fixture が要求された場合のみ実行。
 
