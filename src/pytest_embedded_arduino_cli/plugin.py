@@ -265,7 +265,12 @@ def _validate_peer_option_names(config: pytest.Config, peers: dict[str, Path]) -
                 )
 
 
-def _peer_targets_from_request(request: pytest.FixtureRequest) -> list[PeerTarget]:
+def _peer_targets_from_request(
+    request: pytest.FixtureRequest,
+    *,
+    require_ports: bool = True,
+    strict: bool = True,
+) -> list[PeerTarget]:
     test_path = resolve_test_path(_request_path(request))
     peer_dirs = _peer_dirs(test_path)
     _validate_peer_option_names(request.config, peer_dirs)
@@ -283,12 +288,16 @@ def _peer_targets_from_request(request: pytest.FixtureRequest) -> list[PeerTarge
             )
         except UnsupportedProfileError as e:
             _log_skip(request.config, f"peer {name}: {e}")
-            pytest.skip(f"peer {name}: {e}")
+            if strict:
+                pytest.skip(f"peer {name}: {e}")
+            continue
 
         if app.profile is None:
             reason = f"peer {name}: profile is not resolved; set --peer-profile {name}:<profile> or default_profile"
             _log_skip(request.config, reason)
-            pytest.skip(reason)
+            if strict:
+                pytest.skip(reason)
+            continue
 
         runtime_port = resolve_peer_port(
             peer=name,
@@ -296,7 +305,7 @@ def _peer_targets_from_request(request: pytest.FixtureRequest) -> list[PeerTarge
             option_port=peer_ports.get(name),
             profile_port=app.profile_port,
         )
-        if not runtime_port and request.config.getoption("run_mode") != "build":
+        if not runtime_port and require_ports:
             reason = f"peer {name}: port is not resolved"
             _log_skip(request.config, reason)
             pytest.skip(reason)
@@ -584,6 +593,7 @@ def arduino_cli_build(
         },
     )
     arduino_cli_app.compile()
+    _compile_peer_targets(request)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -687,18 +697,58 @@ def _log_peer_command(
     _log_command(config, action=f"peer {peer} {action}", command=command, details=peer_details)
 
 
+def _compile_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
+    cached = getattr(request.module, "_arduino_cli_peer_compile_targets", None)
+    if cached is not None:
+        return cached
+
+    run_mode = request.config.getoption("run_mode")
+    if not _should_build(run_mode):
+        request.module._arduino_cli_peer_compile_targets = []
+        request.module._arduino_cli_peer_compiled_names = set()
+        return []
+
+    targets = _peer_targets_from_request(request, require_ports=False, strict=False)
+    compiled_names: set[str] = set()
+    for target in targets:
+        app = _resolve_build_property(target.app)
+        _log_peer_command(
+            request.config,
+            peer=target.name,
+            action="compile",
+            command=app.build_command(),
+            details={
+                "cwd": str(app.sketch_dir),
+                "sketch_dir": str(app.sketch_dir),
+                "build_path": str(app.build_path),
+                "profile": app.profile,
+            },
+        )
+        app.compile()
+        compiled_names.add(target.name)
+
+    request.module._arduino_cli_peer_compile_targets = targets
+    request.module._arduino_cli_peer_compiled_names = compiled_names
+    return targets
+
+
 def _prepare_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
     cached = getattr(request.module, "_arduino_cli_peer_targets", None)
     if cached is not None:
         _lock_peer_targets_for_request(request, cached)
         return cached
 
-    targets = _peer_targets_from_request(request)
+    targets = _peer_targets_from_request(
+        request,
+        require_ports=request.config.getoption("run_mode") != "build",
+        strict=True,
+    )
     run_mode = request.config.getoption("run_mode")
+    compiled_names = getattr(request.module, "_arduino_cli_peer_compiled_names", set())
 
     for target in targets:
         app = target.app
-        if _should_build(run_mode):
+        if _should_build(run_mode) and target.name not in compiled_names:
             app = _resolve_build_property(app)
             _log_peer_command(
                 request.config,
@@ -713,6 +763,9 @@ def _prepare_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
                 },
             )
             app.compile()
+            compiled_names.add(target.name)
+
+    request.module._arduino_cli_peer_compiled_names = compiled_names
 
     if not _should_upload(run_mode):
         request.module._arduino_cli_peer_targets = targets

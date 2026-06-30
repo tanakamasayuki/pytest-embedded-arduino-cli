@@ -728,7 +728,7 @@ def test_plain():
     result.assert_outcomes(passed=1)
 
 
-def test_peer_build_runs_only_when_peers_fixture_is_requested(pytester: pytest.Pytester) -> None:
+def test_peer_build_runs_in_build_mode_when_peer_dir_exists(pytester: pytest.Pytester) -> None:
     test_dir = pytester.path / "sample_app"
     peer_dir = test_dir / "peer_echo"
     peer_dir.mkdir(parents=True)
@@ -780,6 +780,74 @@ def test_with_peer(dut, peers):
     result.assert_outcomes(skipped=2)
     assert (test_dir / "build" / "host" / "compiled.txt").is_file()
     assert (peer_dir / "build" / "host" / "compiled.txt").is_file()
+
+
+def test_peer_compile_runs_before_primary_upload(pytester: pytest.Pytester) -> None:
+    test_dir = pytester.path / "sample_app"
+    peer_dir = test_dir / "peer_echo"
+    order_file = pytester.path / "order.txt"
+    peer_dir.mkdir(parents=True)
+    (test_dir / "sample_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text(
+        "default_profile: host\nprofiles:\n  host: {}\n",
+        encoding="utf-8",
+    )
+    (peer_dir / "peer_echo.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (peer_dir / "sketch.yaml").write_text(
+        "default_profile: host\nprofiles:\n  host: {}\n",
+        encoding="utf-8",
+    )
+    pytester.makeconftest(
+        f"""
+from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
+from pytest_embedded_arduino_cli.flasher import ArduinoCliUploadConfig
+
+ORDER_FILE = {str(order_file)!r}
+
+
+def _record(message):
+    with open(ORDER_FILE, "a", encoding="utf-8") as handle:
+        handle.write(message + "\\n")
+
+
+def _fake_compile(self, *, check=True):
+    self.build_path.mkdir(parents=True, exist_ok=True)
+    _record(f"compile:{{self.sketch_dir.name}}")
+    return None
+
+
+def _fake_upload(self, *, check=True):
+    _record(f"upload:{{self.sketch_dir.name}}")
+    return None
+
+
+ArduinoCliBuildConfig.compile = _fake_compile
+ArduinoCliUploadConfig.upload = _fake_upload
+"""
+    )
+    (test_dir / "test_sample.py").write_text(
+        """
+def test_order():
+    assert True
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--device-lock=off",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+
+    result.assert_outcomes(passed=1)
+    assert order_file.read_text(encoding="utf-8").splitlines() == [
+        "compile:sample_app",
+        "compile:peer_echo",
+        "upload:sample_app",
+    ]
 
 
 def test_peer_profile_does_not_auto_select_single_profile(pytester: pytest.Pytester) -> None:
