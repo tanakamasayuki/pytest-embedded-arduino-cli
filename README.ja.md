@@ -173,10 +173,19 @@ peer test（複数 DUT）の場合、primary DUT の状態のみ記録されま�
 lock は DUT を使い終わるまで保持されるため、テスト実行中の board に別 pytest process が新しい firmware を upload することを防ぎます。
 
 device lock は profile ではなく、解決済みの物理 serial port を key にします。
-peer DUT はそれぞれの解決済み port を使い、primary DUT とまとめて決定的な順序で lock します。
+primary DUT の lock は primary upload の前に取得します。
+peer DUT はそれぞれの解決済み port を使い、`peers` fixture が要求された時点で peer upload の前に決定的な順序で lock します。
 `socket://...` target は通常 host process または TCP/IP DUT を表すため、既定では lock しません。
 lock を無効化する場合は `--device-lock=off`、lock key が解決できない場合に失敗させたい場合は `--device-lock=required`、port 文字列が物理 device identity として安定しない特殊環境では `--device-lock-key=KEY` を使います。
 lock file は既定で user runtime/cache directory に置かれ、OS file lock を使う想定です。そのため、強制終了後に lock file が残っていても、それだけで device が lock され続けることはありません。
+既定の lock directory は次の通りです。
+
+- Windows: `%LOCALAPPDATA%\pytest-embedded-arduino-cli\locks`（fallback として `%APPDATA%`、さらに `~/AppData/Local`）
+- Linux/macOS で `XDG_RUNTIME_DIR` がある場合: `$XDG_RUNTIME_DIR/pytest-embedded-arduino-cli/locks`
+- Linux/macOS で `XDG_CACHE_HOME` がある場合: `$XDG_CACHE_HOME/pytest-embedded-arduino-cli/locks`
+- Linux/macOS fallback: `~/.cache/pytest-embedded-arduino-cli/locks`
+
+保存先を変更する場合は `--device-lock-dir=PATH` を使います。
 
 実行時の制御には `pytest-embedded` 標準 option を使います。主なものは次です。
 
@@ -492,7 +501,7 @@ void loop() {}
 - artifact 探索の改善
 - serial reset / monitor helper
 - host Arduino core の TCP/IP 接続補助
-- 複数デバイス対応
+- 同一 device 排他を超える device farm scheduling
 - `fqbn` や sketch path の override
 
 ## リリース方法

@@ -1,6 +1,10 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Add device locking for physical serial DUTs. The default `--device-lock=auto` lets builds run first, then waits before upload and holds each lock until that DUT use finishes; peer DUTs are locked by their resolved serial ports when the `peers` fixture is requested, and `socket://...` targets are left unlocked by default.
+- (JA) 物理 serial DUT 向けの device lock を追加。既定値の `--device-lock=auto` では build を先に実行し、upload 直前で待機して各 DUT の利用終了まで lock を保持する。peer DUT は `peers` fixture が要求された時点で解決済み serial port により lock し、`socket://...` target は既定では lock しない。
+- (EN) Add `--device-lock-timeout`, `--device-lock-dir`, and `--device-lock-key` options, and use OS file locking via `portalocker` so leftover lock files after forced termination do not keep devices locked by themselves.
+- (JA) `--device-lock-timeout`、`--device-lock-dir`、`--device-lock-key` option を追加。`portalocker` による OS file lock を使うため、強制終了後に lock file が残っても、それだけで device が lock され続けることはない。
 
 ## 1.2.2
 - (EN) Fall back to empty C/C++ compile properties (`compiler.cpp.extra_flags` and `compiler.c.extra_flags`) when auto-selecting the `build_config.toml` injection target, so ESP32 boards that populate both `build.extra_flags` and `build.defines` (for example PSRAM-enabled boards) no longer fail detection.

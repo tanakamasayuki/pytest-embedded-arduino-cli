@@ -402,7 +402,7 @@ The default lock key is the resolved physical serial port.
 - Profile name is not the default lock key because two projects can use the same profile name for different devices, and two different profiles can still address the same physical device.
 - `socket://...` targets are not locked by default because they normally represent host-process or TCP/IP DUTs rather than a shared physical serial device.
 
-If multiple DUTs are used in one test, all physical serial lock keys required by the primary and peer DUTs are collected. Duplicate physical serial keys in the same test configuration are treated as a configuration error.
+If multiple peer DUTs are used in one test, all physical serial lock keys required by those peer DUTs are collected when the `peers` fixture is requested. Duplicate physical serial keys in the same peer set are treated as a configuration error. A peer lock key that duplicates the already-held primary DUT lock key is also treated as a configuration error.
 
 ### 12.3 Lock Timing and Lifetime
 
@@ -414,12 +414,19 @@ Releasing the lock immediately after upload is not sufficient because another py
 `--run-mode=build` does not acquire device locks.
 `--run-mode=all` and `--run-mode=test` acquire locks when a lockable physical serial target is resolved.
 
-For multi-DUT tests, locks are acquired in a deterministic sorted order by lock key to avoid deadlocks across processes.
+For the peer DUT set, locks are acquired in a deterministic sorted order by lock key to avoid deadlocks across processes. The primary DUT lock is acquired earlier, before primary upload, because peer DUTs are only prepared for tests that request the `peers` fixture.
 
 ### 12.4 Lock Storage and Stale Locks
 
 Device locks are stored in a user-level runtime or cache directory, not under the project directory, so separate projects on the same machine share the same exclusion domain.
-The default directory should be derived from the platform's user runtime/cache location, for example via `platformdirs`.
+The default directory is resolved as follows:
+
+1. On Windows, use `%LOCALAPPDATA%\pytest-embedded-arduino-cli\locks` when `LOCALAPPDATA` is set.
+2. On Windows, fall back to `%APPDATA%\pytest-embedded-arduino-cli\locks` when `APPDATA` is set.
+3. On Windows, fall back to `~/AppData/Local/pytest-embedded-arduino-cli/locks`.
+4. On non-Windows platforms, use `$XDG_RUNTIME_DIR/pytest-embedded-arduino-cli/locks` when `XDG_RUNTIME_DIR` is set.
+5. On non-Windows platforms, fall back to `$XDG_CACHE_HOME/pytest-embedded-arduino-cli/locks` when `XDG_CACHE_HOME` is set.
+6. On non-Windows platforms, fall back to `~/.cache/pytest-embedded-arduino-cli/locks`.
 
 Lock file names should be based on a normalized or hashed lock key, not on raw path text.
 
