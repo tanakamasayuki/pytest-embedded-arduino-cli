@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.3.2
 - (EN) Keep the primary DUT device lock in the module-level lock manager so it remains held during test execution and is released at module teardown.
 - (JA) primary DUT の device lock を module-level lock manager で保持し、テスト実行中も解放せず module teardown で解放するように修正。
 
