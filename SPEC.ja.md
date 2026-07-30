@@ -730,7 +730,22 @@ peer DUT の build / upload でも、`-v` / `-vv` のログには peer 名が分
 - ESP 固有用語を option 名に持ち込まない
 - pytest-embedded 既存 option と競合しにくい名前にする
 - build / upload / runtime の責務境界が option 名から見えるようにする
-- plugin 固有 option は、実行 mode、profile 選択、peer DUT、device lock、ArduTest、local state cache の範囲に絞る
+- plugin 固有 option は、実行 mode、profile 選択、peer DUT、device lock、ArduTest、local state cache、log directory summary の範囲に絞る
+
+### 14.9 log directory 結果 summary
+
+log directory `<tmpdir>/pytest-embedded/<UTC timestamp>/<テスト名>/` は `pytest-embedded` が所有し、そこには serial log しか出力されない。
+そのため directory tree から実行結果が分からないので、本 plugin は同じ directory に結果ファイルを追加する。
+
+- 各テスト directory に status ファイルをちょうど 1 つ出力する: `PASSED.txt`、`FAILED.txt`、`ERROR.txt`、`SKIPPED.txt`、`XFAILED.txt`、`XPASSED.txt`
+  - `ERROR.txt` は setup / teardown の失敗を表し、build や upload の失敗はここに現れる
+  - status ファイルには test id、phase ごとの所要時間、profile、log ファイル名、失敗時はその内容を含める
+  - 同じ directory に残っている前回実行の status ファイルは削除し、tree 上で結果が矛盾しないようにする
+- session log directory の直下に、件数を名前に持つ 0 byte の marker を出力する（例: `FAILED-2_PASSED-7`）。`tree` や `ls` の 1 行で結果が分かることを目的とする
+- 実行全体について、人が読む `SUMMARY.txt` と機械可読な `summary.json` を出力する
+- 失敗内容は上限サイズで末尾を残して切り詰める。完全な serial log は同じ directory の `dut.log` とする
+- `pytest-embedded` が log directory を作らなかった実行では何も出力しない。また本機能の失敗が pytest の exit status に影響してはならない
+- option: `--arduino-cli-no-log-summary` で本機能を無効化する。既定値は有効
 
 ## 15. テスト状態保存要件
 
@@ -958,6 +973,10 @@ pytest tests/foo --save-state --save-state-dir .test-cache
 - compile 後、upload 前に lock を取得すること
 - 複数 DUT lock の決定的な取得順
 - OS lock が保持されていない stale lock file を許容すること
+- log directory summary の status ファイル、root marker、`SUMMARY.txt`、`summary.json` の内容
+- 前回実行が残した status ファイルと marker を置き換えること
+- 複数の test id が同じ log directory 名を共有する場合に最も重い status を採用すること
+- `--arduino-cli-no-log-summary` で log directory summary を無効化できること
 
 ### 16.2 最小統合テスト
 

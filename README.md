@@ -116,6 +116,7 @@ uv run pytest
 - `--device-lock-key=KEY`
 - `--save-state`
 - `--save-state-dir=PATH`
+- `--arduino-cli-no-log-summary`
 - `--arduino-test-timeout=SECONDS`
 - `--arduino-test-artifact-dir=PATH`
 - `--arduino-test-missing-config=skip|error`
@@ -159,6 +160,30 @@ For peer tests (multi-DUT), only the primary DUT state is recorded.
 
 `--save-state-dir` specifies the directory for state.json storage.
 The default is `.pytest-results` (relative to pytest rootdir unless absolute).
+
+## Log Directory Summary
+
+`pytest-embedded` writes serial logs to `<tmpdir>/pytest-embedded/<UTC timestamp>/<test name>/dut.log`.
+This plugin adds result files to the same directory so the outcome is visible from `tree` or `ls` alone:
+
+```text
+/tmp/pytest-embedded/2026-07-30_08-03-16-959795/
+├── ERROR-1_FAILED-1_PASSED-1_SKIPPED-1   # empty file; the name carries the counts
+├── SUMMARY.txt                           # whole run, human readable
+├── summary.json                          # same data, machine readable
+├── test_diff/
+│   ├── PASSED.txt                         # test id, timings, profile, log file names
+│   └── dut.log
+└── test_memory/
+    ├── FAILED.txt                         # the above plus the failure text
+    └── dut.log
+```
+
+Each test directory holds exactly one of `PASSED.txt`, `FAILED.txt`, `ERROR.txt` (setup or teardown failure, which is where build and upload errors land), `SKIPPED.txt`, or `XFAILED.txt`/`XPASSED.txt`.
+Failure text is truncated to the last 32 KB; `dut.log` in the same directory always has the full serial log.
+Nothing is written when no DUT was created, because `pytest-embedded` does not create a log directory in that case.
+
+Use `--arduino-cli-no-log-summary` to disable these files.
 
 `--arduino-test-artifact-dir` selects the ArduTest artifact root.
 The default is `ardutest`, resolved relative to pytest's `rootdir`.

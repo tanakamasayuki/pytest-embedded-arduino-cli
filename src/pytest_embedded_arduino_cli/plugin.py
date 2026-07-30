@@ -20,6 +20,7 @@ from .app import (
 )
 from .device_lock import DeviceLockError, DeviceLockInfo, DeviceLockSet, default_lock_dir
 from .flasher import ArduinoCliUploadConfig
+from .log_summary import LogSummaryCollector
 from .serial import (
     complete_host_arduino_socket_url,
     ensure_default_embedded_services,
@@ -133,6 +134,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store",
         default=None,
         help="Override the primary DUT device lock key.",
+    )
+    group.addoption(
+        "--arduino-cli-no-log-summary",
+        action="store_true",
+        default=False,
+        help="Do not write result marker files (PASSED.txt/FAILED.txt, SUMMARY.txt) into the pytest-embedded log dir.",
     )
     group.addoption(
         "--save-state",
@@ -967,17 +974,8 @@ def _set_current_profile(config: pytest.Config, profile: str | None) -> None:
     config._arduino_cli_current_profile = profile
 
 
-def pytest_runtest_logreport(report: pytest.TestReport) -> None:
-    """Capture test results and update state cache on test completion."""
-    # Only process call phase (actual test execution)
-    if report.when != "call":
-        return
-
-    # Skip if test was skipped or not run
-    if report.outcome == "skipped":
-        return
-
-    # Get config from report; be robust across pytest versions
+def _config_from_report(report: pytest.TestReport) -> pytest.Config | None:
+    """Get config from a report; be robust across pytest versions."""
     config = getattr(report, "config", None)
     if config is None:
         pyfuncitem = getattr(report, "_pyfuncitem", None)
@@ -990,6 +988,60 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     if config is None:
         # Fallback to global config set during pytest_configure
         config = globals().get("_GLOBAL_CONFIG")
+    return config
+
+
+def _get_log_summary_collector(config: pytest.Config) -> LogSummaryCollector | None:
+    """Get the log summary collector, unless --arduino-cli-no-log-summary was given."""
+    try:
+        if config.getoption("arduino_cli_no_log_summary"):
+            return None
+    except Exception:
+        return None
+
+    collector = getattr(config, "_arduino_cli_log_summary", None)
+    if collector is None:
+        collector = LogSummaryCollector()
+        config._arduino_cli_log_summary = collector
+    return collector
+
+
+def _session_tempdir(config: pytest.Config) -> Path | None:
+    """Locate the log dir pytest-embedded created for this session, if any."""
+    try:
+        from pytest_embedded.plugin import _session_tempdir_key
+    except Exception:
+        return None
+
+    tempdir = config.stash.get(_session_tempdir_key, None)
+    if not tempdir:
+        return None
+    path = Path(tempdir)
+    return path if path.is_dir() else None
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    """Capture test results and update state cache on test completion."""
+    config = _config_from_report(report)
+
+    # Every phase feeds the log summary: setup failures are where build and upload
+    # errors land, and skips are worth showing in the tree too.
+    if config is not None:
+        collector = _get_log_summary_collector(config)
+        if collector is not None:
+            try:
+                collector.record(report, _get_current_profile(config) or config.getoption("profile"))
+            except Exception:
+                pass
+
+    # Only process call phase (actual test execution)
+    if report.when != "call":
+        return
+
+    # Skip if test was skipped or not run
+    if report.outcome == "skipped":
+        return
+
     if config is None:
         # Unable to determine config, skip state update
         return
@@ -1033,8 +1085,28 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
         pass
 
 
+def _write_log_summary(session: pytest.Session, exitstatus: int) -> None:
+    """Drop result marker files into the pytest-embedded log dir. Never fatal."""
+    try:
+        config = getattr(session, "config", None)
+        if config is None:
+            return
+        collector = getattr(config, "_arduino_cli_log_summary", None)
+        if collector is None:
+            return
+        session_tempdir = _session_tempdir(config)
+        if session_tempdir is None:
+            # No DUT was created, so pytest-embedded never made a log dir.
+            return
+        collector.write(session_tempdir, session, exitstatus)
+    except Exception:
+        pass
+
+
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """Apply pending state cache updates at session end and persist state.json."""
+    """Write the log summary and persist pending state cache updates at session end."""
+    _write_log_summary(session, exitstatus)
+
     try:
         config = getattr(session, "config", None)
         if config is None:
