@@ -726,7 +726,22 @@ For peer DUT build / upload as well, include information in the `-v` / `-vv` log
 - Do not bring ESP-specific terminology into option names
 - Use names that are unlikely to conflict with existing pytest-embedded options
 - Make the responsibility boundaries of build / upload / runtime visible from the option names
-- Keep plugin-specific options small and scoped to execution mode, profile selection, peer DUTs, device locking, ArduTest, and local state cache
+- Keep plugin-specific options small and scoped to execution mode, profile selection, peer DUTs, device locking, ArduTest, local state cache, and the log directory summary
+
+### 14.9 Log Directory Result Summary
+
+`pytest-embedded` owns the log directory `<tmpdir>/pytest-embedded/<UTC timestamp>/<test name>/`, and only serial logs are written there.
+The result of the run is therefore not visible from the directory tree, so this plugin adds result files to the same directory.
+
+- Write exactly one status file per test directory: `PASSED.txt`, `FAILED.txt`, `ERROR.txt`, `SKIPPED.txt`, `XFAILED.txt`, or `XPASSED.txt`
+  - `ERROR.txt` covers setup / teardown failures, which is where build and upload failures appear
+  - The status file holds the test id, per-phase durations, the profile, the log file names, and the failure text when there is one
+  - Remove status files left by a previous run in the same directory so the tree never shows a contradiction
+- Write a zero-byte marker at the session log directory root whose name carries the counts, such as `FAILED-2_PASSED-7`, so a single `tree` or `ls` line shows the outcome
+- Write `SUMMARY.txt` for humans and `summary.json` for machines, both covering the whole run
+- Truncate failure text to a bounded size, keeping the tail; `dut.log` in the same directory remains the complete serial log
+- Never write anything when `pytest-embedded` did not create a log directory, and never let a failure in this feature affect the pytest exit status
+- Option: `--arduino-cli-no-log-summary` disables the feature. The default is enabled
 
 ## 15. Test State Saving Requirements
 
@@ -954,6 +969,10 @@ At least the following are verified.
 - Lock acquisition after compile and before upload
 - Deterministic multi-DUT lock ordering
 - Stale lock-file tolerance when the OS lock is not held
+- Status file, root marker, `SUMMARY.txt`, and `summary.json` contents of the log directory summary
+- Replacement of stale status files and markers from a previous run
+- Worst-status selection when several test ids share one log directory name
+- Disabling the log directory summary with `--arduino-cli-no-log-summary`
 
 ### 16.2 Minimal Integration Tests
 

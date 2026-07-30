@@ -116,6 +116,7 @@ uv run pytest
 - `--device-lock-key=KEY`
 - `--save-state`
 - `--save-state-dir=PATH`
+- `--arduino-cli-no-log-summary`
 - `--arduino-test-timeout=SECONDS`
 - `--arduino-test-artifact-dir=PATH`
 - `--arduino-test-missing-config=skip|error`
@@ -159,6 +160,30 @@ peer test（複数 DUT）の場合、primary DUT の状態のみ記録されま�
 
 `--save-state-dir` は `state.json` の保存先 directory を指定します。
 既定値は `.pytest-results` です（pytest rootdir からの相対 path。絶対 path の場合はそのまま使用）。
+
+## log directory の結果 summary
+
+`pytest-embedded` は serial log を `<tmpdir>/pytest-embedded/<UTC timestamp>/<テスト名>/dut.log` に出力します。
+この plugin は同じ directory に結果ファイルを追加するため、`tree` や `ls` だけで結果が把握できます。
+
+```text
+/tmp/pytest-embedded/2026-07-30_08-03-16-959795/
+├── ERROR-1_FAILED-1_PASSED-1_SKIPPED-1   # 中身は空。名前が件数を表す
+├── SUMMARY.txt                           # 実行全体の summary（人が読む用）
+├── summary.json                          # 同じ内容の機械可読版
+├── test_diff/
+│   ├── PASSED.txt                         # test id、所要時間、profile、log ファイル名
+│   └── dut.log
+└── test_memory/
+    ├── FAILED.txt                         # 上記に加えて失敗内容
+    └── dut.log
+```
+
+各テスト directory には `PASSED.txt`、`FAILED.txt`、`ERROR.txt`（setup/teardown 失敗。build や upload の失敗はここに出ます）、`SKIPPED.txt`、`XFAILED.txt`/`XPASSED.txt` のいずれか 1 つだけが置かれます。
+失敗内容は末尾 32 KB で切り詰められます。完全な serial log は同じ directory の `dut.log` を参照してください。
+DUT が生成されなかった実行では `pytest-embedded` が log directory を作らないため、これらのファイルも出力されません。
+
+`--arduino-cli-no-log-summary` を指定すると、これらのファイルを出力しません。
 
 `--arduino-test-artifact-dir` は ArduTest artifact の保存先 root を指定します。
 既定値は `ardutest` で、pytest の `rootdir` からの相対 path として解決されます。
