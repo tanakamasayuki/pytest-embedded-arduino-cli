@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.4.0
 - (EN) Write result files into the `pytest-embedded` log directory: one `PASSED.txt`/`FAILED.txt`/`ERROR.txt`/`SKIPPED.txt`/`XFAILED.txt`/`XPASSED.txt` per test directory, a zero-byte root marker whose name carries the counts (e.g. `FAILED-2_PASSED-7`), plus `SUMMARY.txt` and `summary.json`. Disable with `--arduino-cli-no-log-summary`.
 - (JA) `pytest-embedded` の log directory に結果ファイルを出力。各テスト directory に `PASSED.txt`/`FAILED.txt`/`ERROR.txt`/`SKIPPED.txt`/`XFAILED.txt`/`XPASSED.txt` のいずれか 1 つ、root には件数を名前に持つ 0 byte の marker（例: `FAILED-2_PASSED-7`）、加えて `SUMMARY.txt` と `summary.json` を出力。`--arduino-cli-no-log-summary` で無効化可能。
 
