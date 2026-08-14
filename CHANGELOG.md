@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.4.1
 - (EN) Resolve device lock keys through symlinks, so `/dev/serial/by-id/...` and `/dev/serial/by-path/...` aliases lock the same physical device as the underlying `/dev/ttyUSB*` node. Non-path keys (`COM3`, `--device-lock-key` labels) are unchanged.
 - (JA) device lock key の symlink を解決するように変更。`/dev/serial/by-id/...` や `/dev/serial/by-path/...` を指定しても実体の `/dev/ttyUSB*` と同じ device として排他制御される。path でない key（`COM3` や `--device-lock-key` の label）は従来どおり。
 
