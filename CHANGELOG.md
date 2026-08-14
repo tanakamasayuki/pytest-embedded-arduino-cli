@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Resolve device lock keys through symlinks, so `/dev/serial/by-id/...` and `/dev/serial/by-path/...` aliases lock the same physical device as the underlying `/dev/ttyUSB*` node. Non-path keys (`COM3`, `--device-lock-key` labels) are unchanged.
+- (JA) device lock key の symlink を解決するように変更。`/dev/serial/by-id/...` や `/dev/serial/by-path/...` を指定しても実体の `/dev/ttyUSB*` と同じ device として排他制御される。path でない key（`COM3` や `--device-lock-key` の label）は従来どおり。
 
 ## 1.4.0
 - (EN) Write result files into the `pytest-embedded` log directory: one `PASSED.txt`/`FAILED.txt`/`ERROR.txt`/`SKIPPED.txt`/`XFAILED.txt`/`XPASSED.txt` per test directory, a zero-byte root marker whose name carries the counts (e.g. `FAILED-2_PASSED-7`), plus `SUMMARY.txt` and `summary.json`. Disable with `--arduino-cli-no-log-summary`.
