@@ -198,6 +198,7 @@ In `auto` mode, this plugin lets compile finish first, then waits for a device l
 The lock is held until the DUT is no longer in use, so another pytest process cannot upload new firmware while a test is still running on that board.
 
 Device locks are keyed by the resolved physical serial port, not by profile.
+Port paths are resolved through symlinks before hashing, so `/dev/serial/by-id/...` and `/dev/serial/by-path/...` aliases lock the same device as the underlying `/dev/ttyUSB0` node.
 The primary DUT lock is acquired before the primary upload and held until module teardown.
 Peer DUTs use their own resolved ports and, when the `peers` fixture is requested, their locks are acquired in a deterministic order before peer upload and held until module teardown.
 `socket://...` targets are not locked by default because they usually represent host-process or TCP/IP DUTs.

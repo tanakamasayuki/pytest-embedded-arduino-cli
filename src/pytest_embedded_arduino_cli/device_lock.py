@@ -34,6 +34,24 @@ def default_lock_dir() -> Path:
     return Path.home() / ".cache" / "pytest-embedded-arduino-cli" / "locks"
 
 
+def normalize_device_key(key: str) -> str:
+    """Resolve a device key to its underlying device node.
+
+    ``/dev/serial/by-id/...`` and ``/dev/serial/by-path/...`` are symlinks to the
+    real ``/dev/ttyUSB*`` node, so two runs naming the same device differently must
+    still collide on the same lock. Keys that are not existing filesystem paths
+    (``COM3``, arbitrary override labels) are returned unchanged.
+    """
+    if not key:
+        return key
+    try:
+        if not os.path.exists(key):
+            return key
+        return os.path.realpath(key)
+    except OSError:
+        return key
+
+
 def lock_file_name(key: str) -> str:
     digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
     return f"device-{digest}.lock"
@@ -62,6 +80,9 @@ class DeviceLockInfo:
     profile: str | None = None
     sketch_dir: str | None = None
     role: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "key", normalize_device_key(self.key))
 
 
 class DeviceLock:

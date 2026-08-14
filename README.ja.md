@@ -198,6 +198,7 @@ DUT が生成されなかった実行では `pytest-embedded` が log directory 
 lock は DUT を使い終わるまで保持されるため、テスト実行中の board に別 pytest process が新しい firmware を upload することを防ぎます。
 
 device lock は profile ではなく、解決済みの物理 serial port を key にします。
+port path は hash 化する前に symlink を解決するため、`/dev/serial/by-id/...` や `/dev/serial/by-path/...` を指定しても実体の `/dev/ttyUSB0` と同じ lock になります。
 primary DUT の lock は primary upload の前に取得し、module teardown まで保持します。
 peer DUT はそれぞれの解決済み port を使い、`peers` fixture が要求された時点で peer upload の前に決定的な順序で lock し、module teardown まで保持します。
 `socket://...` target は通常 host process または TCP/IP DUT を表すため、既定では lock しません。
