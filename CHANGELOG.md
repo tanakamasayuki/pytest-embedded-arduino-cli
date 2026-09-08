@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.5.0
 - (EN) Add reserved DUT lifecycle commands `START` / `RECOVER` / `STOP`, sent to the primary DUT and every connected peer DUT: `START` after all fixtures connect and before the test body (peers in name order, then primary, resent until the reply arrives; no reply is a setup error), `RECOVER` right before the connections close after every test, and `STOP` instead of `RECOVER` when nothing runs after the test (last test, `-x` / `--maxfail`, Ctrl-C). Each command is opt-in through the ini pair `arduino_cli_dut_<name>_command` / `arduino_cli_dut_<name>_reply` (plus `arduino_cli_dut_command_terminator`), with `--arduino-cli-dut-start-timeout` and `--arduino-cli-dut-teardown-timeout`. A reply means the sketch reached the target state. Test modules may define `arduino_cli_dut_start` / `arduino_cli_dut_teardown` to replace the generic implementation.
 - (JA) DUT ライフサイクル予約コマンド `START` / `RECOVER` / `STOP` を追加。primary DUT と接続中の全 peer DUT に送る。`START` は全 fixture 接続後かつテスト本体の前（peer を名前順、次に primary。応答まで再送し、応答がなければ setup error）、`RECOVER` は毎テストの接続 close 直前、`STOP` はそのテストの後に実行するテストがないとき（最後のテスト、`-x` / `--maxfail`、Ctrl-C）に `RECOVER` の代わりに送る。各コマンドは ini の `arduino_cli_dut_<name>_command` / `arduino_cli_dut_<name>_reply`（および `arduino_cli_dut_command_terminator`）で個別に opt-in し、`--arduino-cli-dut-start-timeout` / `--arduino-cli-dut-teardown-timeout` で待ち時間を調整する。応答は sketch が目標状態に到達したことを意味する。テスト module に `arduino_cli_dut_start` / `arduino_cli_dut_teardown` を定義すると汎用実装を置き換えられる。
 
