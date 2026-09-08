@@ -449,16 +449,18 @@ arduino_cli_dut_stop_reply = STOPPED
 ```
 
 Values accept `\xNN`, `\n`, `\r`, `\t`, and `\\` escapes.
+In `pyproject.toml`, write them as TOML literal strings (`'\x01'`): basic strings (`"\x01"`) reject `\x` escapes and the file fails to parse.
 Every command is written as the configured bytes followed by `arduino_cli_dut_command_terminator` (default `\n`).
 The plugin ships no default bytes. The control characters above (SOH, CAN, EOT) are a recommended convention because typical sketches dispatch printable characters from `Serial.read()` and ignore everything else.
 
 Rules:
 
 - A reply means the sketch has **reached the target state**, not that it received the command. A sketch whose start-up is asynchronous (USB enumeration, a BLE connection) must defer the `START` reply until it is actually ready.
-- `START` is sent to peers in name order, then to the primary DUT. It is resent every 0.5 s until the reply arrives or `--arduino-cli-dut-start-timeout` (default 15 s) elapses. A missing reply is a setup **error** and the test body does not run. Enabling `START` means every sketch in the project answers it. `START` does not replace test-side normalization of application state.
+- `START` is sent to peers in name order, then to the primary DUT. It is resent every 0.5 s until the reply arrives or `--arduino-cli-dut-start-timeout` (default 15 s) elapses. A missing reply is a setup **error** and the test body does not run. Enabling `START` obliges every device in the session, the primary DUT and every peer, to answer it; a device that has nothing to start still replies, immediately. `START` does not replace test-side normalization of application state.
 - `RECOVER` / `STOP` are sent to the primary DUT first, then to peers in reverse name order, once per test, before the first connection closes. Each waits at most `--arduino-cli-dut-teardown-timeout` (default 2 s). A missing reply is a **warning** and never changes the test result. `RECOVER` runs after every test, so keep it idempotent and cheap; it may be a no-op when the sketch can see it is already in its boot state.
+- A device that cannot reach a quiet state at all (for example Arduino's USB CDC stack, which cannot stop presenting the device once begun) acknowledges what it can actually do: it clears the state the test left behind, then replies.
 - Sketch requirement: the command dispatch rooted at `Serial.read()` must ignore unknown bytes. A chain that ends in a catch-all `else` or `default:` that acts is not safe to configure.
-- Each command appears in `dut.log` as a marker line such as `[arduino-cli] START -> primary`, so the exchange is visible in the serial log.
+- Each command appears in `dut.log` as a marker line such as `[arduino-cli] START -> primary`, so the exchange is visible in the serial log. `START` retransmissions are logged at debug level, and a missing reply reports how many times the command was sent.
 
 Which `RECOVER` is right depends on the sketch. A sketch that waits for `START` before doing anything has an idle boot state, so `RECOVER` returns to idle and `STOP` is usually the same operation. A sketch that starts working in `setup()` must restore that running state (re-advertise, re-enumerate) because nothing else will.
 

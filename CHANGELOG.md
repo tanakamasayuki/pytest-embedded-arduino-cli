@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Report how many times a DUT lifecycle command was sent when the device does not reply, and log `START` retransmissions at debug level. Clarify that the existing rule (enabling `START` means every sketch answers it) covers devices with nothing to start, which reply immediately; add guidance for devices that cannot reach a quiet state, and note that `pyproject.toml` values must be TOML literal strings (`'\x01'`).
+- (JA) DUT ライフサイクルコマンドに応答がなかった場合のエラーに送信回数を含め、`START` の再送を debug レベルでログに出すように変更。既存の規則（`START` を有効にしたら全 sketch が応答する）が、始めるものがない device にも当てはまり即座に応答することを明確化。静かな状態に到達できない device の扱い、`pyproject.toml` では値を TOML の literal string（`'\x01'`）で書く必要があることを文書化。
 
 ## 1.5.0
 - (EN) Add reserved DUT lifecycle commands `START` / `RECOVER` / `STOP`, sent to the primary DUT and every connected peer DUT: `START` after all fixtures connect and before the test body (peers in name order, then primary, resent until the reply arrives; no reply is a setup error), `RECOVER` right before the connections close after every test, and `STOP` instead of `RECOVER` when nothing runs after the test (last test, `-x` / `--maxfail`, Ctrl-C). Each command is opt-in through the ini pair `arduino_cli_dut_<name>_command` / `arduino_cli_dut_<name>_reply` (plus `arduino_cli_dut_command_terminator`), with `--arduino-cli-dut-start-timeout` and `--arduino-cli-dut-teardown-timeout`. A reply means the sketch reached the target state. Test modules may define `arduino_cli_dut_start` / `arduino_cli_dut_teardown` to replace the generic implementation.

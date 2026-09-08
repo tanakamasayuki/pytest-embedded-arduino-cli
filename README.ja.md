@@ -454,16 +454,18 @@ arduino_cli_dut_stop_reply = STOPPED
 ```
 
 値には `\xNN`、`\n`、`\r`、`\t`、`\\` のエスケープが使えます。
+`pyproject.toml` に書く場合は TOML の literal string（`'\x01'`）にしてください。basic string（`"\x01"`）は `\x` エスケープを受け付けず、ファイルの parse に失敗します。
 コマンドは「設定したバイト列 + `arduino_cli_dut_command_terminator`（既定 `\n`）」として送られます。
 plugin は既定のバイト列を持ちません。上の制御文字（SOH、CAN、EOT）は推奨規約です。一般的な sketch は `Serial.read()` の印字可能文字で分岐し、それ以外を無視するため衝突しません。
 
 規則:
 
 - 応答は「コマンドを受け取った」ではなく「**目標状態に到達した**」の合図です。USB の列挙や BLE 接続のように立ち上がりが非同期な sketch は、実際に準備できるまで `START` の応答を遅らせてください。
-- `START` は peer を名前順、最後に primary DUT へ送ります。応答が来るまで 0.5 秒ごとに再送し、`--arduino-cli-dut-start-timeout`（既定 15 秒）で諦めます。応答がなければ setup **ERROR** で、テスト本体は動きません。`START` を有効にしたら、そのプロジェクトの全 sketch が応答します。`START` はテスト側で行うアプリ状態の正規化を置き換えるものではありません。
+- `START` は peer を名前順、最後に primary DUT へ送ります。応答が来るまで 0.5 秒ごとに再送し、`--arduino-cli-dut-start-timeout`（既定 15 秒）で諦めます。応答がなければ setup **ERROR** で、テスト本体は動きません。`START` を有効にすると、session 内の全 device、つまり primary DUT と全 peer が応答する義務を負います。始めるものが何もない device も、すぐに応答を返します。`START` はテスト側で行うアプリ状態の正規化を置き換えるものではありません。
 - `RECOVER` / `STOP` は primary DUT、次に peer を名前の逆順で、テストごとに 1 回、最初の接続が閉じる前に送ります。応答待ちは各 device につき最大 `--arduino-cli-dut-teardown-timeout`（既定 2 秒）です。応答がなくても **warning** にとどめ、テスト結果は変えません。`RECOVER` は毎テスト走るので冪等かつ軽量にしてください。sketch 側が既に boot 直後の状態だと判定できるなら no-op で構いません。
+- 静かな状態に到達できない device（例えば Arduino の USB CDC スタックは一度 begin すると device の提示を止められません）は、実際にできることだけを行って応答します。テストが残した状態を片付けてから応答を返す、という形です。
 - sketch 側の条件: `Serial.read()` を根とするコマンド分岐が未知のバイトを無視すること。何かを実行する catch-all の `else` や `default:` で終わる分岐を持つ sketch には設定しないでください。
-- 各コマンドは `dut.log` に `[arduino-cli] START -> primary` のようなマーカー行として残るので、やり取りを serial log で確認できます。
+- 各コマンドは `dut.log` に `[arduino-cli] START -> primary` のようなマーカー行として残るので、やり取りを serial log で確認できます。`START` の再送は debug レベルのログに出し、応答がなかった場合のエラーには送信回数を含めます。
 
 正しい `RECOVER` の中身は sketch によって違います。`START` を待ってから動き始める sketch の boot 状態は idle なので、`RECOVER` は idle に戻す操作になり、`STOP` と同じになるのが普通です。`setup()` で動き始める sketch は、その動作中の状態（再アドバタイズ、再列挙）を自分で復元する必要があります。他に復元するものがないからです。
 
