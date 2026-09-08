@@ -195,7 +195,7 @@ def test_send_command_resends_until_the_reply_arrives() -> None:
 def test_send_command_raises_after_the_budget_when_resending() -> None:
     dut = FakeDut(reply_after=10**6)
 
-    with pytest.raises(DutCommandError, match=r"peer echo did not reply 'READY' to START .* within 0\.1s"):
+    with pytest.raises(DutCommandError, match=r"peer echo did not reply 'READY' to START .* within 0\.1s \(sent \d+ times\)"):
         send_command(dut, START, terminator=b"\n", timeout=0.1, resend_interval=0.01, target="peer echo")
 
     assert len(dut.writes) > 1
@@ -204,7 +204,7 @@ def test_send_command_raises_after_the_budget_when_resending() -> None:
 def test_send_command_without_resend_writes_once() -> None:
     dut = FakeDut(reply_after=10**6)
 
-    with pytest.raises(DutCommandError, match="RECOVER"):
+    with pytest.raises(DutCommandError, match=r"RECOVER .* \(sent 1 time\)"):
         send_command(dut, RECOVER, terminator=b"\n", timeout=0.05, resend_interval=None, target="primary")
 
     assert dut.writes == [b"\x18\n"]

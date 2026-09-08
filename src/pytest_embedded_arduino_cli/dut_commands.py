@@ -18,6 +18,7 @@ was merely received.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 import string
 import time
 from typing import Any, Callable, Mapping
@@ -163,19 +164,31 @@ def send_command(
 
     payload = command.command + terminator
     write_marker(dut, f"{command.name} -> {target}")
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline = started + timeout
+    attempts = 0
     while True:
         dut.write(payload)
+        attempts += 1
+        if attempts > 1:
+            logging.debug("arduino-cli: %s resent to %s (attempt %d)", command.name, target, attempts)
         remaining = max(deadline - time.monotonic(), 0.0)
         wait = remaining if resend_interval is None else min(resend_interval, remaining)
         try:
             dut.expect_exact(command.reply, timeout=wait)
-            return
         except pexpect.TIMEOUT:
             if resend_interval is None or time.monotonic() >= deadline:
                 break
+            continue
+        if attempts > 1:
+            logging.debug(
+                "arduino-cli: %s acknowledged by %s after %d attempts (%.2fs)",
+                command.name, target, attempts, time.monotonic() - started,
+            )
+        return
     raise DutCommandError(
-        f"{target} did not reply {command.reply!r} to {command.name} ({command.command!r}) within {timeout:.1f}s"
+        f"{target} did not reply {command.reply!r} to {command.name} ({command.command!r}) "
+        f"within {timeout:.1f}s (sent {attempts} time{'s' if attempts != 1 else ''})"
     )
 
 
