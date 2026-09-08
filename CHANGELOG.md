@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.5.1
 - (EN) Report how many times a DUT lifecycle command was sent when the device does not reply, and log `START` retransmissions at debug level. Clarify that the existing rule (enabling `START` means every sketch answers it) covers devices with nothing to start, which reply immediately; add guidance for devices that cannot reach a quiet state, and note that `pyproject.toml` values must be TOML literal strings (`'\x01'`).
 - (JA) DUT ライフサイクルコマンドに応答がなかった場合のエラーに送信回数を含め、`START` の再送を debug レベルでログに出すように変更。既存の規則（`START` を有効にしたら全 sketch が応答する）が、始めるものがない device にも当てはまり即座に応答することを明確化。静かな状態に到達できない device の扱い、`pyproject.toml` では値を TOML の literal string（`'\x01'`）で書く必要があることを文書化。
 
