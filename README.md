@@ -120,6 +120,8 @@ uv run pytest
 - `--arduino-test-timeout=SECONDS`
 - `--arduino-test-artifact-dir=PATH`
 - `--arduino-test-missing-config=skip|error`
+- `--arduino-cli-dut-start-timeout=SECONDS`
+- `--arduino-cli-dut-teardown-timeout=SECONDS`
 
 `--clean` passes `--clean` to `arduino-cli compile`.
 It is useful when Arduino CLI's incremental build cache should be ignored.
@@ -421,6 +423,66 @@ The plugin already drains the receive buffer on a best-effort basis when the ser
   ```
 
 Note that `arduino_test.run()` stops reading at the ArduTest `RESULT` event, so any `LOG` / tick lines the device emits after `RESULT` are not collected unless you drain afterwards.
+
+## DUT Lifecycle Commands
+
+The plugin can send three reserved commands to the primary DUT and to every connected peer DUT so that the devices are in a known state at the edges of each test.
+Nothing is sent unless you configure it.
+
+| Command | When | What the reply confirms |
+| --- | --- | --- |
+| `START` | after all fixtures are connected, before the test body | the sketch is ready for the test body |
+| `RECOVER` | right before the serial connections close, after every test | the sketch's own boot state is restored |
+| `STOP` | instead of `RECOVER` when nothing runs after this test in the session (last test, `-x` / `--maxfail`, Ctrl-C) | everything is off: connections closed, advertising and scanning stopped |
+
+Each command is enabled independently by configuring its command bytes and its reply line in the pytest ini.
+Use one, two, or all three. A project that only wants a quiet lab after the run can configure `STOP` alone.
+
+```ini
+[pytest]
+arduino_cli_dut_start_command = \x01
+arduino_cli_dut_start_reply = READY
+arduino_cli_dut_recover_command = \x18
+arduino_cli_dut_recover_reply = RECOVERED
+arduino_cli_dut_stop_command = \x04
+arduino_cli_dut_stop_reply = STOPPED
+```
+
+Values accept `\xNN`, `\n`, `\r`, `\t`, and `\\` escapes.
+Every command is written as the configured bytes followed by `arduino_cli_dut_command_terminator` (default `\n`).
+The plugin ships no default bytes. The control characters above (SOH, CAN, EOT) are a recommended convention because typical sketches dispatch printable characters from `Serial.read()` and ignore everything else.
+
+Rules:
+
+- A reply means the sketch has **reached the target state**, not that it received the command. A sketch whose start-up is asynchronous (USB enumeration, a BLE connection) must defer the `START` reply until it is actually ready.
+- `START` is sent to peers in name order, then to the primary DUT. It is resent every 0.5 s until the reply arrives or `--arduino-cli-dut-start-timeout` (default 15 s) elapses. A missing reply is a setup **error** and the test body does not run. Enabling `START` means every sketch in the project answers it. `START` does not replace test-side normalization of application state.
+- `RECOVER` / `STOP` are sent to the primary DUT first, then to peers in reverse name order, once per test, before the first connection closes. Each waits at most `--arduino-cli-dut-teardown-timeout` (default 2 s). A missing reply is a **warning** and never changes the test result. `RECOVER` runs after every test, so keep it idempotent and cheap; it may be a no-op when the sketch can see it is already in its boot state.
+- Sketch requirement: the command dispatch rooted at `Serial.read()` must ignore unknown bytes. A chain that ends in a catch-all `else` or `default:` that acts is not safe to configure.
+- Each command appears in `dut.log` as a marker line such as `[arduino-cli] START -> primary`, so the exchange is visible in the serial log.
+
+Which `RECOVER` is right depends on the sketch. A sketch that waits for `START` before doing anything has an idle boot state, so `RECOVER` returns to idle and `STOP` is usually the same operation. A sketch that starts working in `setup()` must restore that running state (re-advertise, re-enumerate) because nothing else will.
+
+Per-module override: define one of these functions in a test file to replace the generic implementation for that module.
+`ctx` carries `phase`, `stop`, `session_end`, `interrupted`, `failed`, `timeout`, and the helpers `send_start()` / `send_recover()` / `send_stop()` that use the configured bytes and reply.
+
+```python
+def arduino_cli_dut_start(dut, peers, ctx):
+    ctx.send_start(dut)  # primary first for this module
+    for name in sorted(peers):
+        ctx.send_start(peers[name], name=f"peer {name}")
+
+
+def arduino_cli_dut_teardown(dut, peers, ctx):
+    if ctx.stop:
+        dut.write("forget-bonds\n")
+        dut.expect_exact("BONDS_CLEARED", timeout=ctx.timeout)
+    ctx.send_recover(dut)
+```
+
+Overrides run whenever they are defined, even when no command is configured.
+Exceptions from `arduino_cli_dut_start` are setup errors; exceptions from `arduino_cli_dut_teardown` become warnings.
+
+Adopting the commands later in a project's life is up to the project. Enabling a command switches it on for every sketch at once; the module override can exclude a module if you prefer converting one sketch at a time.
 
 ## ArduTest Fixture
 

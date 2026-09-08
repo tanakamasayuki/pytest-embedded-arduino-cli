@@ -617,6 +617,37 @@ peer DUT の構造不備は設定エラーとして扱う。
 例えば `.ino` がない、`.ino` が複数ある、`sketch.yaml` が壊れている場合は error とする。
 一方で、profile 非対応、profile 未決定、port 未解決のように実行条件が揃わない場合は skip とする。
 
+### 13.9 DUT ライフサイクル予約コマンド
+
+module は 1 回だけ upload し、接続はテストごとに行い、接続を閉じるときは device に何も送らない。
+このため問題が 2 つ生じる。途中で失敗したテストは、同じ module の次のテストに中途半端な状態を持ち越す。間に再 upload がないからである。session が終わると、device は最後のテストが残した動作（例えば BLE アドバタイズ）を次の upload まで続ける。
+module 境界は問題にならない。テストを実行するすべての run mode は先に upload し、upload がボードをリセットする。
+
+そこで plugin は 3 つの予約コマンドを提供する。いずれも primary DUT と、そのテストで接続した全 peer DUT に送る。
+
+| コマンド | 呼び出し点 | 目標状態 |
+| --- | --- | --- |
+| `START` | そのテストの全 fixture の setup 後、テスト本体の前 | テスト本体を始められる状態 |
+| `RECOVER` | テストごとに 1 回、最初の DUT 接続が閉じる直前 | その sketch 自身の boot 直後の状態 |
+| `STOP` | 同じ呼び出し点で、そのテストの後に session 内で実行されるテストがないときに `RECOVER` の代わりに送る | 全停止（接続を切り、アドバタイズとスキャンを止める）。`RECOVER` の上位集合 |
+
+「そのテストの後に実行されるテストがない」は、収集された最後のテスト、`-x` / `--maxfail` による session 停止、Ctrl-C による中断で成り立つ。
+
+要件:
+
+- コマンド単位の opt-in。コマンドは、そのコマンドのバイト列と応答行の両方が ini に設定されているときだけ有効になる。未設定のコマンドには何も送らず、時間も使わない。plugin は既定のバイト列を持たない。有効にするコマンドの組はプロジェクトとして選ぶ規則であり、コマンドを有効にしたら、そのプロジェクトの全 sketch がそれを実装する。
+- 送信形式。各コマンドは、設定したバイト列に設定した終端子（既定 `\n`）を付けて書き込む。値には `\xNN`、`\n`、`\r`、`\t`、`\\` のエスケープを使える。
+- 応答の意味。応答は sketch がそのコマンドの目標状態に到達したことを意味し、受信したことを意味しない。立ち上がりが非同期の sketch は、準備が整うまで `START` の応答を遅らせる。応答を待つことで、log を読む fixture が動く前にやり取りが serial log に残ることも保証される。
+- `START`。peer を名前順、次に primary DUT に送る。応答が来るか start timeout（既定 15 秒、`--arduino-cli-dut-start-timeout`）が経過するまで 0.5 秒ごとに再送する。予算が長いのは、応答に列挙や接続が必要な場合があるためである。応答がなければ device 名を含む setup error とし、テスト本体は実行しない。fixture の teardown は通常どおり行う。sketch は `START` を冪等に扱う。`START` はテスト側で行うアプリ状態の正規化を置き換えない。
+- `RECOVER` / `STOP`。primary DUT、次に peer を名前の逆順に送る。device ごとに 1 回書き込み、最大で teardown timeout（既定 2 秒、`--arduino-cli-dut-teardown-timeout`）だけ待つ。予算が短いのは、失敗したテストの後は device が応答できないことが多いためである。応答がない場合や例外は warning とし、テスト結果を変えない。この round はテストごとにちょうど 1 回、最初の DUT 接続が閉じる前に実行する。fixture finalizer が session 終了処理から動く Ctrl-C 経路も含む。この時点で device lock はまだ保持されている。
+- `RECOVER` の契約。`RECOVER` は sketch 自身の boot 直後の状態を復元する。`START` を待つ sketch の boot 状態は idle であり、`STOP` は通常同じ操作になる。`setup()` で動き始める sketch の boot 状態は動作中であり、`RECOVER` はそれを再確立（再アドバタイズ、再列挙）しなければならない。`RECOVER` は毎テスト後に走るため、冪等かつ軽量であること。sketch が既に boot 状態なら no-op でよい。ライブラリ呼び出しによる soft idle を想定し、ボードリセットは想定しない。ネイティブ USB のポートが再列挙されるためである。
+- sketch 側の安全条件。`Serial.read()`（または行読み取り）を根とするコマンド分岐は未知のバイトを無視すること。`if` / `else if` の連鎖や `switch` が、何かを実行する catch-all で終わってはならない。条件は分岐連鎖に関するものであり、ファイル内のどこかに `else` があるかではない。捨てるだけの catch-all は問題ない。sketch は印字可能文字で分岐するため、`0x01` SOH / `0x18` CAN / `0x04` EOT のような制御文字を推奨規約とする。
+- ログ。各コマンドは DUT log にマーカー行 `[arduino-cli] <COMMAND> -> <target>` として記録する。
+- module 単位の override。テスト module は `arduino_cli_dut_start(dut, peers, ctx)` と `arduino_cli_dut_teardown(dut, peers, ctx)` を定義できる。定義されていれば、その module では汎用実装の代わりに呼ばれ、コマンドが未設定でも動く。`ctx` は `phase`、`stop`、`session_end`、`interrupted`、`failed`、`timeout` と、`send_start()` / `send_recover()` / `send_stop()` のヘルパーを持つ。start override の例外は setup error、teardown override の例外は warning とする。
+- 既存制約の明文化。利用側 conftest の autouse fixture が teardown で serial log を読む場合、その fixture は直接にも間接にも `dut` を要求してはならない。要求すると DUT が閉じる前に finalize され、log の末尾を見られない。これはコマンドとは無関係に現状でも成り立つ。
+- 対象外: pytest-embedded の multi-DUT タプル（`--count`）、pytest-xdist、`--run-mode=build`（接続が存在しない）。
+- 移行は本仕様の対象外とする。コマンドを有効にすると全 sketch が一斉に対象になる。途中から導入するプロジェクトは、全部を変換して赤くなったものを直しても、変換中は override で module を除外してもよい。
+
 ## 14. pytest option 要件
 
 少なくとも次のカテゴリの option を対象とする。
@@ -730,7 +761,7 @@ peer DUT の build / upload でも、`-v` / `-vv` のログには peer 名が分
 - ESP 固有用語を option 名に持ち込まない
 - pytest-embedded 既存 option と競合しにくい名前にする
 - build / upload / runtime の責務境界が option 名から見えるようにする
-- plugin 固有 option は、実行 mode、profile 選択、peer DUT、device lock、ArduTest、local state cache、log directory summary の範囲に絞る
+- plugin 固有 option は、実行 mode、profile 選択、peer DUT、device lock、ArduTest、local state cache、log directory summary、DUT ライフサイクル予約コマンドの範囲に絞る
 
 ### 14.9 log directory 結果 summary
 
@@ -746,6 +777,22 @@ log directory `<tmpdir>/pytest-embedded/<UTC timestamp>/<テスト名>/` は `py
 - 失敗内容は上限サイズで末尾を残して切り詰める。完全な serial log は同じ directory の `dut.log` とする
 - `pytest-embedded` が log directory を作らなかった実行では何も出力しない。また本機能の失敗が pytest の exit status に影響してはならない
 - option: `--arduino-cli-no-log-summary` で本機能を無効化する。既定値は有効
+
+### 14.10 DUT ライフサイクル予約コマンド
+
+ini 値（すべて任意。コマンドは両方の値が設定されたときだけ有効）:
+
+- `arduino_cli_dut_start_command` / `arduino_cli_dut_start_reply`
+- `arduino_cli_dut_recover_command` / `arduino_cli_dut_recover_reply`
+- `arduino_cli_dut_stop_command` / `arduino_cli_dut_stop_reply`
+- `arduino_cli_dut_command_terminator`（既定 `\n`）
+
+option:
+
+- `--arduino-cli-dut-start-timeout=SECONDS`（既定 15）
+- `--arduino-cli-dut-teardown-timeout=SECONDS`（既定 2）
+
+コマンドが 1 つ以上有効なとき、report header に `arduino-cli dut commands: START, RECOVER, STOP` のように列挙する。
 
 ## 15. テスト状態保存要件
 

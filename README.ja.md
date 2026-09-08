@@ -120,6 +120,8 @@ uv run pytest
 - `--arduino-test-timeout=SECONDS`
 - `--arduino-test-artifact-dir=PATH`
 - `--arduino-test-missing-config=skip|error`
+- `--arduino-cli-dut-start-timeout=SECONDS`
+- `--arduino-cli-dut-teardown-timeout=SECONDS`
 
 `--clean` は `arduino-cli compile` に `--clean` を渡します。
 Arduino CLI の incremental build cache を使わずに再 build したいときに使います。
@@ -426,6 +428,66 @@ plugin はシリアル close 時に受信バッファをベストエフォート
   ```
 
 なお `arduino_test.run()` は ArduTest の `RESULT` event で読み取りを止めるため、`RESULT` 後に出る `LOG` / tick 行は、あとからドレインしない限り収集されません。
+
+## DUT ライフサイクルコマンド
+
+plugin は primary DUT と接続中の全 peer DUT に 3 つの予約コマンドを送り、各テストの入口と出口で device を既知の状態にできます。
+設定しなければ何も送りません。
+
+| コマンド | いつ | 応答が意味すること |
+| --- | --- | --- |
+| `START` | 全 fixture の接続後、テスト本体の前 | sketch がテスト本体を始められる状態になった |
+| `RECOVER` | 毎テスト、serial 接続を閉じる直前 | sketch 自身の boot 直後の状態に戻った |
+| `STOP` | そのテストの後に session 内で実行されるテストがないとき、`RECOVER` の代わりに送る（最後のテスト、`-x` / `--maxfail`、Ctrl-C） | 全停止した。接続を切り、アドバタイズもスキャンも止めた |
+
+各コマンドは、コマンドのバイト列と応答行を pytest の ini に書いたときだけ、それぞれ独立に有効になります。
+1 つだけ、2 つ、3 つすべて、どの使い方もできます。実行後に電波を止めたいだけなら `STOP` だけを設定すれば足ります。
+
+```ini
+[pytest]
+arduino_cli_dut_start_command = \x01
+arduino_cli_dut_start_reply = READY
+arduino_cli_dut_recover_command = \x18
+arduino_cli_dut_recover_reply = RECOVERED
+arduino_cli_dut_stop_command = \x04
+arduino_cli_dut_stop_reply = STOPPED
+```
+
+値には `\xNN`、`\n`、`\r`、`\t`、`\\` のエスケープが使えます。
+コマンドは「設定したバイト列 + `arduino_cli_dut_command_terminator`（既定 `\n`）」として送られます。
+plugin は既定のバイト列を持ちません。上の制御文字（SOH、CAN、EOT）は推奨規約です。一般的な sketch は `Serial.read()` の印字可能文字で分岐し、それ以外を無視するため衝突しません。
+
+規則:
+
+- 応答は「コマンドを受け取った」ではなく「**目標状態に到達した**」の合図です。USB の列挙や BLE 接続のように立ち上がりが非同期な sketch は、実際に準備できるまで `START` の応答を遅らせてください。
+- `START` は peer を名前順、最後に primary DUT へ送ります。応答が来るまで 0.5 秒ごとに再送し、`--arduino-cli-dut-start-timeout`（既定 15 秒）で諦めます。応答がなければ setup **ERROR** で、テスト本体は動きません。`START` を有効にしたら、そのプロジェクトの全 sketch が応答します。`START` はテスト側で行うアプリ状態の正規化を置き換えるものではありません。
+- `RECOVER` / `STOP` は primary DUT、次に peer を名前の逆順で、テストごとに 1 回、最初の接続が閉じる前に送ります。応答待ちは各 device につき最大 `--arduino-cli-dut-teardown-timeout`（既定 2 秒）です。応答がなくても **warning** にとどめ、テスト結果は変えません。`RECOVER` は毎テスト走るので冪等かつ軽量にしてください。sketch 側が既に boot 直後の状態だと判定できるなら no-op で構いません。
+- sketch 側の条件: `Serial.read()` を根とするコマンド分岐が未知のバイトを無視すること。何かを実行する catch-all の `else` や `default:` で終わる分岐を持つ sketch には設定しないでください。
+- 各コマンドは `dut.log` に `[arduino-cli] START -> primary` のようなマーカー行として残るので、やり取りを serial log で確認できます。
+
+正しい `RECOVER` の中身は sketch によって違います。`START` を待ってから動き始める sketch の boot 状態は idle なので、`RECOVER` は idle に戻す操作になり、`STOP` と同じになるのが普通です。`setup()` で動き始める sketch は、その動作中の状態（再アドバタイズ、再列挙）を自分で復元する必要があります。他に復元するものがないからです。
+
+module 単位の override: テストファイルに次の関数を定義すると、その module では汎用実装の代わりに呼ばれます。
+`ctx` には `phase`、`stop`、`session_end`、`interrupted`、`failed`、`timeout` と、設定済みのバイト列と応答を使うヘルパー `send_start()` / `send_recover()` / `send_stop()` があります。
+
+```python
+def arduino_cli_dut_start(dut, peers, ctx):
+    ctx.send_start(dut)  # この module では primary を先に
+    for name in sorted(peers):
+        ctx.send_start(peers[name], name=f"peer {name}")
+
+
+def arduino_cli_dut_teardown(dut, peers, ctx):
+    if ctx.stop:
+        dut.write("forget-bonds\n")
+        dut.expect_exact("BONDS_CLEARED", timeout=ctx.timeout)
+    ctx.send_recover(dut)
+```
+
+override は定義されていれば常に呼ばれ、コマンドが未設定でも動きます。
+`arduino_cli_dut_start` の例外は setup ERROR、`arduino_cli_dut_teardown` の例外は warning になります。
+
+途中から導入するかどうかはプロジェクトの判断です。コマンドを有効にすると全 sketch が一斉に対象になります。1 本ずつ変換したい場合は、module override でその module を除外できます。
 
 ## ArduTest fixture
 
