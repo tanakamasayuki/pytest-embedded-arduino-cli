@@ -190,6 +190,63 @@ host core での実行は実機テストの代わりにはなりません。PC �
 
 **実機だけでユニットテストを回しても問題ありません。** 書き込みの時間はかかりますが、環境は普段の Arduino 開発と同じままです。まず実機で始めて、回す回数が増えて待ち時間が気になってきたら host core を足す、という順でも構いません。
 
+## ディレクトリ構成
+
+Arduino のプロジェクトでは、ライブラリや sketch が root にあります。そこへ Python の道具を混ぜると散らかるので、**テスト関係は `tests/` の下にまとめ、root はきれいに保つ**構成を勧めます。
+
+```text
+MyLibrary/                 <- Arduino ライブラリの root
+  library.properties
+  src/
+  examples/
+  tests/                   <- ここが Python 側の root
+    pyproject.toml         <- 依存と pytest の設定
+    uv.lock
+    .env                   <- port など環境ごとの値。git に入れない
+    .env.example           <- 共有用の雛形
+    my_app/                <- テストアプリ 1 つ
+      my_app.ino
+      sketch.yaml
+      test_my_app.py
+```
+
+依存を `tests/pyproject.toml` に書くので、Python の仮想環境も `tests/.venv` に作られます。Arduino 側のファイルと混ざりません。
+
+**コマンドは `tests/` の中で実行します。** このガイドの以降の例も、それを前提にします。
+
+```bash
+cd tests
+uv run --env-file .env pytest my_app
+```
+
+テストが増えてきたら、`tests/` の下を目的別に分けます。
+
+```text
+  tests/
+    unit/                  <- ボードを使わないテスト。.ino を置かない
+    suites/                <- 既定で流す実機テスト
+      my_app/
+        my_app.ino
+        sketch.yaml
+        test_my_app.py
+    manual/                <- 臨時の機材や人の操作が必要なテスト
+    sketch_support/        <- sketch 側で共有するヘッダ
+    conftest.py            <- 必要になったときだけ
+```
+
+名前はプロジェクトの自由です。大事なのは、**既定で流すものと、そうでないものが分かれていること**です。既定の対象は `pyproject.toml` で決められます。
+
+```toml
+[tool.pytest.ini_options]
+testpaths = ["unit", "suites"]
+```
+
+```bash
+cd tests
+uv run --env-file .env pytest              # testpaths のものだけ
+uv run --env-file .env pytest manual/      # 臨時のものを明示して実行
+```
+
 ## 何台のボードを使うか
 
 台数によってできることが変わります。少ない台数から始めるのが良いです。
@@ -222,7 +279,7 @@ default_profile: host
 いちばん基本の構成です。実機でのユニットテストに使います。
 
 ```bash
-pytest tests/my_app --port=/dev/ttyUSB0
+pytest my_app --port=/dev/ttyUSB0
 ```
 
 毎回 `--port` を書かずに済ませる方法は、peer の説明の後でまとめて扱います。
@@ -284,7 +341,7 @@ TEST_SERIAL_PORT=/dev/ttyUSB0
 ```
 
 ```bash
-uv run --env-file .env pytest tests/my_app
+uv run --env-file .env pytest my_app
 ```
 
 `--env-file` は pytest ではなく `uv` の option なので、**`pytest` より前に書きます**。`uv` を使わない場合は `export TEST_SERIAL_PORT=/dev/ttyUSB0` でも同じです。
@@ -458,7 +515,7 @@ def test_count(dut):
 **確認方法**は簡単です。テストを 1 本ずつ指定して実行し、全部通ればステートレスです。
 
 ```bash
-pytest tests/my_app/test_my_app.py::test_count
+pytest my_app/test_my_app.py::test_count
 ```
 
 CI では収集した nodeid を 1 つずつ回すと機械的に検証できます。

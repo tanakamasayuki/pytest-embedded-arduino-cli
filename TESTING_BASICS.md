@@ -190,6 +190,63 @@ Unit tests are not only for a host core, either. Checking individual functions i
 
 **Running your unit tests only on hardware is perfectly fine.** Flashing costs time, but the environment stays exactly what ordinary Arduino development already needs. Starting on hardware, then adding a host core later once the waiting starts to bother you, is a perfectly reasonable order.
 
+## Directory layout
+
+In an Arduino project the library and the sketches live at the root. Mixing Python tooling in there makes a mess, so the recommended arrangement is to **keep everything test-related under `tests/` and leave the root clean.**
+
+```text
+MyLibrary/                 <- the Arduino library root
+  library.properties
+  src/
+  examples/
+  tests/                   <- the root of the Python side
+    pyproject.toml         <- dependencies and pytest settings
+    uv.lock
+    .env                   <- per-machine values such as the port; not committed
+    .env.example           <- a template to share
+    my_app/                <- one test application
+      my_app.ino
+      sketch.yaml
+      test_my_app.py
+```
+
+Dependencies go in `tests/pyproject.toml`, so the Python virtual environment is created at `tests/.venv` and never mixes with the Arduino files.
+
+**Commands are run from inside `tests/`.** The rest of this guide assumes that.
+
+```bash
+cd tests
+uv run --env-file .env pytest my_app
+```
+
+As the tests grow, split what is under `tests/` by purpose.
+
+```text
+  tests/
+    unit/                  <- tests that need no board; no .ino here
+    suites/                <- hardware tests in the default run
+      my_app/
+        my_app.ino
+        sketch.yaml
+        test_my_app.py
+    manual/                <- tests needing occasional equipment or a person
+    sketch_support/        <- headers shared by the sketches
+    conftest.py            <- only once you actually need one
+```
+
+The names are yours to choose. What matters is that **what runs by default is separated from what does not.** Set the default target in `pyproject.toml`.
+
+```toml
+[tool.pytest.ini_options]
+testpaths = ["unit", "suites"]
+```
+
+```bash
+cd tests
+uv run --env-file .env pytest              # only what testpaths names
+uv run --env-file .env pytest manual/      # name the occasional ones explicitly
+```
+
 ## How many boards to use
 
 What you can test depends on the board count. Starting with fewer is easier.
@@ -222,7 +279,7 @@ Hardware tests only run on your own bench or on a self-hosted runner you set up 
 The basic setup, used for unit tests on real hardware.
 
 ```bash
-pytest tests/my_app --port=/dev/ttyUSB0
+pytest my_app --port=/dev/ttyUSB0
 ```
 
 A way to avoid typing `--port` every time is covered after the peer sections.
@@ -284,7 +341,7 @@ TEST_SERIAL_PORT=/dev/ttyUSB0
 ```
 
 ```bash
-uv run --env-file .env pytest tests/my_app
+uv run --env-file .env pytest my_app
 ```
 
 `--env-file` is an option of `uv`, not of pytest, so it **goes before `pytest`**. Without `uv`, `export TEST_SERIAL_PORT=/dev/ttyUSB0` does the same.
@@ -458,7 +515,7 @@ Each test establishes the state it needs. Either one passes when run alone.
 **Checking this is easy.** Run the tests one at a time; if they all pass, they are stateless.
 
 ```bash
-pytest tests/my_app/test_my_app.py::test_count
+pytest my_app/test_my_app.py::test_count
 ```
 
 In CI you can verify it mechanically by iterating over the collected node ids one by one.
