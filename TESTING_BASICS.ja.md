@@ -321,6 +321,20 @@ TEST_SERIAL_PORT_PEER_ECHO=/dev/ttyUSB1
 
 module は「テストファイル 1 つ」です。そのファイルが置かれたディレクトリにある `.ino` が、その module の sketch になります。
 
+逆に、**`.ino` がないディレクトリのテストファイルには、この plugin は何もしません。** compile も upload も走らず、普通の pytest として動きます。ボードを使わないユニットテストは、`.ino` を置かないディレクトリにまとめてください。
+
+```text
+tests/
+  unit/
+    test_parser.py     <- .ino がない。plugin は何もしない
+  my_app/
+    my_app.ino
+    sketch.yaml
+    test_my_app.py     <- sketch ディレクトリのテスト
+```
+
+注意点が 1 つあります。**`.ino` があるディレクトリにテストを置くと、そのテストが `dut` を要求していなくても compile と upload が走ります。** compile と upload は module 単位の準備で、テストが接続するかどうかとは別に実行されるからです。ボードを使わないテストを sketch ディレクトリに混ぜると、無駄な待ち時間が増え、ボードも占有します。
+
 各単位で起きることは次の通りです。
 
 - **session の開始**: pytest が起動し、対象のテストを集めます。

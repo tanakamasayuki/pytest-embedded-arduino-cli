@@ -321,6 +321,20 @@ The rest of this guide matters once you have more than one test. Here is what py
 
 A module is one test file. The `.ino` in the directory holding that file is the module's sketch.
 
+The reverse also holds: **for a test file in a directory with no `.ino`, this plugin does nothing at all.** Nothing is compiled or uploaded, and it runs as plain pytest. Keep unit tests that need no board in a directory with no `.ino` in it.
+
+```text
+tests/
+  unit/
+    test_parser.py     <- no .ino here, so the plugin does nothing
+  my_app/
+    my_app.ino
+    sketch.yaml
+    test_my_app.py     <- a test in a sketch directory
+```
+
+One thing to watch. **Put a test in a directory that has an `.ino` and the sketch is compiled and uploaded, even if that test never asks for `dut`.** Compiling and uploading are module-level preparation, run independently of whether a test connects. Mixing board-free tests into a sketch directory adds waiting for nothing and ties up the board.
+
 This is what happens at each level.
 
 - **Session start**: pytest starts up and collects the tests to run.
