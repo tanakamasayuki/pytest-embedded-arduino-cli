@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.6.0
 - (EN) Add testing guides: Testing Basics, Advanced Testing, and Example Projects, all linked from the README.
 - (JA) テストガイドを追加。テストの基本、テストの応用、実例集。いずれも README からリンク。
 
