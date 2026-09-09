@@ -487,26 +487,18 @@ def test_bad(dut):
 
 ### 方法 A: pytest から定期的に投げる
 
-sketch に問い合わせコマンドを 1 つ用意し、応答が返るまで送り続けます。準備ができるまでは答えません。
+sketch に問い合わせコマンドを 1 つ用意し、応答が返るまで送り続けます。
 
 ```cpp
 // polling.ino
-unsigned long ready_at = 0;
-bool ready = false;
-
 void setup()
 {
   Serial.begin(115200);
-  ready_at = millis() + 3000;   // 初期化に 3 秒かかるとする
+  delay(3000);                  // 初期化に 3 秒かかるとする
 }
 
 void loop()
 {
-  if (!ready && millis() >= ready_at)
-  {
-    ready = true;
-  }
-
   if (Serial.available() == 0)
   {
     return;
@@ -517,11 +509,7 @@ void loop()
 
   if (line == "?")
   {
-    if (ready)
-    {
-      Serial.println("READY");
-    }
-    // 準備前は何も返さない
+    Serial.println("READY");
   }
   else if (line == "ping")
   {
@@ -529,6 +517,8 @@ void loop()
   }
 }
 ```
+
+準備できたかを記録する変数は要りません。**初期化中は `loop()` が動かないので、何を送っても読まれません。** `setup()` の中で Wi-Fi や BLE を起動する形なら、この性質がそのまま使えます。逆に、初期化を `loop()` の中で少しずつ進める作りにするなら、準備前にコマンドへ答えてしまわないよう自分で防ぐ必要があります。
 
 ```python
 import pexpect
@@ -552,7 +542,13 @@ def test_with_polling(dut):
     dut.expect_exact("PONG")
 ```
 
-接続がいつ開いても動くので、実機で確実です。sketch 側は問い合わせに答えるだけでよく、準備前は無視して構いません。
+**なぜ 1 回送って長く待つのではなく、送り直すのか。** 早く送ったバイトは失われることがあるからです。
+
+- native USB の board では、USB の列挙が終わる前に送ったバイトは届きません。
+- 接続したときにリセットされる board では、リセット前に送ったものが消えます。
+- 初期化中に送ったものは、シリアルの受信バッファに残っていれば初期化後に読まれますが、残っている保証はありません。
+
+1 回だけ送って待つ形は、その 1 回が失われたときに何も救えません。届くまで送り直せば、いつ届くようになっても次の 1 回で応答が返ります。接続がいつ開いても動くので、実機で確実です。
 
 ### 方法 B: マイコンから準備完了を送る
 

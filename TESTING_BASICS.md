@@ -487,26 +487,18 @@ Wait for **an actual reply** instead. There are two ways to do it and you can pi
 
 ### Method A: poll from pytest
 
-Give the sketch one query command and keep sending it until a reply comes back. It does not answer before it is ready.
+Give the sketch one query command and keep sending it until a reply comes back.
 
 ```cpp
 // polling.ino
-unsigned long ready_at = 0;
-bool ready = false;
-
 void setup()
 {
   Serial.begin(115200);
-  ready_at = millis() + 3000;   // pretend initialization takes 3 seconds
+  delay(3000);                  // pretend initialization takes 3 seconds
 }
 
 void loop()
 {
-  if (!ready && millis() >= ready_at)
-  {
-    ready = true;
-  }
-
   if (Serial.available() == 0)
   {
     return;
@@ -517,11 +509,7 @@ void loop()
 
   if (line == "?")
   {
-    if (ready)
-    {
-      Serial.println("READY");
-    }
-    // answer nothing before it is ready
+    Serial.println("READY");
   }
   else if (line == "ping")
   {
@@ -529,6 +517,8 @@ void loop()
   }
 }
 ```
+
+No flag is needed to record whether it is ready. **While initializing, `loop()` does not run, so nothing you send is read.** If your sketch brings up Wi-Fi or BLE inside `setup()`, that property does the work for you. If instead you advance initialization step by step inside `loop()`, you have to stop yourself from answering commands before you are ready.
 
 ```python
 import pexpect
@@ -552,7 +542,13 @@ def test_with_polling(dut):
     dut.expect_exact("PONG")
 ```
 
-This works whenever the connection happens to open, which makes it reliable on real hardware. The sketch only has to answer the query, and may ignore it before it is ready.
+**Why resend, rather than send once and wait a long time?** Because bytes sent too early can be lost.
+
+- On a native USB board, bytes sent before USB enumeration completes never arrive.
+- On a board that resets when the port is opened, anything sent before that reset is gone.
+- Bytes sent during initialization are read afterwards if they are still in the serial receive buffer, but nothing guarantees they are.
+
+Send once and wait, and there is no recovery if that one attempt was lost. Keep resending and the next attempt after the device starts listening gets an answer. It works whenever the connection happens to open, which makes it reliable on real hardware.
 
 ### Method B: let the device announce it is ready
 
