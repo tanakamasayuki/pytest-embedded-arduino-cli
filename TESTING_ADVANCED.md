@@ -191,6 +191,16 @@ SKIPPED [1] peer device2: port is not resolved
 
 So an extra board usually needs no conftest at all. Where the board is attached and its port configured, the test runs; where it is not, the test is skipped quietly. CI and the workbench can share the same test files.
 
+**This skipping is for peers only.** The primary DUT is never skipped; it fails instead, in one of three shapes.
+
+| The primary's situation | What happens |
+| --- | --- |
+| No port configured at all | `ValueError` while preparing the connection |
+| The string resolves, but nothing is behind it | `arduino-cli upload` fails |
+| A path that does not exist | `FileNotFoundError` at connection time |
+
+Writing a symlink such as `/dev/serial/by-id/...` into `.env` makes the middle case easy to hit: **the string resolves while the device is absent.** On a bench where a supposedly permanent board has been unplugged, the default run fails right there. The primary is the thing under test, so its absence is treated as a configuration error, never a skip.
+
 ### Equipment the plugin knows nothing about is yours to check
 
 For equipment the plugin has no idea exists, such as a sensor, an analyzer, or a switch that can cut power, check for it yourself and skip.
@@ -282,6 +292,8 @@ Higher wins.
 5. `profiles.<profile>.port` in `sketch.yaml`, but only when it is a `socket://...` URL
 
 `<PROFILE>` is the profile name upper-cased with `-` replaced by `_`.
+
+If none of them resolves, the run **fails rather than skipping**. That is the difference from a peer.
 
 ### A peer DUT's port
 
@@ -476,6 +488,24 @@ What to stop is up to the project. These judgements have held up in practice.
 
 **Cleanup is not a substitute for normalizing state at the start of a test.** Cleanup protects the environment. A test's own correctness, and being able to run it alone with `-k`, are the job of its own start-up. Never write a test that assumes the previous test's cleanup succeeded.
 
+### A backstop for when the cleanup command never arrives
+
+A sketch that has hung or crashed never reads the cleanup command. **And those are exactly the runs that leave the worst residue.** On a bench shared with other projects, the board is handed over still transmitting or still presenting USB.
+
+Only one mechanism survives a dead sketch: **flashing something inert at the end of the session.** Flashing does not depend on the serial conversation, so it works even when the sketch does not.
+
+Implement it in `pytest_sessionfinish` in a `conftest.py`. Every fixture is gone by then, so a hook is the only option.
+
+**Take the device lock yourself.** The plugin's lock is module-scoped and released at module teardown, so it is no longer held at the end of the session. Flashing without it collides with whatever process was waiting. The lock is importable:
+
+```python
+from pytest_embedded_arduino_cli.device_lock import DeviceLock, DeviceLockInfo, default_lock_dir
+```
+
+The lock directory is the value of `--device-lock-dir`, or `default_lock_dir()` when that is unset. The key is the symlink-resolved port path. Track the boards yourself: relying on which ones the last test connected to misses every board that run did not touch.
+
+This is slow. When the cleanup command is enough, use that instead.
+
 ## conftest.py is a last resort
 
 `conftest.py` is pytest's extension point. Put it in the same directory as your tests, or any directory above them. Placed high up it applies to the whole project; placed in a sketch directory it applies to that sketch only.
@@ -558,6 +588,8 @@ For catching the case where a test passed but the log contained something worryi
 
 **Do not let that fixture request `dut`.** If it does, it is set up after `dut` and finalized before it, so it can never read the tail of the log. Requesting only `test_case_tempdir` gives the correct order.
 
+This is not a constraint the audit introduces; it is one that **already holds.** The audit reads log files, which requires the serial listener to have flushed them, and that is only true because `dut` finalizes first. In other words, the reason to respect it is to avoid breaking something you already have.
+
 ### 5. Prepare the environment before a run
 
 For work such as symlinking a local platform into the Arduino directory. It has to happen once, before any build, so it belongs in a session-scoped autouse fixture.
@@ -613,5 +645,27 @@ With peers, the flashing order needs care. The primary upload runs first, at mod
 If the primary brings up radio or USB in `setup()`, it can observe the resets and enumerations caused by flashing the peer, and record them as errors. That is not a defect in the sketch.
 
 The fix is to **start nothing that affects the outside world in `setup()`, and start it when the test says so**. Enable it on the first line of the test body, by which point the peer has already been flashed.
+
+That shape brings two problems of its own. Both happen on real hardware.
+
+### The reply to the enabling command swallows the start-up output
+
+Send the enabling command and wait for a reply with `expect`, and **anything printed before that reply falls behind the read position.** `expect` reads forward to the match and discards what came before it. Connect lines and enumeration dumps the sketch printed while starting are then invisible to the rest of the test. It looks as though the sketch never printed them, which makes for a failure that is hard to trace.
+
+| When the sketch prints it | Can the test `expect` that line? |
+| --- | --- |
+| Before the reply | No; it fails on a timeout |
+| After the reply | Yes |
+
+So **print the start-up output after the reply.** Only the order changes; what the sketch does need not.
+
+### When to answer is a real choice
+
+Whichever way you lean, answering has a failure mode.
+
+- **Answer as soon as the peripheral is started.** The test body begins running before anything is enumerated or connected. Writing to the other side goes nowhere.
+- **Answer only once it is genuinely usable.** Then, per the section above, the start-up output precedes the reply and is swallowed.
+
+**Only one shape satisfies both.** Defer the answer until it is usable, and **re-emit the start-up lines after answering.** Tests that move data need the device live; tests that watch the lifecycle need the connect line visible. When one sketch carries both kinds of test, this is the shape you need.
 
 Projects that use everything covered here are collected in [Example Projects](TESTING_EXAMPLES.md).
