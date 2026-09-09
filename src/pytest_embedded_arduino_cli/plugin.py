@@ -19,13 +19,6 @@ from .app import (
     run_show_properties,
 )
 from .device_lock import DeviceLockError, DeviceLockInfo, DeviceLockSet, default_lock_dir
-from .dut_commands import (
-    COMMAND_NAMES,
-    DutCommandContext,
-    DutCommandSet,
-    run_start_round,
-    run_teardown_round,
-)
 from .flasher import ArduinoCliUploadConfig
 from .log_summary import LogSummaryCollector
 from .serial import (
@@ -160,55 +153,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=".pytest-results",
         help="Directory to save state.json (relative to pytest rootdir unless absolute).",
     )
-    group.addoption(
-        "--arduino-cli-dut-start-timeout",
-        action="store",
-        type=float,
-        default=15.0,
-        help="Seconds to wait for the START reply of each DUT (START is resent until it replies).",
-    )
-    group.addoption(
-        "--arduino-cli-dut-teardown-timeout",
-        action="store",
-        type=float,
-        default=2.0,
-        help="Seconds to wait for the RECOVER / STOP reply of each DUT.",
-    )
-    for name in COMMAND_NAMES:
-        parser.addini(
-            f"arduino_cli_dut_{name}_command",
-            default="",
-            help=f"Bytes sent to every DUT as the {name.upper()} command (escapes such as \\x01 are allowed).",
-        )
-        parser.addini(
-            f"arduino_cli_dut_{name}_reply",
-            default="",
-            help=f"Reply line a DUT prints once it has reached the {name.upper()} target state.",
-        )
-    parser.addini(
-        "arduino_cli_dut_command_terminator",
-        default="\\n",
-        help="Bytes appended to every DUT command (default: newline).",
-    )
 
 
 def pytest_report_header(config: pytest.Config) -> list[str]:
-    lines = [
+    return [
         f"arduino-cli run-mode: {config.getoption('run_mode')}",
         f"arduino-cli profile: {config.getoption('profile') or 'default'}",
     ]
-    enabled = _dut_commands(config).enabled_names
-    if enabled:
-        lines.append(f"arduino-cli dut commands: {', '.join(enabled)}")
-    return lines
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    global _DUT_INTERRUPTED
-    _DUT_INTERRUPTED = False
     install_fast_socket_redirect_thread()
     _remember_initial_ports(config)
-    _dut_commands(config)
     _clean_ardutest_artifacts(config)
     ensure_default_embedded_services(config)
     _set_optional_metadata(config)
@@ -924,27 +880,20 @@ def _make_peer_dut(request: pytest.FixtureRequest, target: PeerTarget) -> tuple[
 
     def cleanup() -> None:
         try:
-            _run_dut_teardown(request.node)
+            dut.close()
         finally:
             try:
-                dut.close()
+                serial.close()
             finally:
-                _close_peer_resources(serial, pexpect_fr, listener)
+                try:
+                    pexpect_fr.close()
+                finally:
+                    if listener.is_alive():
+                        listener.terminate()
+                        listener.join(timeout=5)
+                    listener.close()
 
     return dut, cleanup
-
-
-def _close_peer_resources(serial: Any, pexpect_fr: Any, listener: Any) -> None:
-    try:
-        serial.close()
-    finally:
-        try:
-            pexpect_fr.close()
-        finally:
-            if listener.is_alive():
-                listener.terminate()
-                listener.join(timeout=5)
-            listener.close()
 
 
 @pytest.fixture
@@ -955,7 +904,6 @@ def peers(request: pytest.FixtureRequest) -> PeerDutMap:
         return
 
     peer_map: PeerDutMap = PeerDutMap()
-    request.node.stash[_dut_peers_key] = peer_map
     cleanups: list[Callable[[], None]] = []
     try:
         for target in targets:
@@ -966,139 +914,6 @@ def peers(request: pytest.FixtureRequest) -> PeerDutMap:
     finally:
         for cleanup in reversed(cleanups):
             cleanup()
-
-
-# ---------------------------------------------------------------------------
-# Reserved DUT lifecycle commands (START / RECOVER / STOP)
-# ---------------------------------------------------------------------------
-
-_dut_primary_key = pytest.StashKey[Any]()
-_dut_peers_key = pytest.StashKey[Any]()
-_dut_nextitem_key = pytest.StashKey[Any]()
-_dut_call_failed_key = pytest.StashKey[bool]()
-_dut_teardown_done_key = pytest.StashKey[bool]()
-_NO_NEXTITEM = object()
-_DUT_INTERRUPTED = False
-
-
-def _dut_commands(config: pytest.Config) -> DutCommandSet:
-    cached = getattr(config, "_arduino_cli_dut_commands", None)
-    if cached is None:
-        cached = DutCommandSet.from_config(config)
-        config._arduino_cli_dut_commands = cached
-    return cached
-
-
-def _module_override(item: pytest.Item, name: str) -> Any | None:
-    module = getattr(item, "module", None)
-    return getattr(module, name, None) if module is not None else None
-
-
-def _run_dut_start(item: pytest.Item) -> None:
-    """Send START to the connected DUTs of ``item`` (peers in name order, then primary)."""
-    if item.config.getoption("run_mode") == "build":
-        return
-    funcargs = getattr(item, "funcargs", None) or {}
-    dut = funcargs.get("dut")
-    if isinstance(dut, (list, tuple)):
-        return
-    peers = funcargs.get("peers") or {}
-    if dut is None and not peers:
-        return
-    commands = _dut_commands(item.config)
-    override = _module_override(item, "arduino_cli_dut_start")
-    if override is None and commands.start is None:
-        return
-    ctx = DutCommandContext(
-        phase="start",
-        stop=False,
-        session_end=False,
-        interrupted=False,
-        failed=False,
-        timeout=commands.start_timeout,
-        commands=commands,
-    )
-    run_start_round(dut, peers, ctx, override=override)
-
-
-def _run_dut_teardown(item: pytest.Item) -> None:
-    """Send RECOVER or STOP once per test, right before the first DUT connection closes."""
-    if item.stash.get(_dut_teardown_done_key, False):
-        return
-    item.stash[_dut_teardown_done_key] = True
-    config = item.config
-    if config.getoption("run_mode") == "build":
-        return
-    dut = item.stash.get(_dut_primary_key, None)
-    peers = item.stash.get(_dut_peers_key, None) or {}
-    commands = _dut_commands(config)
-    override = _module_override(item, "arduino_cli_dut_teardown")
-    if override is None and not commands.teardown_enabled:
-        return
-    nextitem = item.stash.get(_dut_nextitem_key, _NO_NEXTITEM)
-    # The teardown hook never runs for an item interrupted by Ctrl-C; its
-    # fixtures are finalized from sessionfinish instead.
-    interrupted = _DUT_INTERRUPTED or nextitem is _NO_NEXTITEM
-    session_end = nextitem is None
-    ctx = DutCommandContext(
-        phase="teardown",
-        stop=session_end or interrupted,
-        session_end=session_end,
-        interrupted=interrupted,
-        failed=bool(item.stash.get(_dut_call_failed_key, False)),
-        timeout=commands.teardown_timeout,
-        commands=commands,
-    )
-    run_teardown_round(dut, peers, ctx, override=override)
-
-
-def _install_dut_teardown(item: pytest.Item, dut: Any) -> None:
-    if dut is None or isinstance(dut, (list, tuple)) or not hasattr(dut, "close"):
-        return
-    item.stash[_dut_primary_key] = dut
-    original_close = dut.close
-
-    def close_with_teardown() -> None:
-        try:
-            _run_dut_teardown(item)
-        finally:
-            original_close()
-
-    dut.close = close_with_teardown
-
-
-@pytest.hookimpl(wrapper=True)
-def pytest_fixture_setup(fixturedef: Any, request: pytest.FixtureRequest):
-    result = yield
-    if fixturedef.argname == "dut" and isinstance(request.node, pytest.Item):
-        _install_dut_teardown(request.node, result)
-    return result
-
-
-@pytest.hookimpl(wrapper=True)
-def pytest_runtest_setup(item: pytest.Item):
-    result = yield
-    _run_dut_start(item)
-    return result
-
-
-@pytest.hookimpl(wrapper=True, tryfirst=True)
-def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]):
-    report = yield
-    if report.when == "call":
-        item.stash[_dut_call_failed_key] = bool(report.failed)
-    return report
-
-
-@pytest.hookimpl(wrapper=True, tryfirst=True)
-def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None):
-    item.stash[_dut_nextitem_key] = nextitem
-    return (yield)
-
-
-def pytest_keyboard_interrupt(excinfo: Any) -> None:
-    global _DUT_INTERRUPTED
-    _DUT_INTERRUPTED = True
 
 
 @pytest.fixture(autouse=True)
