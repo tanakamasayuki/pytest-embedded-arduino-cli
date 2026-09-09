@@ -678,4 +678,4 @@ If you use method B on real hardware, either have the sketch repeat `READY` or m
 - If you do write several tests, every one of them must pass on its own and must not depend on an earlier test.
 - Wait for a reply, not for a fixed amount of time.
 
-More advanced topics are in the [advanced guide](TESTING_ADVANCED.md).
+More advanced topics are in [Advanced Testing](TESTING_ADVANCED.md). Real, working projects are collected in [Example Projects](TESTING_EXAMPLES.md).
