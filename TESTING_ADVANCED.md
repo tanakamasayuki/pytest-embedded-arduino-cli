@@ -613,3 +613,5 @@ With peers, the flashing order needs care. The primary upload runs first, at mod
 If the primary brings up radio or USB in `setup()`, it can observe the resets and enumerations caused by flashing the peer, and record them as errors. That is not a defect in the sketch.
 
 The fix is to **start nothing that affects the outside world in `setup()`, and start it when the test says so**. Enable it on the first line of the test body, by which point the peer has already been flashed.
+
+Projects that use everything covered here are collected in [Example Projects](TESTING_EXAMPLES.md).
