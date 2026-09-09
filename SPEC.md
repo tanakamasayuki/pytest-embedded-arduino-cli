@@ -613,38 +613,6 @@ Structural defects of peer DUTs are treated as configuration errors.
 For example, if there is no `.ino`, there are multiple `.ino` files, or the `sketch.yaml` is broken, it is treated as an error.
 On the other hand, if the execution conditions are not met, such as unsupported profile, undetermined profile, or unresolved port, it is treated as skip.
 
-### 13.9 Reserved DUT Lifecycle Commands
-
-A module uploads once and connects per test, and closing a connection sends nothing to the device.
-Two problems follow. A test that fails midway leaves the device in an intermediate state for the next test in the same module, because nothing re-uploads in between. After the session ends, the device keeps doing whatever the last test left it doing, such as BLE advertising, until the next upload.
-Module boundaries are not a problem: every run mode that executes tests uploads first, and the upload resets the board.
-
-The plugin therefore provides three reserved commands. Each is sent to the primary DUT and to every peer DUT connected for the test.
-
-| Command | Call point | Target state |
-| --- | --- | --- |
-| `START` | after all fixtures of the test are set up, before the test body | ready for the test body |
-| `RECOVER` | once per test, right before the first DUT connection closes | the sketch's own boot state |
-| `STOP` | the same call point, instead of `RECOVER`, when nothing runs after this test in the session | everything off (connections closed, advertising and scanning stopped); a superset of `RECOVER` |
-
-"Nothing runs after this test" holds for the last collected test, when `-x` / `--maxfail` stops the session, and when the session is interrupted with Ctrl-C.
-
-Requirements:
-
-- Opt-in per command. A command is active only when both its command bytes and its reply line are configured in the ini. Nothing is sent and no time is spent for an unconfigured command. The plugin ships no default bytes. The set of enabled commands is a rule chosen for the project: enabling a command means every sketch in the project implements it.
-- Transport. Each command is written as the configured bytes followed by the configured terminator (default `\n`). Values accept `\xNN`, `\n`, `\r`, `\t`, and `\\` escapes. In `pyproject.toml` the values are TOML literal strings (`'\x01'`); basic strings reject `\x` escapes.
-- Reply semantics. A reply means the sketch has reached the command's target state, never that it received the command. A sketch with asynchronous start-up defers the `START` reply until it is ready. Waiting for the reply also guarantees that the exchange is in the serial log before any log-reading fixture runs.
-- `START`. Sent to peers in name order, then to the primary DUT. Resent every 0.5 s until the reply arrives or the start timeout elapses (default 15 s, `--arduino-cli-dut-start-timeout`); the budget is long because the reply may require enumeration or a connection. A missing reply is a setup error naming the device; the test body does not run; fixtures are still torn down. Enabling `START` obliges every device in the session, the primary DUT and every peer, to answer it; a device already in its started state, or with nothing to start, replies immediately. Sketches treat `START` as idempotent. `START` does not replace test-side normalization of application state.
-- `RECOVER` / `STOP`. Sent to the primary DUT first, then to peers in reverse name order. One write per device, waiting at most the teardown timeout (default 2 s, `--arduino-cli-dut-teardown-timeout`); the budget is short because a failed test often means a device that cannot answer. A missing reply or an exception is a warning and never changes the test result. The round runs exactly once per test, before the first DUT connection closes, including the Ctrl-C path where fixture finalizers run from session finish. The device lock is still held at that point.
-- `RECOVER` contract. `RECOVER` restores the sketch's own boot state. For a sketch that waits for `START`, the boot state is idle and `STOP` is typically the same operation; for a sketch that starts in `setup()`, the boot state is running and `RECOVER` must re-establish it (re-advertise, re-enumerate). `RECOVER` runs after every test and must be idempotent and cheap; it may be a no-op when the sketch is already in its boot state. Soft idle through library calls is expected; a board reset is not, since it re-enumerates native USB ports.
-- Devices that cannot go quiet. Some devices cannot reach a quiet state at all; Arduino's USB CDC stack, for example, cannot stop presenting the device once begun. Such a sketch acknowledges what it can actually do: it clears the state the test left behind and replies. `STOP` then means as quiet as this device can be.
-- Sketch safety condition. The command dispatch rooted at `Serial.read()` (or the line reader) must ignore unknown bytes: the `if` / `else if` chain or `switch` must not end in a catch-all that acts. The condition is about the dispatch chain, not about an `else` appearing anywhere in the file; a catch-all that only discards is fine. Control characters such as `0x01` SOH / `0x18` CAN / `0x04` EOT are the recommended convention because sketches dispatch printable characters.
-- Logging. Each command is recorded in the DUT log as a marker line `[arduino-cli] <COMMAND> -> <target>`. `START` retransmissions are logged at debug level, and a missing reply reports how many times the command was sent, so budgets can be tuned from evidence.
-- Module override. A test module may define `arduino_cli_dut_start(dut, peers, ctx)` and `arduino_cli_dut_teardown(dut, peers, ctx)`. When defined, the function replaces the generic implementation for that module and runs even when no command is configured. `ctx` exposes `phase`, `stop`, `session_end`, `interrupted`, `failed`, `timeout`, and `send_start()` / `send_recover()` / `send_stop()` helpers. Exceptions from the start override are setup errors; exceptions from the teardown override are warnings.
-- Existing constraint made explicit. An autouse fixture in the consumer's conftest that reads the serial log at teardown must not request `dut`, directly or transitively; otherwise it finalizes before the DUT closes and never sees the tail of the log. This holds today independently of the commands.
-- Out of scope: pytest-embedded multi-DUT tuples (`--count`), pytest-xdist, and `--run-mode=build` (no connection exists).
-- Migration is not part of this specification. Enabling a command switches it on for every sketch at once. A project adopting the commands later may convert everything and fix what turns red, or exclude modules with the override while converting.
-
 ## 14. pytest option Requirements
 
 At least the following categories of options are targeted.
@@ -758,7 +726,7 @@ For peer DUT build / upload as well, include information in the `-v` / `-vv` log
 - Do not bring ESP-specific terminology into option names
 - Use names that are unlikely to conflict with existing pytest-embedded options
 - Make the responsibility boundaries of build / upload / runtime visible from the option names
-- Keep plugin-specific options small and scoped to execution mode, profile selection, peer DUTs, device locking, ArduTest, local state cache, the log directory summary, and reserved DUT lifecycle commands
+- Keep plugin-specific options small and scoped to execution mode, profile selection, peer DUTs, device locking, ArduTest, local state cache, and the log directory summary
 
 ### 14.9 Log Directory Result Summary
 
@@ -774,22 +742,6 @@ The result of the run is therefore not visible from the directory tree, so this 
 - Truncate failure text to a bounded size, keeping the tail; `dut.log` in the same directory remains the complete serial log
 - Never write anything when `pytest-embedded` did not create a log directory, and never let a failure in this feature affect the pytest exit status
 - Option: `--arduino-cli-no-log-summary` disables the feature. The default is enabled
-
-### 14.10 Reserved DUT Lifecycle Commands
-
-ini values (all optional; a command is active only when both of its values are set):
-
-- `arduino_cli_dut_start_command` / `arduino_cli_dut_start_reply`
-- `arduino_cli_dut_recover_command` / `arduino_cli_dut_recover_reply`
-- `arduino_cli_dut_stop_command` / `arduino_cli_dut_stop_reply`
-- `arduino_cli_dut_command_terminator` (default `\n`)
-
-Options:
-
-- `--arduino-cli-dut-start-timeout=SECONDS` (default 15)
-- `--arduino-cli-dut-teardown-timeout=SECONDS` (default 2)
-
-When at least one command is enabled, the report header lists them, for example `arduino-cli dut commands: START, RECOVER, STOP`.
 
 ## 15. Test State Saving Requirements
 

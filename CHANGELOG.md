@@ -1,14 +1,14 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Add testing guides: Testing Basics, Advanced Testing, and Example Projects, all linked from the README.
+- (JA) テストガイドを追加。テストの基本、テストの応用、実例集。いずれも README からリンク。
 
-## 1.5.1
-- (EN) Report how many times a DUT lifecycle command was sent when the device does not reply, and log `START` retransmissions at debug level. Clarify that the existing rule (enabling `START` means every sketch answers it) covers devices with nothing to start, which reply immediately; add guidance for devices that cannot reach a quiet state, and note that `pyproject.toml` values must be TOML literal strings (`'\x01'`).
-- (JA) DUT ライフサイクルコマンドに応答がなかった場合のエラーに送信回数を含め、`START` の再送を debug レベルでログに出すように変更。既存の規則（`START` を有効にしたら全 sketch が応答する）が、始めるものがない device にも当てはまり即座に応答することを明確化。静かな状態に到達できない device の扱い、`pyproject.toml` では値を TOML の literal string（`'\x01'`）で書く必要があることを文書化。
-
-## 1.5.0
-- (EN) Add reserved DUT lifecycle commands `START` / `RECOVER` / `STOP`, sent to the primary DUT and every connected peer DUT: `START` after all fixtures connect and before the test body (peers in name order, then primary, resent until the reply arrives; no reply is a setup error), `RECOVER` right before the connections close after every test, and `STOP` instead of `RECOVER` when nothing runs after the test (last test, `-x` / `--maxfail`, Ctrl-C). Each command is opt-in through the ini pair `arduino_cli_dut_<name>_command` / `arduino_cli_dut_<name>_reply` (plus `arduino_cli_dut_command_terminator`), with `--arduino-cli-dut-start-timeout` and `--arduino-cli-dut-teardown-timeout`. A reply means the sketch reached the target state. Test modules may define `arduino_cli_dut_start` / `arduino_cli_dut_teardown` to replace the generic implementation.
-- (JA) DUT ライフサイクル予約コマンド `START` / `RECOVER` / `STOP` を追加。primary DUT と接続中の全 peer DUT に送る。`START` は全 fixture 接続後かつテスト本体の前（peer を名前順、次に primary。応答まで再送し、応答がなければ setup error）、`RECOVER` は毎テストの接続 close 直前、`STOP` はそのテストの後に実行するテストがないとき（最後のテスト、`-x` / `--maxfail`、Ctrl-C）に `RECOVER` の代わりに送る。各コマンドは ini の `arduino_cli_dut_<name>_command` / `arduino_cli_dut_<name>_reply`（および `arduino_cli_dut_command_terminator`）で個別に opt-in し、`--arduino-cli-dut-start-timeout` / `--arduino-cli-dut-teardown-timeout` で待ち時間を調整する。応答は sketch が目標状態に到達したことを意味する。テスト module に `arduino_cli_dut_start` / `arduino_cli_dut_teardown` を定義すると汎用実装を置き換えられる。
+## 1.5.1 (withdrawn / 取り消し)
+## 1.5.0 (withdrawn / 取り消し)
+> (EN) Removed from PyPI and not installable. The reserved DUT lifecycle commands they introduced were reverted; clean devices up with a fixture in a test file or a `conftest.py` instead, as described in the testing guides.
+>
+> (JA) PyPI から削除済みで、インストールできません。これらが追加した DUT ライフサイクル予約コマンドは撤回しました。device の掃除はテストファイルか `conftest.py` の fixture で行ってください。詳細はテストガイドにあります。
 
 ## 1.4.1
 - (EN) Resolve device lock keys through symlinks, so `/dev/serial/by-id/...` and `/dev/serial/by-path/...` aliases lock the same physical device as the underlying `/dev/ttyUSB*` node. Non-path keys (`COM3`, `--device-lock-key` labels) are unchanged.
