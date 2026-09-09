@@ -89,10 +89,39 @@ This same form comes up again below, in keeping tests out of the default run.
 
 **It applies below where you put it.** At the project root it applies to everything; in a sketch directory it applies to that sketch and below. When both define a fixture of the same name, the one nearer the test wins.
 
-There are two main things to write in it.
+There are two kinds of thing to write in it, and they differ in **who chooses the name.**
 
-- **Fixture definitions.** Setup and cleanup shared by several test files.
-- **Hook implementations.** Write a function with a set name such as `pytest_runtest_setup` and pytest calls it at the right moment. That lets you insert work at positions a fixture cannot express, like "before a test" or "at the end of the session".
+| Kind | Name | How it gets called |
+| --- | --- | --- |
+| hook | pytest decides it; you cannot invent new ones | pytest calls it at the moment that name stands for |
+| fixture | You decide it | Called when a test or another fixture takes it as an argument, or unasked with `autouse=True` |
+
+**A hook means implementing one of a fixed set of names.** `pytest_runtest_setup` runs just before each test, `pytest_sessionfinish` at the end of the session. That lets you insert work at positions a fixture cannot express, like "before a test" or "at the end of the session". The full list of names is in the Hooks section of the official reference.
+
+<https://docs.pytest.org/en/stable/reference/reference.html#hooks>
+
+A typo will not pass silently. Names beginning with `pytest_` are validated as hooks, so writing `pytest_runtest_setupp` aborts the run with an `unknown hook` error. A name that does not begin with `pytest_` is simply an ordinary function and is ignored.
+
+**The hook names are pytest's alone.** Plugins do not add hook names; neither `pytest-embedded` nor this plugin does. What a plugin does is implement pytest's hooks and add fixtures and options. So when you are looking for a hook to write in a conftest, pytest's reference is the only place to look.
+
+| Layer | What it adds |
+| --- | --- |
+| pytest | The hook names, the built-in fixtures, the standard options |
+| `pytest-embedded` | Fixtures such as `dut`; options such as `--port`, `--baud`, `--root-logdir` |
+| This plugin | Fixtures such as `peers`, `arduino_test`, `arduino_cli_app`; options such as `--profile`, `--run-mode`, `--device-lock` |
+| Your project | Fixtures, and implementations of pytest's hooks |
+
+**Fixture names are yours, so you can add as many as you like.** List the ones currently available with the command below. It also shows what this plugin and `pytest-embedded` provide, such as `dut`, `peers` and `arduino_test`.
+
+```bash
+pytest --fixtures
+```
+
+How to write them is in the Fixtures section of the official reference.
+
+<https://docs.pytest.org/en/stable/reference/fixtures.html>
+
+**Fixtures can also live in a test file; hooks cannot.** A hook written in a test file is never called. So `conftest.py` is only strictly needed when you need a hook; when a fixture is enough, the test file is the safer place because its reach is narrower.
 
 It is powerful, but pick your moments. The reasoning and the real uses are covered later, under "conftest.py is a last resort".
 
