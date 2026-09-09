@@ -29,6 +29,20 @@ def test_actual(dut):
     wait_ready(dut)
 ```
 
+**テストファイルの名前は、プロジェクト全体で一意にしてください。** 同じ basename のファイルが 2 つあると、collection の時点でエラーになります。
+
+```text
+import file mismatch:
+imported module 'test_plain' has this __file__ attribute:
+  .../no_ino/test_plain.py
+which is not the same as the test file we want to collect:
+  .../with_ino/test_plain.py
+```
+
+`__init__.py` を置かないディレクトリでは、ファイルの basename がそのままモジュール名になるためです。sketch ディレクトリ名に合わせて `test_<sketch 名>.py` と付けておけば、自然に一意になります。
+
+**同時に実行しないつもりのファイルでも一意にしてください。** 別々に動かしているうちは気づかず、あとで全体を流したときに初めて出ます。`--import-mode=importlib` を使えば重複を許せますが、名前を一意にするほうが単純です。
+
 一時的にテストを止めたいときにも使えますが、その用途では勧めません。名前を変えると、止めていること自体が見えなくなります。理由が残る方法、つまり marker を使ってください。
 
 ### marker とは
@@ -96,18 +110,18 @@ pytest の設定は 1 つのファイルから読まれます。候補は 4 つ�
 書き方は形式によって違います。
 
 ```ini
-# pytest.ini
+# tests/pytest.ini
 [pytest]
-testpaths = tests
+testpaths = unit suites
 addopts = -m "not manual"
 markers =
     manual: 人の操作を必要とする
 ```
 
 ```toml
-# pyproject.toml
+# tests/pyproject.toml
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["unit", "suites"]
 addopts = "-m 'not manual'"
 markers = [
     "manual: 人の操作を必要とする",
@@ -153,7 +167,7 @@ SKIPPED [1] peer device2: port is not resolved
 センサやアナライザ、給電を切れる装置のように、plugin が存在を知らない機材は、自分で有無を確かめて skip します。
 
 ```python
-# tests/manual/conftest.py
+# manual/conftest.py
 import os
 
 import pytest
@@ -168,13 +182,13 @@ conftest をディレクトリに置けば、その配下だけに効きます�
 
 ### 自動で判定できないものは既定から外す
 
-**人の操作が必要なテストは、環境変数では判定できません。** その場に人がいるかどうかを plugin もテストも知りようがないからです。実行に非常に時間がかかるテストも、機材は揃っているが毎回は流したくない類です。こうしたものは既定の実行から外し、必要なときだけ指定します。方法は 2 つです。
+**人の操作が必要なテストは、環境変数では判定できません。** その場に人がいるかどうかを plugin もテストも知りようがないからです。実行に非常に時間がかかるテストも、機材は揃っているが毎回は流したくない類です。こうしたものは既定の実行から外し、必要なときだけ指定します。方法は 3 つです。
 
-**ディレクトリで分ける。** 既定の実行対象から外し、必要なときだけ指定します。
+**ディレクトリで分ける。** `testpaths` の対象から外し、必要なときだけ指定します。
 
 ```bash
-pytest tests/          # 既定。manual は入らない
-pytest tests/manual/   # 必要なときだけ
+pytest                 # testpaths のものだけ。manual は入らない
+pytest manual/         # 必要なときだけ
 ```
 
 **marker で分ける。** ini に登録し、既定では除外します。
@@ -190,7 +204,39 @@ addopts = -m "not manual"
 pytest -m manual       # marker を付けたものだけ
 ```
 
-どちらでも構いません。要点は、**機材がない環境で必ず失敗するテストを既定の実行に置かないこと**です。置くと失敗が常態になり、本当の失敗が埋もれます。
+**ファイル名から `test_` を外す。** 収集規則を逆に使う方法です。ファイル名が `test_*.py` でなければ自動では収集されませんが、**ファイルを直接指定したときだけパターン照合が飛ばされ、収集されます**。
+
+テストファイルは sketch ディレクトリの中に置く必要があるので、`manual/` の直下ではなく sketch ごとのディレクトリに入れます。
+
+```text
+  manual/
+    manual_power_cycle/
+      manual_power_cycle.ino
+      sketch.yaml
+      manual_power_cycle.py   <- test_ で始まらない
+```
+
+```python
+# manual/manual_power_cycle/manual_power_cycle.py
+def test_power_cycle(dut):     # 関数側の test_ は必要
+    ...
+```
+
+```bash
+pytest                                                  # 収集されない
+pytest manual/                                          # 収集されない
+pytest manual/manual_power_cycle/manual_power_cycle.py  # これだけ収集される
+```
+
+**ディレクトリ指定では収集されない点に注意してください。** ファイルを名前で指定する必要があります。まとめて動かすなら shell の展開を使います。
+
+```bash
+pytest manual/*/*.py
+```
+
+ini への登録も `testpaths` の調整も要らないので、**1 本ずつ動かすテストには手軽です。** 人が操作するテストはたいてい 1 本ずつ動かすので相性が良いです。代わりに、そのファイルにテストが入っていることが名前から分かりにくくなります。まとめて流すことが多いなら、ディレクトリか marker のほうが向いています。
+
+どの方法でも構いません。要点は、**機材や人が揃わない環境で必ず失敗するテストを既定の実行に置かないこと**です。置くと失敗が常態になり、本当の失敗が埋もれます。
 
 ## 設定の優先順位と `.env`
 

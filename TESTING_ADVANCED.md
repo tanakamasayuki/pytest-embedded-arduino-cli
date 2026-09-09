@@ -29,6 +29,20 @@ def test_actual(dut):
     wait_ready(dut)
 ```
 
+**Test file names must be unique across the whole project.** Two files with the same basename fail at collection time.
+
+```text
+import file mismatch:
+imported module 'test_plain' has this __file__ attribute:
+  .../no_ino/test_plain.py
+which is not the same as the test file we want to collect:
+  .../with_ino/test_plain.py
+```
+
+In a directory with no `__init__.py`, a file's basename becomes its module name. Naming files after the sketch directory, as `test_<sketch name>.py`, keeps them unique without thinking about it.
+
+**Keep names unique even for files you never intend to run together.** While you run them separately nothing shows, and the error appears the first time someone runs everything. `--import-mode=importlib` allows duplicates, but unique names are the simpler answer.
+
 You can also use it to disable a test temporarily, but that is not recommended. Renaming hides the fact that it is disabled. Use a form that keeps the reason visible, which means a marker.
 
 ### What a marker is
@@ -96,18 +110,18 @@ A `pytest.ini` wins even when it is empty. **Have two and one of them is ignored
 The syntax differs by format.
 
 ```ini
-# pytest.ini
+# tests/pytest.ini
 [pytest]
-testpaths = tests
+testpaths = unit suites
 addopts = -m "not manual"
 markers =
     manual: needs a person
 ```
 
 ```toml
-# pyproject.toml
+# tests/pyproject.toml
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["unit", "suites"]
 addopts = "-m 'not manual'"
 markers = [
     "manual: needs a person",
@@ -153,7 +167,7 @@ So an extra board usually needs no conftest at all. Where the board is attached 
 For equipment the plugin has no idea exists, such as a sensor, an analyzer, or a switch that can cut power, check for it yourself and skip.
 
 ```python
-# tests/manual/conftest.py
+# manual/conftest.py
 import os
 
 import pytest
@@ -168,13 +182,13 @@ Put the conftest in a directory and it applies only below that directory.
 
 ### What cannot be detected automatically stays out of the default run
 
-**A test that needs a person cannot be gated on an environment variable.** Neither the plugin nor the test can know whether someone is standing there. A test that takes a very long time is similar: the hardware is present, but you do not want it on every run. Keep these out of the default run and name them when you want them. There are two ways.
+**A test that needs a person cannot be gated on an environment variable.** Neither the plugin nor the test can know whether someone is standing there. A test that takes a very long time is similar: the hardware is present, but you do not want it on every run. Keep these out of the default run and name them when you want them. There are three ways.
 
-**Separate by directory.** Keep it out of the default target and name it when you want it.
+**Separate by directory.** Leave it out of `testpaths` and name it when you want it.
 
 ```bash
-pytest tests/          # the default; manual is not included
-pytest tests/manual/   # only when you want it
+pytest                 # only what testpaths names; manual is not included
+pytest manual/         # only when you want it
 ```
 
 **Separate by marker.** Register it in the ini and exclude it by default.
@@ -190,7 +204,39 @@ addopts = -m "not manual"
 pytest -m manual       # only the marked ones
 ```
 
-Either is fine. The point is to **keep tests that always fail without the equipment out of the default run.** Leave them in and failure becomes the normal state, which buries the real ones.
+**Drop the `test_` prefix from the file name.** This uses the collection rules in reverse. A file not named `test_*.py` is not collected automatically, but **naming the file directly skips the pattern check and collects it.**
+
+A test file has to sit inside a sketch directory, so it goes in a per-sketch directory rather than loose under `manual/`.
+
+```text
+  manual/
+    manual_power_cycle/
+      manual_power_cycle.ino
+      sketch.yaml
+      manual_power_cycle.py   <- does not start with test_
+```
+
+```python
+# manual/manual_power_cycle/manual_power_cycle.py
+def test_power_cycle(dut):     # the function still needs test_
+    ...
+```
+
+```bash
+pytest                                                  # not collected
+pytest manual/                                          # not collected
+pytest manual/manual_power_cycle/manual_power_cycle.py  # only this collects it
+```
+
+**Note that naming the directory does not collect it.** You have to name the file. To run several, use shell expansion.
+
+```bash
+pytest manual/*/*.py
+```
+
+Nothing has to be registered in the ini and `testpaths` needs no adjusting, which makes this **the easy choice for tests you run one at a time.** Tests operated by a person usually are run one at a time, so it fits. The cost is that the name no longer says the file contains tests. If you often run them as a group, a directory or a marker suits better.
+
+Any of the three is fine. The point is to **keep tests that always fail without the equipment or the person out of the default run.** Leave them in and failure becomes the normal state, which buries the real ones.
 
 ## Configuration precedence and `.env`
 

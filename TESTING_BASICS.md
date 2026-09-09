@@ -234,7 +234,9 @@ As the tests grow, split what is under `tests/` by purpose.
     conftest.py            <- only once you actually need one
 ```
 
-The names are yours to choose. What matters is that **what runs by default is separated from what does not.** Set the default target in `pyproject.toml`.
+The names are yours to choose. What matters is that **what runs by default is separated from what does not.**
+
+Name test files after their sketch directory, as `test_<sketch name>.py`, so that they are **unique across the whole project**. Two files with the same name fail at collection time when someone runs everything. Set the default target in `pyproject.toml`.
 
 ```toml
 [tool.pytest.ini_options]
