@@ -10,6 +10,11 @@ A pytest plugin to test Arduino projects using `pytest-embedded` and `arduino-cl
 
 This package does not depend on `pytest-embedded-arduino`. It is intended to stay generic enough to work well for Arduino projects beyond ESP32-specific assumptions.
 
+## Guides
+
+- [Testing Basics](TESTING_BASICS.md): what a test is, how a run works, what only real hardware can tell you, how many boards to use, and how to keep tests independent. Start here if you are new to pytest.
+- [Advanced Testing](TESTING_ADVANCED.md): collection rules, traps in `expect`, where logs and artifacts live, cleaning up after an early exit, when a `conftest.py` is justified, and principles for peer tests.
+
 ## Design
 
 - Build with `arduino-cli compile`

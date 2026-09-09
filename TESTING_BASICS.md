@@ -1,0 +1,612 @@
+# Testing Basics
+
+[日本語](TESTING_BASICS.ja.md)
+
+A guide for writing your first tests with this plugin. It starts from what a test is, so you can read it without knowing pytest.
+
+## What a test is
+
+A test is a way to let a machine check, the same way every time, what you used to check by hand.
+
+Developing for a microcontroller usually means flashing a sketch, opening a serial monitor, reading the output, typing a command and watching the reaction. A test is that procedure written down as code. Write it once and the same check runs automatically every time you change something.
+
+With this plugin, a test comes down to one sentence.
+
+**Flash a sketch to the board, exchange messages over serial, and check that the expected output appears.**
+
+## Terms
+
+Here are the words this guide uses.
+
+| Word | Meaning |
+| --- | --- |
+| host | The PC that runs the tests. The side pytest runs on. |
+| device | The microcontroller board being tested. Also called the board. |
+| DUT | Short for Device Under Test: the device being tested. This is the `dut` argument of a test function. |
+| peer | A device the DUT talks to. There can be as many as you need, not just one. |
+| sketch | An Arduino program, the `.ino` file. |
+| profile | The settings for which board to build for and how. Written in `sketch.yaml`. |
+| host core | A board core that builds the sketch for the host and runs it as a PC program, with no microcontroller involved. |
+
+Host and device come up throughout. **The host side** means the PC pytest runs on, and comes up when deciding which side judges pass or fail. **The device side** is the microcontroller board under test.
+
+Separately you will see the term **host core**. That is a kind of board core which builds the sketch as a PC program instead of for a microcontroller, and runs it on the PC. "Deciding on the host" and "running on a host core" are different things, so do not conflate them.
+
+## How it works
+
+When you run `pytest`, this happens in order.
+
+1. pytest collects the functions whose names start with `test_`. Those are the tests that run.
+2. The plugin compiles the `.ino` in the same directory as that test file, using `arduino-cli`.
+3. It uploads to the board. This resets the board, and the sketch starts running.
+4. It opens the serial port.
+5. Your test function runs. It sends with `dut.write(...)` and waits with `dut.expect_exact(...)`.
+6. If the expected text arrives, the test moves on. If it does not, the test fails on a timeout.
+7. The serial port is closed.
+
+The smallest possible pairing is this. A sketch file and a test file go together.
+
+```cpp
+// hello.ino
+void setup()
+{
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("hello from arduino");
+}
+
+void loop()
+{
+}
+```
+
+```python
+# test_hello.py
+def test_hello(dut):
+    dut.expect_exact("hello from arduino")
+```
+
+The sketch prints one line with `Serial.println` and the test waits for it with `dut.expect_exact`. That pairing is the basic shape.
+
+Match the speed in `Serial.begin(115200)` with the test side. This plugin defaults to 115200, and `--baud` changes it. A mismatch delivers garbled lines.
+
+Naming `dut` as an argument of the test function is what makes steps 2 through 4 happen.
+
+Sending first and checking the reply looks the same. The sketch reads one line at a time and treats it as a command.
+
+```cpp
+// echo.ino
+void setup()
+{
+  Serial.begin(115200);
+}
+
+void loop()
+{
+  if (Serial.available() == 0)
+  {
+    return;
+  }
+
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+
+  if (line == "ping")
+  {
+    Serial.println("PONG");
+  }
+}
+```
+
+```python
+# test_echo.py
+def test_echo(dut):
+    dut.write("ping\n")
+    dut.expect_exact("PONG")
+```
+
+The sketch reads the `ping` that `dut.write` sent, answers `PONG`, and the test waits for it. Every later example uses this shape.
+
+The mix of cases is deliberate. **Commands sent from the host are lower case, and result lines printed by the device are upper case.** It is not a rule, but it makes the direction of a line obvious at a glance in a log, so this guide keeps to it throughout.
+
+### There are two places to decide pass or fail
+
+- **Decide on the host.** The test code checks the text it received. The sketch only has to print values. Every example so far is this.
+- **Decide on the device.** The judgement happens inside the sketch, which prints only the result. This suits cases where you want to inspect values inside the board directly.
+
+Written plainly, deciding on the device looks like this.
+
+```cpp
+  int sum = add(2, 3);
+  if (sum == 5)
+  {
+    Serial.println("ADD_PASS");
+  }
+  else
+  {
+    Serial.print("ADD_FAIL sum=");
+    Serial.println(sum);
+  }
+```
+
+```python
+def test_add(dut):
+    dut.expect_exact("ADD_PASS")
+```
+
+The judgement lives in the sketch, so the test only waits for the result line.
+
+Libraries such as Unity and ArduTest are a tidied-up version of this. Here is how they work.
+
+1. The sketch runs several checks itself.
+2. It prints the result of each check, plus how many passed and how many failed.
+3. One line on the test side reads that output: `dut.expect_unity_test_output()` for Unity, `arduino_test.run()` for ArduTest.
+4. **If even one check failed, that pytest test fails.** The error names the checks that failed.
+
+```python
+def test_unity(dut):
+    dut.expect_unity_test_output(timeout=60)   # fails here if any check failed
+```
+
+So from pytest's point of view it is one test, and inside it any number of device-side checks run. Adding a check does not mean editing the test file. This is the shape that pairs well with "put it all in one larger test" later on.
+
+With Unity each check is also recorded in the junit report, so `--junitxml` keeps per-check results.
+
+Either is fine, and you can mix them.
+
+## What only real hardware can tell you
+
+With a host core you can run the sketch as a PC program. It is fast and needs no board attached, but there is a limit to what it proves.
+
+| Subject | Can a host core tell you? |
+| --- | --- |
+| Pure logic such as computation, parsing, state machines | Yes |
+| The shape of a protocol exchanged over serial | Yes |
+| Peripherals such as GPIO, I2C, SPI | No |
+| Real-time timing, interrupts | No |
+| Persistence in Flash or NVS | No |
+| Board-specific APIs, Wi-Fi, BLE, USB | No |
+
+Running on a host core is not a substitute for testing on hardware. Results can also shift with the PC's OS, the gcc version, and how the host core implements `Serial`. Treat it as a way to iterate on logic quickly.
+
+### The idea of a unit test
+
+A unit test checks one part at a time, in isolation. It targets a single function or class and keeps the surroundings out of it. A test that runs the whole thing on hardware, by contrast, looks at how the parts combine. Both have a role.
+
+| | One part (unit test) | Combined (hardware test) |
+| --- | --- | --- |
+| Subject | A function or a class | The whole sketch plus the hardware |
+| Speed | Fast | Slow; flashing alone takes time |
+| What you need | Nothing; a host core is enough | A board, which has to be shared |
+| When it fails | The cause is in a narrow place | The cause could be anywhere |
+
+Here is the rule of thumb for dividing them. **Anything determined by its inputs and outputs, such as computation, parsing and state machines, belongs in unit tests on a host core.** Leave only what hardware alone can tell you, such as peripherals, timing and radio, for hardware tests. Hardware tests are slow and the boards are limited, so the more you narrow down what they check, the faster the whole suite gets.
+
+On a microcontroller the parts can be hard to isolate, because code that touches hardware directly sits mixed in with code that computes and decides. Separate those two and the latter runs on a host core. Thinking about testability doubles as a design guideline.
+
+Unit tests are not only for a host core, either. Checking individual functions inside the board with Unity or ArduTest is also a unit test, just one that runs on hardware. Parts that depend on peripherals end up in that form.
+
+**You can choose where to run them.** A host core has two advantages: nothing is uploaded, so it is fast, and no board is needed. In exchange you have to add the host core platform and have an environment on the PC that can build C++.
+
+**Running your unit tests only on hardware is perfectly fine.** Flashing costs time, but the environment stays exactly what ordinary Arduino development already needs. Starting on hardware, then adding a host core later once the waiting starts to bother you, is a perfectly reasonable order.
+
+## How many boards to use
+
+What you can test depends on the board count. Starting with fewer is easier.
+
+### Zero boards: run on a host core
+
+With a host core, the sketch is built with the PC's gcc and launched as an executable on the PC. Instead of a serial port, it is reached over a TCP socket.
+
+```yaml
+# sketch.yaml
+profiles:
+  host:
+    fqbn: lang-ship:host:host
+    port: socket://localhost
+    platforms:
+      - platform: lang-ship:host (1.7.1)
+        platform_index_url: https://tanakamasayuki.github.io/lang-ship-arduino-core/package_lang-ship_index.json
+
+default_profile: host
+```
+
+This suits checking logic, and no board has to be shared.
+
+**Being able to run in CI is a major benefit.** A CI service such as GitHub Actions cannot have a board attached, but a host core needs none, so it just runs. Even without a bench of your own, the logic unit tests get checked automatically on every change. For a public open-source repository the free tier covers it, so it costs nothing.
+
+Hardware tests only run on your own bench or on a self-hosted runner you set up yourself. So the more you move onto a host core, the wider the range that gets checked automatically.
+
+### One board: run on hardware
+
+The basic setup, used for unit tests on real hardware.
+
+```bash
+pytest tests/my_app --port=/dev/ttyUSB0
+```
+
+A way to avoid typing `--port` every time is covered after the peer sections.
+
+Even with one board you can wire an output back to an input as a loopback and exercise both directions. Peripherals, timing and persistence, the things a host core cannot tell you, start here.
+
+### Two boards: tests that need a partner
+
+For tests that need someone to talk to, put a `peer_<name>/` directory inside the sketch directory.
+
+```text
+tests/
+  my_app/
+    my_app.ino
+    sketch.yaml
+    test_my_app.py
+    peer_echo/
+      peer_echo.ino
+      sketch.yaml
+```
+
+Ask for `peers` in the test function and the peer is built, uploaded and connected too.
+
+```python
+def test_round_trip(dut, peers):
+    echo = peers["echo"]
+    dut.write("send\n")
+    echo.expect_exact("RECEIVED")
+```
+
+You write two sketches. The primary sends to the peer over whatever transport you are testing when it receives `send`, and the peer prints `RECEIVED` when it gets something. Whether the transport is BLE, Wi-Fi or I2C, the test side looks the same.
+
+BLE and Wi-Fi obviously need a partner, but many other tests are simply easier with two boards. You can read the other side's log directly, which tells you which side is at fault.
+
+### Three or more boards: cluster-style tests
+
+Just add more peer directories, with distinct names such as `peer_device` and `peer_device2`.
+
+```text
+    peer_device/
+    peer_device2/
+```
+
+That lets you build setups like one Central connected to two Peripherals at once, or a relay in the middle.
+
+More boards work the same way: add a peer directory and a port.
+
+This guide assumes the boards you need are attached. In reality a bench mixes boards that are always connected with boards you attach only for the occasion. **If a peer's port cannot be resolved, the tests using that peer are skipped automatically.** They do not fail, so on a bench with fewer boards everything else still runs.
+
+Organizing tests that need equipment which is not always attached is covered in the [advanced guide](TESTING_ADVANCED.md).
+
+## Keeping port settings in `.env`
+
+Writing `--port` every time is tedious, and the value differs per machine. Put it in a `.env` file and you can leave it out.
+
+```bash
+# .env
+TEST_SERIAL_PORT=/dev/ttyUSB0
+```
+
+```bash
+uv run --env-file .env pytest tests/my_app
+```
+
+`--env-file` is an option of `uv`, not of pytest, so it **goes before `pytest`**. Without `uv`, `export TEST_SERIAL_PORT=/dev/ttyUSB0` does the same.
+
+A `.env` holds per-machine settings, so **do not commit it**. This repository lists it in `.gitignore`. To share the shape of it, add a `.env.example` with the values blanked out and have everyone copy it.
+
+If you switch between boards, you can set one per profile. The variable name is the profile name upper-cased with `-` replaced by `_`.
+
+```bash
+# .env
+TEST_SERIAL_PORT=/dev/ttyUSB0          # the default
+TEST_SERIAL_PORT_ESP32=/dev/ttyUSB0    # used with --profile esp32
+TEST_SERIAL_PORT_UNO=/dev/ttyACM0      # used with --profile uno
+```
+
+Peers have the same mechanism. For `peer_echo` it is `TEST_SERIAL_PORT_PEER_ECHO`.
+
+```bash
+# .env
+TEST_SERIAL_PORT_PEER_ECHO=/dev/ttyUSB1
+```
+
+A `--port` on the command line wins over `.env`. So you can keep the usual value in `.env` and add `--port` only when trying a different board. The full precedence is in the [advanced guide](TESTING_ADVANCED.md).
+
+## session, module, test
+
+The rest of this guide matters once you have more than one test. Here is what pytest's three terms mean in this plugin.
+
+| Term | Meaning | Role in this plugin |
+| --- | --- | --- |
+| session | One whole pytest run | Walks through several sketches in turn |
+| module | One test file | The unit of sketch compile and upload |
+| test | One `def test_...` function | The unit of opening and closing the serial connection |
+
+A module is one test file. The `.ino` in the directory holding that file is the module's sketch.
+
+This is what happens at each level.
+
+- **Session start**: pytest starts up and collects the tests to run.
+- **Module start**: the sketch is compiled and uploaded to the board. **The upload resets the board.** For a physical board, the device lock is acquired.
+- **Test start**: the serial port is opened. The plugin does not deliberately do anything to reset the board, but opening a port asserts DTR and RTS. **Whether that resets the board depends on the board's circuit.**
+- **Test end**: the serial port is closed.
+- **Module end**: the device lock is released.
+
+One important conclusion follows. **The upload always resets the board. Whether the per-test connection resets it depends on the board.** On some boards the next test sees exactly what the previous test left behind; on others every connection resets it away. Boards that wire DTR and RTS straight to EN reset; boards with an auto-reset circuit in between, and native USB boards, usually do not.
+
+So when you add a second test to the same module, the board state that test sees depends on the board's circuit. **Writing tests that depend on neither is the only safe approach.**
+
+## Prefer one test per module
+
+Start with this shape.
+
+```text
+tests/
+  blink/
+    blink.ino
+    sketch.yaml
+    test_blink.py      <- a single def test_blink(dut)
+```
+
+When you have more to verify, consider these two options before adding a test function.
+
+1. **Put it all in one larger test.** If you send commands in sequence and check the replies, you can chain as many steps as you like inside a single test.
+2. **Split the sketch itself.** A separate sketch directory becomes a separate module, each with its own upload, so the board state is always reset. If the features are genuinely different, this is the natural choice.
+
+## When multiple tests are fine
+
+Multiple tests are fine only when **every test passes when run on its own**. This is what stateless means.
+
+A test that just sends a command to `dut` and checks the reply does not depend on earlier tests, so it is stateless. Note, though, that the same thing can be achieved by sending those commands in sequence inside one larger test.
+
+Splitting is genuinely worth it when **one test takes a very long time and you want to run just that one**. Being able to try a single test without running everything speeds up development.
+
+Splitting has one more benefit. **It is easier to see where a failure happened.** With five steps of verification in one test, you read the output to work out which step broke. With five tests, the name of the failing test is the answer.
+
+## The trap: depending on an earlier test breaks single runs
+
+This section works against the sketch below. It counts every `send`, answers the count on `count?`, and resets to zero on `reset`.
+
+```cpp
+// counter.ino
+int sent = 0;
+
+void setup()
+{
+  Serial.begin(115200);
+}
+
+void loop()
+{
+  if (Serial.available() == 0)
+  {
+    return;
+  }
+
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+
+  if (line == "reset")
+  {
+    sent = 0;
+    Serial.println("RESET_OK");
+  }
+  else if (line == "send")
+  {
+    sent++;
+    Serial.println("SENT");
+  }
+  else if (line == "count?")
+  {
+    Serial.print("COUNT ");
+    Serial.println(sent);
+  }
+}
+```
+
+`sent` survives until the next upload resets it. That is the seed of the trap.
+
+Here is what not to do.
+
+```python
+# Bad
+def test_send_first(dut):
+    dut.write("send\n")
+    dut.expect_exact("SENT")
+
+
+def test_count(dut):
+    dut.write("count?\n")
+    dut.expect_exact("COUNT 1")     # assumes test_send_first ran
+```
+
+Run `test_count` alone and the count is 0, so it fails. Reorder the tests and it fails. Let `test_send_first` fail and it fails. On a board that resets on every connection, it fails even when run in order. It is a bad example on any board.
+
+Here it is fixed.
+
+```python
+# Good
+def test_send(dut):
+    dut.write("reset\n")
+    dut.expect_exact("RESET_OK")
+    dut.write("send\n")
+    dut.expect_exact("SENT")
+
+
+def test_count(dut):
+    dut.write("reset\n")
+    dut.expect_exact("RESET_OK")
+    dut.write("send\n")
+    dut.expect_exact("SENT")
+    dut.write("count?\n")
+    dut.expect_exact("COUNT 1")
+```
+
+Each test establishes the state it needs. Either one passes when run alone.
+
+**Checking this is easy.** Run the tests one at a time; if they all pass, they are stateless.
+
+```bash
+pytest tests/my_app/test_my_app.py::test_count
+```
+
+In CI you can verify it mechanically by iterating over the collected node ids one by one.
+
+### Splitting while keeping independence
+
+Put two test files in the same sketch directory and each becomes its own module. The upload runs once per module, so the board is reset each time.
+
+```text
+tests/
+  my_app/
+    my_app.ino
+    sketch.yaml
+    test_quick.py      <- module 1, gets an upload
+    test_slow.py       <- module 2, gets another upload
+```
+
+You pay for an extra upload, but state independence is guaranteed. This is a good way to carve out a slow test.
+
+## The device does not answer at the start of a test
+
+Right after the upload the board is booting and running `setup()`. During that time it will not answer anything you send over serial. Library initialization, bringing up Wi-Fi or BLE, USB enumeration and so on all take time, and how long varies with the environment.
+
+**Do not wait for a fixed amount of time.**
+
+```python
+# Bad
+import time
+
+
+def test_bad(dut):
+    time.sleep(3)            # nothing guarantees 3 seconds is enough
+    dut.write("ping\n")
+    dut.expect_exact("PONG")
+```
+
+It fails where three seconds is not enough. It wastes three seconds every run where one would do.
+
+Wait for **an actual reply** instead. There are two ways to do it and you can pick either.
+
+### Method A: poll from pytest
+
+Give the sketch one query command and keep sending it until a reply comes back. It does not answer before it is ready.
+
+```cpp
+// polling.ino
+unsigned long ready_at = 0;
+bool ready = false;
+
+void setup()
+{
+  Serial.begin(115200);
+  ready_at = millis() + 3000;   // pretend initialization takes 3 seconds
+}
+
+void loop()
+{
+  if (!ready && millis() >= ready_at)
+  {
+    ready = true;
+  }
+
+  if (Serial.available() == 0)
+  {
+    return;
+  }
+
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+
+  if (line == "?")
+  {
+    if (ready)
+    {
+      Serial.println("READY");
+    }
+    // answer nothing before it is ready
+  }
+  else if (line == "ping")
+  {
+    Serial.println("PONG");
+  }
+}
+```
+
+```python
+import pexpect
+import pytest
+
+
+def wait_ready(dut, attempts=20, interval=0.5):
+    for _ in range(attempts):
+        dut.write("?\n")
+        try:
+            dut.expect_exact("READY", timeout=interval)
+            return
+        except pexpect.TIMEOUT:
+            continue
+    pytest.fail("device did not become ready")
+
+
+def test_with_polling(dut):
+    wait_ready(dut)
+    dut.write("ping\n")
+    dut.expect_exact("PONG")
+```
+
+This works whenever the connection happens to open, which makes it reliable on real hardware. The sketch only has to answer the query, and may ignore it before it is ready.
+
+### Method B: let the device announce it is ready
+
+The sketch prints one line at the end of `setup()` and pytest waits for it.
+
+```cpp
+// announce.ino
+void setup()
+{
+  Serial.begin(115200);
+  delay(3000);                  // pretend initialization takes 3 seconds
+  Serial.println("READY");
+}
+
+void loop()
+{
+  if (Serial.available() == 0)
+  {
+    return;
+  }
+
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+
+  if (line == "ping")
+  {
+    Serial.println("PONG");
+  }
+}
+```
+
+```python
+def test_with_announcement(dut):
+    dut.expect_exact("READY", timeout=10)
+    dut.write("ping\n")
+    dut.expect_exact("PONG")
+```
+
+There is less to write, but note one thing. pytest opens the serial port after the upload, so **a `READY` printed before that can be missed**.
+
+This really happens. With two boards, the one that finishes flashing first boots and starts printing while the second is still being flashed. Where flashing takes minutes, all of the startup output has gone by before pytest connects. The symptom is that **one side's log is completely empty**. It is not a bug in the sketch, it is the timing of flashing and resetting.
+
+With a host core over a socket the output is retained, so this is much less likely there.
+
+If you use method B on real hardware, either have the sketch repeat `READY` or move to method A. For states that are announced once at the moment they happen, also let the sketch answer the current value on a query, so a test never has to wait for the announcement.
+
+## Summary
+
+- A test is the procedure you used to run by hand, written as code: flash the sketch, talk over serial, check the expected output.
+- Running on a host core suits logic. Peripherals, timing, persistence and radio can only be checked on hardware.
+- Zero, one, two, or three-plus boards each unlock different tests. Adding a peer is just adding a name.
+- The upload is per module, the serial connection is per test. The upload always resets the board; whether a connection does depends on the board.
+- Prefer one test per module. To verify more, use one larger test or split the sketch.
+- If you do write several tests, every one of them must pass on its own and must not depend on an earlier test.
+- Wait for a reply, not for a fixed amount of time.
+
+More advanced topics are in the [advanced guide](TESTING_ADVANCED.md).

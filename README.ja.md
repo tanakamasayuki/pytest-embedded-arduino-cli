@@ -10,6 +10,11 @@
 
 このパッケージは `pytest-embedded-arduino` には依存しません。ESP32 固有の前提に寄せず、より広い Arduino プロジェクトで使いやすい構成を目指しています。
 
+## ガイド
+
+- [テストの基本](TESTING_BASICS.ja.md): テストとは何か、どういう仕組みで動くか、実機でないと分からないこと、何台のボードを使うか、テストを独立に保つ方法。pytest が初めてならここから。
+- [テストの応用](TESTING_ADVANCED.ja.md): 収集規則、`expect` の落とし穴、ログとアーティファクトの置き場所、中断時の後片付け、`conftest.py` が正当化される場面、peer テストの原則。
+
 ## 設計方針
 
 - build は `arduino-cli compile`
