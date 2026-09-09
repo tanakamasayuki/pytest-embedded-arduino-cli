@@ -333,38 +333,117 @@ So **archiving logs after a run is usually unnecessary**. Consider it only when 
 
 ## Cleaning up after an early exit
 
-When a test stops partway through, any cleanup written at the end of it never runs. That is true for a failed `assert`, for an `expect` timeout, and for Ctrl-C. The board is left in an intermediate state.
-
-If another test follows in the same module, it inherits that state. If none does, the state persists after the run finishes. Leave BLE advertising on and it keeps showing up in the scans of the bench next to you.
-
-A pytest fixture's finalizer runs even when the test fails, and even on Ctrl-C. Use that.
+Cleanup written at the end of a test body **does not run when the test stops partway through.** That is true for a failed `assert`, an `expect` timeout, and Ctrl-C.
 
 ```python
-# tests/device/conftest.py  ... every test under this directory uses dut
+# Bad: an expect failure never reaches the stop
+def test_advertise(dut):
+    dut.write("start\n")
+    dut.expect_exact("ADVERTISING 1")
+    dut.write("stop\n")            # not executed if the line above fails
+```
+
+The board is left in an intermediate state. If another test follows in the same module, it inherits that state. If none does, the state persists after the run finishes. Leave BLE advertising on and it keeps showing up in the scans of the bench next to you.
+
+**Move the cleanup into a fixture's teardown.** A fixture's teardown runs even when the test fails and even on Ctrl-C, so the cleanup happens however the test ended.
+
+### Start by writing it in the test file
+
+What to clean is specific to that sketch, so the test file is the natural place. `conftest.py` is a last resort.
+
+```python
 import pytest
 
 
 @pytest.fixture(autouse=True)
-def leave_quiet(dut):
+def cleanup_device(dut):
+    yield
+    dut.write("stop\n")
+
+
+def test_advertise(dut):
+    dut.write("start\n")
+    dut.expect_exact("ADVERTISING 1")
+```
+
+`autouse=True` applies it to every test in that file, and only to that module.
+
+**The name is yours to choose**, with two rules.
+
+- **Make it read as cleanup.** Something like `cleanup_device`, `stop_radio` or `release_pins`, so the name says what it does. An `autouse=True` fixture never appears by name in a test body, so the name is the only clue there is.
+- **Do not start the name with `test_`.** It still works as a fixture, but **pytest silently leaves it out of collection, with no warning.** Anyone scanning the file reads it as a test, and the moment the `@pytest.fixture` decorator is lost, the function quietly becomes a real test.
+
+**The port being open during the cleanup is guaranteed.** Because the fixture requests `dut`, it is set up after `dut` and torn down before it.
+
+To clean peers as well, take `peers` as an argument.
+
+```python
+@pytest.fixture(autouse=True)
+def cleanup_device(dut, peers):
+    yield
+    for device in [dut, *[peers[name] for name in sorted(peers)]]:
+        device.write("stop\n")
+```
+
+**Waiting for a reply is optional.** The examples above only send. You can wait instead.
+
+```python
+@pytest.fixture(autouse=True)
+def cleanup_device(dut):
     yield
     dut.write("stop\n")
     try:
         dut.expect_exact("STOPPED", timeout=2)
     except Exception:
-        pass
+        pass          # a failed cleanup must not change the test result
 ```
 
-There are two limitations.
+Waiting has two benefits. It prevents the overlap where the port closes before things have stopped, the module teardown releases the lock, and another process starts an upload. It also leaves the outcome of the cleanup in the log.
 
-- **An autouse fixture that requests `dut` demands a board for every test under that directory.** You cannot put it where tests that need no hardware also live. Put it in the conftest of a directory that holds only device tests.
-- **It does not reach peers.** If an autouse fixture requests `peers`, it trips the peer activation check, so every test counts as a peer test and peers get built and uploaded every time.
+Not waiting has two benefits of its own. It is simpler, and it works with a sketch that answers nothing. It also costs no time when the sketch is hung.
+
+**If you do wait, swallow the exception.** A failed cleanup must not change the test result. A missing reply is not unusual: the sketch may not read commands at all, or it may be hung. A failed test that also carries a teardown error makes the real cause harder to see.
+
+Note that without waiting, nothing guarantees the sketch finished reading the command before the port closed. Wait if you need that certainty.
+
+### Move it to a conftest to share across modules
+
+When writing the same cleanup into many modules gets tedious, move it into a `conftest.py`. It then applies below wherever you put it, and the body can stay exactly as it was in the test file.
+
+**Mind where you put it.** An autouse fixture that requests `dut` demands a board for every test below it. It cannot go above a directory holding tests that need no board, such as `unit/`. Put it in a directory that holds only device tests.
+
+```text
+  tests/
+    unit/                  <- keep it out of here
+    suites/
+      conftest.py          <- put it here
+      my_app/
+        test_my_app.py
+```
+
+Taking `peers` as an argument is fine too. For a module with no `peer_*` directory it is simply an empty mapping, and nothing extra happens.
+
+### The same name or a different one
+
+`conftest.py` files in directories above are read as well. When a cleanup fixture exists both above and below, **the behaviour depends on whether the names match.**
+
+| Name | Behaviour |
+| --- | --- |
+| The same | Only the nearer one runs. The one above is hidden completely |
+| Different | Both run. The nearer one is torn down first, then the one above, then `dut` closes |
+
+Use it like this. Give it the same name to **replace** the shared cleanup with something else for that sketch. Give it a different name to keep the shared one running and **add** something for that sketch only.
+
+There is nothing to gain from splitting cleanup across several fixtures, so keep one fixture with the same name as the default.
+
+### What to stop
 
 What to stop is up to the project. These judgements have held up in practice.
 
 - **Always stop BLE advertising and scanning.** Otherwise you interfere with the benches around you.
 - **Stop PWM, servos and driven GPIO.** Anything that keeps moving physically is a hazard.
 - **Peripherals such as USB are often harmless to leave up.** Arduino's USB stack cannot stop presenting the device once begun. When something cannot be stopped, clean up as far as you can and leave it there.
-- **Reply when the state has been reached, not when the command was received.** Restarting advertising or closing every link takes time. Replying on receipt lets the run move on while the work is unfinished.
+- **If you take a reply, have the sketch send it once it has stopped.** Closing every link and stopping advertising take time. Reply on receipt and the test moves on while things are still running. A setup that takes no reply at all is fine too.
 
 **Cleanup is not a substitute for normalizing state at the start of a test.** Cleanup protects the environment. A test's own correctness, and being able to run it alone with `-k`, are the job of its own start-up. Never write a test that assumes the previous test's cleanup succeeded.
 
