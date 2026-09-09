@@ -89,10 +89,39 @@ pytest -m slow          # slow だけ実行
 
 **効く範囲は置いた場所の配下です。** プロジェクトの root に置けば全体に、sketch ディレクトリに置けばその sketch とその下だけに効きます。同じ名前の fixture が両方にあれば、テストに近いほうが勝ちます。
 
-書けるものは主に 2 つです。
+書けるものは 2 種類あり、**名前を誰が決めるか**が違います。
 
-- **fixture の定義。** 複数のテストファイルで共有する準備や後片付けです。
-- **hook の実装。** `pytest_runtest_setup` のように決まった名前の関数を書くと、pytest が適切な時点で呼び出します。「テストの前」「セッションの終わり」のような、fixture では表せない位置に処理を差し込めます。
+| 種類 | 名前 | 呼ばれ方 |
+| --- | --- | --- |
+| hook | pytest が決めている。増やせない | その名前に対応した時点で pytest が呼ぶ |
+| fixture | 自分で決める | テストや他の fixture が引数に取ると呼ばれる。`autouse=True` なら要求されなくても呼ばれる |
+
+**hook は定義済みの名前を実装するものです。** `pytest_runtest_setup` は各テストの直前、`pytest_sessionfinish` はセッションの終わりに呼ばれます。「テストの前」「セッションの終わり」のような、fixture では表せない位置に処理を差し込めます。使える名前の一覧は公式リファレンスの Hooks にあります。
+
+<https://docs.pytest.org/en/stable/reference/reference.html#hooks>
+
+綴りを間違えても気づけます。`pytest_` で始まる名前は hook として検査されるので、`pytest_runtest_setupp` のように書くと `unknown hook` エラーで実行が止まります。逆に `pytest_` で始まらない名前は、ただの関数として無視されます。
+
+**hook の名前は pytest のものだけです。** plugin が hook の名前を増やすことはありません。`pytest-embedded` もこの plugin も増やしていません。plugin がしているのは、pytest の hook を実装することと、fixture と option を足すことです。したがって conftest に書ける hook を探すときは、pytest のリファレンスだけを見れば足ります。
+
+| 層 | 足すもの |
+| --- | --- |
+| pytest | hook の名前、組み込み fixture、標準 option |
+| `pytest-embedded` | fixture（`dut` など）、option（`--port`、`--baud`、`--root-logdir` など） |
+| この plugin | fixture（`peers`、`arduino_test`、`arduino_cli_app` など）、option（`--profile`、`--run-mode`、`--device-lock` など） |
+| プロジェクト | fixture、および pytest の hook の実装 |
+
+**fixture は名前が自由なので、いくらでも増やせます。** いま使える fixture は次のコマンドで一覧できます。この plugin や `pytest-embedded` が提供する `dut`、`peers`、`arduino_test` などもここに出ます。
+
+```bash
+pytest --fixtures
+```
+
+書き方は公式リファレンスの Fixtures にあります。
+
+<https://docs.pytest.org/en/stable/reference/fixtures.html>
+
+**fixture はテストファイルにも書けますが、hook は書けません。** テストファイルに書いた hook は呼ばれません。つまり `conftest.py` が必須になるのは hook が必要なときだけで、fixture だけで足りるならテストファイルに置くほうが範囲が狭くて安全です。
 
 強力ですが、使いどころは選んでください。理由と実際の用途は、後の「conftest.py は最後の手段」で扱います。
 
