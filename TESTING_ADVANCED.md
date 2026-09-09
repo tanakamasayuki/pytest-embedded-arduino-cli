@@ -4,7 +4,11 @@
 
 A follow-on from [Testing Basics](TESTING_BASICS.md). It covers the traps that are easy to fall into on real hardware, and what to do when the standard features are not enough.
 
-## How tests are collected
+## pytest fundamentals
+
+Four mechanisms come up again and again in this guide, so here they are up front.
+
+### How tests are collected
 
 pytest runs automatically only what matches both of these.
 
@@ -25,13 +29,103 @@ def test_actual(dut):
     wait_ready(dut)
 ```
 
-You can also use it to disable a test temporarily, but that is not recommended. Renaming hides the fact that it is disabled. Choose a form that keeps the reason visible.
+You can also use it to disable a test temporarily, but that is not recommended. Renaming hides the fact that it is disabled. Use a form that keeps the reason visible, which means a marker.
+
+### What a marker is
+
+A marker is a label attached to a test, written as `@pytest.mark.<name>` above the test function.
+
+pytest knows the meaning of several of them.
+
+| Marker | What it does |
+| --- | --- |
+| `skip` | Always skip. The reason goes in `reason` |
+| `skipif` | Skip only when a condition is true |
+| `xfail` | The failure is known. Failing does not turn the run red |
+| `parametrize` | Run the same test several times with different values |
+
+To disable a test, write this.
 
 ```python
 @pytest.mark.skip(reason="waiting for hardware")
 def test_pending(dut):
     ...
 ```
+
+It then shows up in the results as skipped, with the `reason` printed, so both the fact and the reason survive. That is the difference from dropping the `test_` prefix.
+
+**You can also invent your own markers.** pytest does not know what they mean, so they are for selecting with `-m`. Register one in the ini before using it, or you get a warning. Adding `--strict-markers` turns that warning into an error, which catches typos.
+
+```ini
+[pytest]
+markers =
+    slow: takes a long time to run
+```
+
+```bash
+pytest -m "not slow"    # run everything except slow
+pytest -m slow          # run only slow
+```
+
+This same form comes up again below, in keeping tests out of the default run.
+
+### What conftest.py is
+
+`conftest.py` is a file pytest loads by itself. Put it in the same directory as your tests, or in any directory above them. There is no import; being there is enough.
+
+**It applies below where you put it.** At the project root it applies to everything; in a sketch directory it applies to that sketch and below. When both define a fixture of the same name, the one nearer the test wins.
+
+There are two main things to write in it.
+
+- **Fixture definitions.** Setup and cleanup shared by several test files.
+- **Hook implementations.** Write a function with a set name such as `pytest_runtest_setup` and pytest calls it at the right moment. That lets you insert work at positions a fixture cannot express, like "before a test" or "at the end of the session".
+
+It is powerful, but pick your moments. The reasoning and the real uses are covered later, under "conftest.py is a last resort".
+
+### Config files: pytest.ini and pyproject.toml
+
+pytest reads its settings from exactly one file. There are four candidates, and the higher one wins.
+
+1. `[pytest]` in `pytest.ini`
+2. `[tool.pytest.ini_options]` in `pyproject.toml`
+3. `[pytest]` in `tox.ini`
+4. `[tool:pytest]` in `setup.cfg`
+
+A `pytest.ini` wins even when it is empty. **Have two and one of them is ignored entirely.** When a setting has no effect, first suspect that the other file is the one being read. The run prints which one as `configfile:`.
+
+The syntax differs by format.
+
+```ini
+# pytest.ini
+[pytest]
+testpaths = tests
+addopts = -m "not manual"
+markers =
+    manual: needs a person
+```
+
+```toml
+# pyproject.toml
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not manual'"
+markers = [
+    "manual: needs a person",
+]
+```
+
+TOML values are typed, so multi-line settings are arrays. For a value containing quotes, such as `addopts`, use different quotes outside and inside.
+
+These are the settings you reach for most.
+
+| Setting | What it does |
+| --- | --- |
+| `testpaths` | Which directories to run when given no arguments |
+| `addopts` | Options added to every run |
+| `markers` | Registering your own markers |
+| `filterwarnings` | How warnings are treated |
+
+This plugin's own repository sets `testpaths = ["tests"]` in `pyproject.toml`, so a bare `pytest` runs only the plugin's own tests. Running anything under `examples/` means naming it explicitly.
 
 How to separate tests whose availability depends on the bench is covered in the next section.
 
@@ -40,9 +134,9 @@ How to separate tests whose availability depends on the bench is covered in the 
 Bench equipment falls into two kinds.
 
 - **Permanent equipment.** Always connected and usable in the default run.
-- **Occasional equipment.** Attached only for particular tests: an extra board, a sensor, an analyzer, a switch that can cut power.
+- **Occasional resources.** Set up only for particular tests: an extra board, a sensor, an analyzer, a switch that can cut power, and **a person's hands as well.** A test that needs someone to press a button, unplug a cable or hold a magnet near the board can only run while that someone is there.
 
-**The dividing line is not the board count, it is whether the default run can always use it.** With three permanent boards, three-board tests belong in the default run. With one permanent board, two-board tests are the occasional kind.
+**The dividing line is not the board count, it is whether the default run can always assemble what it needs.** Equipment and people count the same way. With three permanent boards, three-board tests belong in the default run. With one permanent board, two-board tests are the occasional kind.
 
 ### The plugin takes care of peer boards
 
@@ -72,9 +166,9 @@ def pytest_runtest_setup(item):
 
 Put the conftest in a directory and it applies only below that directory.
 
-### Keeping tests out of the default run even when the equipment is there
+### What cannot be detected automatically stays out of the default run
 
-A test that takes a very long time, or that needs a person to do something, is one you may not want on every run even when the hardware is present. There are two ways.
+**A test that needs a person cannot be gated on an environment variable.** Neither the plugin nor the test can know whether someone is standing there. A test that takes a very long time is similar: the hardware is present, but you do not want it on every run. Keep these out of the default run and name them when you want them. There are two ways.
 
 **Separate by directory.** Keep it out of the default target and name it when you want it.
 
@@ -316,7 +410,7 @@ For work such as symlinking a local platform into the Arduino directory. It has 
 
 ### 6. Helpers for unit tests that use no hardware
 
-`tests/` can also hold plain Python tests that need no board. Their fixtures are ordinary pytest usage and have nothing to do with this plugin.
+`tests/` can also hold plain Python tests that need no board. Put them in a directory with no `.ino` and this plugin compiles nothing, uploads nothing, and they run as plain pytest. Their fixtures are ordinary pytest usage and have nothing to do with the plugin.
 
 ### When you do not need a conftest
 
