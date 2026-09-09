@@ -6,9 +6,9 @@
 
 ## 1.5.1 (withdrawn / 取り消し)
 ## 1.5.0 (withdrawn / 取り消し)
-> (EN) Removed from PyPI and not installable. The reserved DUT lifecycle commands they introduced were reverted; clean devices up with a fixture in a test file or a `conftest.py` instead, as described in the testing guides.
+> (EN) Removed from PyPI and not installable. A project pinning `>=1.5.0` or `>=1.5.1` cannot resolve it and should move to `>=1.6.0`; leftover `arduino_cli_dut_*` ini keys now only produce an `Unknown config option` warning. The reserved DUT lifecycle commands these versions introduced were reverted; clean devices up with a fixture in a test file or a `conftest.py` instead, as described in the testing guides.
 >
-> (JA) PyPI から削除済みで、インストールできません。これらが追加した DUT ライフサイクル予約コマンドは撤回しました。device の掃除はテストファイルか `conftest.py` の fixture で行ってください。詳細はテストガイドにあります。
+> (JA) PyPI から削除済みで、インストールできません。`>=1.5.0` や `>=1.5.1` を pin しているプロジェクトは解決できないため、`>=1.6.0` へ上げてください。残った `arduino_cli_dut_*` の ini キーは `Unknown config option` の warning が出るだけになります。これらが追加した DUT ライフサイクル予約コマンドは撤回しました。device の掃除はテストファイルか `conftest.py` の fixture で行ってください。詳細はテストガイドにあります。
 
 ## 1.4.1
 - (EN) Resolve device lock keys through symlinks, so `/dev/serial/by-id/...` and `/dev/serial/by-path/...` aliases lock the same physical device as the underlying `/dev/ttyUSB*` node. Non-path keys (`COM3`, `--device-lock-key` labels) are unchanged.

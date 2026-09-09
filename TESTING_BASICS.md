@@ -331,6 +331,8 @@ More boards work the same way: add a peer directory and a port.
 
 This guide assumes the boards you need are attached. In reality a bench mixes boards that are always connected with boards you attach only for the occasion. **If a peer's port cannot be resolved, the tests using that peer are skipped automatically.** They do not fail, so on a bench with fewer boards everything else still runs.
 
+**That behaviour is for peers only.** When the primary DUT's port cannot be resolved, nothing is skipped and the run fails. The thing under test is missing, so it is treated as a configuration error.
+
 Organizing tests that need equipment which is not always attached is covered in the [advanced guide](TESTING_ADVANCED.md).
 
 ## Keeping port settings in `.env`

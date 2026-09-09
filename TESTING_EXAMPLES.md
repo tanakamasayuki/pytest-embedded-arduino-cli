@@ -26,7 +26,7 @@ Sizes and layouts keep changing, so this page only says **what you can see** in 
 
 ## A large one
 
-- **[EspUsbDevice](https://github.com/tanakamasayuki/EspUsbDevice)** — an example of a large setup, with two wiring styles side by side: two ESP32-S3 boards checked through a peer, and a single ESP32-P4 wired as a loopback so USB is connected internally. It reads as one library verified through two different arrangements. Its `tests/conftest.py` audits the serial logs and adds the findings to pytest's report.
+- **[EspUsbDevice](https://github.com/tanakamasayuki/EspUsbDevice)** — an example of a large setup, with two wiring styles side by side: two ESP32-S3 boards checked through a peer, and a single ESP32-P4 whose two USB controllers are joined by a cable, so the board tests itself. It reads as one library verified through two different arrangements. Its `tests/conftest.py` audits the serial logs and adds the findings to pytest's report.
 
 ## Reference
 
