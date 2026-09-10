@@ -767,7 +767,9 @@ The same goes for a test that runs for a long time to measure how a resource gro
 
 ### Two checks
 
-**Run the module once in reverse.** This is the everyday check **for as long as multi-test modules exist.** Its subject is state shared between tests in a module, so at one test per module there is nothing left to reverse and it stops being worth running; order dependence has moved inside the merged test, where the reversible check list above is what audits it. **While you still have multi-test modules, run it** — in one suite it found defects in most of the modules it was pointed at, and the majority of those showed up neither in a single-test run nor in a normal one. **It is also the tool that makes the move to one test per module safe**, since it tells you which modules were leaning on order before you merge them. It costs one upload and catches all three shapes above. **Reverse the module's tests within a single pytest invocation**; do not run them one at a time in reverse order, which pays an upload per test and turns into the other, more expensive check. **The second one in particular is invisible to running tests alone**, because a test run by itself is always first.
+**Run the module once in reverse.** This is the everyday check. It costs one upload and catches all three shapes above. **Reverse the module's tests within a single pytest invocation**; do not run them one at a time in reverse order, which pays an upload per test and turns into the other, more expensive check. **The second one in particular is invisible to running tests alone**, because a test run by itself is always first.
+
+**Its subject is state shared between tests, so it applies for as long as multi-test modules exist.** At one test per module there is nothing left to reverse, and the check stops being worth running as a routine; order dependence has moved inside the merged test, and auditing it there is a separate question, covered further below. **While multi-test modules remain, run it** — in one suite it found defects in most of the modules it was pointed at, and the majority of those showed up neither in a single-test run nor in a normal one. **It is also what makes the move to one test per module safe**, since it tells you which modules were leaning on order before you merge them.
 
 ```bash
 pytest $(pytest my_app --collect-only -q | grep '::' | tac)
@@ -866,6 +868,8 @@ Whether merging is faster is unknown until you measure. In one suite, where fixe
 
 **The reverse-order check also only exists once you have split.** That one can be a reason to split, and the next section covers it.
 
+**And the rule buys one thing that no timing measurement can argue against: the restore code you never write.** With one test per module nothing carries over inside the module, so cleanup only ever has to stop things, never put the board back the way it booted — see *What to stop*, where that turns out to be the half the bugs live in. Even in the suite above, where merging moved the total not at all, this reason still held.
+
 So **there is almost no positive reason to put several tests in one module. Treat one test per module as the rule.** When you want to split, first ask whether the module can be split instead, or whether reporting from the device would do. If you split anyway, the added time is governed by the formula further below.
 
 ### Break a large test into functions
@@ -886,6 +890,11 @@ def test_msc(dut):
 
 **Either shape works.** Nested functions close over `dut` and take no arguments. Module-level functions named `_case(dut, peers)` take them explicitly and keep the file flat; that form **converts mechanically** — rename `def test_x(` to `def _x(` and generate the calls — so merging an existing module does not mean rewriting any bodies, and every case keeps its docstring.
 
+**A case has to return the board in the state it found it.** Between modules that is guaranteed for you: each module starts with an upload and a boot. **Between cases nobody guarantees it.** Merging is precisely the act of removing that guarantee from the boundaries inside the module, so each function now owes what the upload used to do on its behalf. Two shapes come up, and this guide already answers both.
+
+- **A case that leaves the board unusable** — it ends the link, or disables something until reset. **Move it out into its own module**, the same answer as for a destructive test, applied at case granularity.
+- **A case that deliberately leaves something switched off** — a callback removed to show the code copes without it. **Have the case put it back**, which usually costs one more command in the sketch and one more line at the end of the case.
+
 **Then the rule that matters: do not catch the failures.** Drive the functions from a list, call them in order, and let a failure propagate on its own.
 
 **The traceback is the reason.** Left uncaught, pytest names the failing frame after the check and shows the line and the value it was waiting for.
@@ -902,6 +911,10 @@ There is a second cost, specific to serial. **A check that timed out left the li
 This is the same conclusion as **One failure does not stop the rest** above, reached from the other side: once a check has failed on hardware the state is no longer trustworthy, and what follows is noise rather than information.
 
 **Driving from a list is not decoration.** Merging moves order dependence inside the test, so the reverse-order check has to move inside with it. A list can be reversed; a sequence of direct calls cannot.
+
+**But not every merged test is a candidate for that.** Ask whether each function establishes what it needs. If it does, the list is auditable and reversing it is a real check. **If a step only means anything after the one before it, the order is the subject matter rather than an accident.** A protocol conversation is the clear case: set a group of fields and read them back, then set one field on its own and assert the others still hold what the previous request left. Reversing that asserts a state nobody established. **That is one case with several assertions, not several cases** — give it functions for readability and leave the reversal off. Offer a reversible list where reversal is meaningless and someone will add the fixture, watch it fail, and conclude the test is broken.
+
+**Listing them is already a detector, before you run anything.** Arranging the calls into a list makes you ask, one case at a time, what that case leaves behind — a question a straight run of calls never puts to you. In one suite that step alone surfaced two order dependencies in a module that passed forward and passed alone.
 
 ```python
 import os
@@ -920,6 +933,10 @@ def run_checks():
 
     return _run
 ```
+
+**Compare against the exact value, as above.** A switch read as "set to anything" turns one leftover line in a shell profile into a permanently reversed suite, which is worse than having no switch: every run is the audit and none is the ordinary check.
+
+**And test the switch itself.** If the reversal stops reversing, the audit quietly becomes a second forward run. That is covered below, with the other checks that go silently green when they break.
 
 ### When splitting really is required
 
@@ -965,7 +982,7 @@ def test_payload(dut, size):
 
 But **finer is not automatically better.** That same allowlist also had an entry written broadly on purpose, for a transient that lands on a different case every run: a property of the run, not of any one case. **Match the key to the actual scope of the thing.** And if your implementation stops at the first matching rule, **put the specific rules ahead of the broad ones**, or a broad rule will swallow a specific one.
 
-**2. When you want to find vacuous assertions.** This differs in kind from the other one: it is about the quality of the tests rather than of the product.
+**2. When you want to find assertions that pass for the wrong reason.** This differs in kind from the other one: it is about the quality of the tests rather than of the product.
 
 The reverse-order check only means anything **where state is shared**, and state is shared only inside a module. All three alternatives destroy the check.
 
@@ -973,9 +990,25 @@ The reverse-order check only means anything **where state is shared**, and state
 - **Split into modules.** Every module begins with an upload and a boot, so the premise always holds and the check runs empty.
 - **Report from the device.** The order is fixed in firmware; reordering means reflashing.
 
-And what the check finds is not only order dependence. It also finds **assertions satisfied by the environment rather than by the code under test.** In one real case, an assertion meant to verify that discovery does not claim a device was only ever zero because it ran right after boot. **That assertion could not fail.** Rewritten to establish its premise explicitly, it can.
+And what the check finds is not only order dependence. It also finds **assertions satisfied by the state the board happened to be in rather than by anything the test established.** In one real case, an assertion that the discovery phase does not start using a device held only because it ran right after boot. **It was not an empty assertion** — a regression that made discovery start using one would still have failed it — but it was satisfied by the boot state, so putting any test that connects a device ahead of it made it fail as a false positive. Rewritten to establish its own premise, by stopping, starting, waiting and only then asserting, it holds no matter what ran before.
 
 Take any of the alternatives and such an assertion stays in place, silently, and always green.
+
+**An assertion that cannot notice a broken reporting path is a separate class, and the reverse-order check does not find it.** Establishing the premise does not fix it either. If the sketch came to print zero unconditionally, an assertion that a counter is zero stays green forever, because **nothing in the test shows that the counter can move at all.**
+
+**Most of the suspects are not it, though.** Sweep a suite for "asserts zero and never observes non-zero" and the list comes back long. Three things account for nearly all of it, and none of them is a defect.
+
+- **It is a hygiene check, not an assertion.** A zero read at the start of a test says "nothing is left over from the last run". The environment satisfying it is the normal case; its failing is precisely the signal you wanted. **Only a claim about the product needs to be able to fail on the product.**
+- **Another check in the same test observes the value moving.** It does not have to be the same case. Merging puts sibling checks inside one test, and a sibling that sees the field non-zero is evidence enough that the field can move.
+- **The line encodes the value redundantly.** Where a field is derived from the same call as its neighbours, a reporting path stuck at zero would have to fake the correlation as well. Fields printed together from one query, or a `submitted` / `completed` / `errors` triple where a dead error tally makes the other two disagree, are already protected. **Check for this before rewriting anything:** a redundantly encoded report buys what dirtying and restoring buys, for free.
+
+Where none of those hold, the remedy is structural: **make the value move inside the same case.** Dirty the state, confirm it changed, restore it, then assert the pristine value. A dead reporting path then fails at the confirmation step instead of passing at the end.
+
+**Expect this class to be rare.** Across two suites audited this way, order dependence turned up several times over while this turned up once. **And the sweep cannot be finished statically.** An audit that collects `expect` patterns out of the source cannot see a pattern passed in through a variable, which in one run was the single largest group of false positives. Static screening narrows the list; only reading decides.
+
+**When you have finished suspecting the product's assertions, turn the same eye on the checks.** A check is code, and this class of defect applies to it too. Let the reversal in a `run_checks` fixture stop reversing and the reverse audit becomes a second forward run: every module passes, the audit reports success, and nothing was examined. **A reverse run passing is not evidence that it reversed**, because it passes either way. A single-test audit and a serial-log audit have the same shape — broken, each one goes silently green.
+
+**The tell is whether that check has ever reported a failure.** Where it has, the record is your evidence and you need nothing further. Where it has not, either break it deliberately and confirm it complains, or **assert the mechanism directly**, which is the cheaper option. A test that the check list comes back in the order you asked for needs no device at all, so it lives in a directory with no `.ino` and costs nothing to run. Assert the ordering both ways, and assert that a failure still propagates — that last one turns the do-not-catch rule into something a future change cannot quietly undo.
 
 In short: **several tests are not required for expressiveness. They are required for detection.**
 
@@ -990,6 +1023,8 @@ The time that splitting adds is governed by this.
 ```text
 added time = (number of tests - 1) x measured per-test setup and cleanup
 ```
+
+**Before you compare two timings, check what else was running.** A measurement taken while an unrelated build occupies the machine is not a measurement. The way to tell is to **look at a module you did not touch**: if that moved by a similar amount, the comparison is void, whatever the numbers say about the parts you did change. One team nearly reported that merging had made things slower, when compile-dominated modules had all drifted up by a comparable amount, an untouched one included.
 
 Argue about splitting versus merging without measuring the second factor and you will not reach an answer. **"It is slow because there are many tests" is a misdiagnosis. It is slow because per-test setup is heavy.** The very same act of adding one test costs wildly different amounts depending on the arrangement: reconnecting and nothing else is not remotely comparable to stopping and restarting radio or USB every time.
 
