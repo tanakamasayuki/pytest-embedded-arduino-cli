@@ -489,6 +489,15 @@ There is nothing to gain from splitting cleanup across several fixtures, so keep
 
 ### What to stop
 
+**First ask what needs restoring, because the module structure decides that.** Stopping something and putting the board back the way it booted are different jobs, and the second one is where the bugs live.
+
+- **One test per module: stopping is enough.** Nothing carries over inside the module, and the next module begins with an upload, which resets the board. **There is no next test to restore state for**, so a command that rebuilds the boot state has no purpose. What remains is leaving the rig quiet for whoever uses it next, and stopping does that — sooner than the next upload would, which matters on a shared bench.
+- **Several tests per module: restoring becomes necessary**, and it is error-prone. One project implemented both a stop and a restore-to-boot command, and every bug it hit was in the restore half: a counter reset without the listeners it counted, a callback not put back, a flag restored without the radio it described, a characteristic value left behind. **Restoring means enumerating everything you changed, and the failure mode is forgetting one.** A stop restores nothing, so that whole family of bugs cannot occur.
+
+**When you do restore, restore the thing and not your copy of it.** Those bugs share a shape: **the state was not in the sketch's variables.** It was in a library's registry, a callback slot, a server attribute, the hardware. A variable that only mirrors one of those can be reset on its own, which puts the copy out of step with the reality — **worse than not restoring at all**, because the sketch now reports a state it is not in. Re-run the registration instead of re-assigning the mirror, and derive counts from the real thing rather than keeping your own. **And some actions cannot be undone:** disabling a radio controller until the next reset is a fact, not a setting. Restoring the flag that recorded it just resumes calling into something that is gone. The honest restore leaves that record standing and lets the next upload put the board back.
+
+So the rule of one test per module buys something beyond execution time: **the restore code you never have to write.**
+
 What to stop is up to the project. These judgements have held up in practice.
 
 - **Always stop BLE advertising and scanning.** Otherwise you interfere with the benches around you.
@@ -758,7 +767,7 @@ The same goes for a test that runs for a long time to measure how a resource gro
 
 ### Two checks
 
-**Run the module once in reverse.** This is the everyday check. It costs one upload and catches all three shapes above. **Reverse the module's tests within a single pytest invocation**; do not run them one at a time in reverse order, which pays an upload per test and turns into the other, more expensive check. **The second one in particular is invisible to running tests alone**, because a test run by itself is always first.
+**Run the module once in reverse.** This is the everyday check **for as long as multi-test modules exist.** Its subject is state shared between tests in a module, so at one test per module there is nothing left to reverse and it stops being worth running; order dependence has moved inside the merged test, where the reversible check list above is what audits it. **While you still have multi-test modules, run it** — in one suite it found defects in most of the modules it was pointed at, and the majority of those showed up neither in a single-test run nor in a normal one. **It is also the tool that makes the move to one test per module safe**, since it tells you which modules were leaning on order before you merge them. It costs one upload and catches all three shapes above. **Reverse the module's tests within a single pytest invocation**; do not run them one at a time in reverse order, which pays an upload per test and turns into the other, more expensive check. **The second one in particular is invisible to running tests alone**, because a test run by itself is always first.
 
 ```bash
 pytest $(pytest my_app --collect-only -q | grep '::' | tac)
@@ -793,7 +802,11 @@ def pytest_collection_modifyitems(items):
 pytest my_app/test_my_app.py::test_count
 ```
 
-**With either check, the point is to actually run it.** The suspicion that a test only passes because of an earlier test's side effect **cannot be settled by reading the code or grepping for it.** In practice the misreadings went both ways: a test classified as querying turned out to be reading start-up output, and a test assumed to be waiting for a connection notice turned out to query first. Do not take comfort in a static count. Change the order and run it.
+**With either check, the point is to actually run it.** The suspicion that a test only passes because of an earlier test's side effect **cannot be settled by grepping for it.** In practice the misreadings went both ways: a test classified as querying turned out to be reading start-up output, and a test assumed to be waiting for a connection notice turned out to query first. Do not take comfort in a static count. Change the order and run it.
+
+**Running is not sufficient either, and no one route finds everything.** In an audit of restore code, the defects came out by different routes and each route found exactly one of them: the ordinary full run, the reverse run, and re-reading the sketches, which accounted for the rest. The one the reverse run caught appeared neither alone nor in a normal run. The ones reading caught never fired in any run at all, because the test that would have exposed them happened to sit late in its module. **Run the checks, and read the restore paths too.**
+
+**Searching for them mechanically did not work.** A rule of "file-scope variables not assigned in `setup()`" cannot see a callback registration or a value written into a server attribute, because **neither of those is a variable.** A search shaped like a variable cannot find state that is not held in one. And where the state was in a variable, the rule classified it backwards: nothing in the type or the name of a `bool` separates a setting you may restore from a record that something irreversible has happened. Narrowing a large candidate list left a handful, of which one was real.
 
 ### Query the state instead of waiting for an announcement
 
@@ -847,7 +860,7 @@ Note that needing the device to present itself differently per case is not a rea
 
 Whether merging is faster is unknown until you measure. In one suite, where fixed cost is a small share of each test, neither merging nor splitting moved the total. If time does not decide, the benefits have to. Lay them out, and every item turns out to be better served some other way.
 
-- **The name tells you where it broke.** But a merged test still prints the line that failed, and you read where it stopped either way. Having a name adds little beyond being easier to pick out of a result list. **If per-check records are what you want, reporting from the device is more reliable.**
+- **The name tells you where it broke.** **You do not have to give that up.** Keep each case as a named function and call them in order: the traceback names the failing frame after the case, so a merged test still says which case broke, and each case keeps its own docstring. What merging really costs is a line in the result list, not the name. **If per-check records are what you want, reporting from the device is more reliable.**
 - **You can run just one.** To carve out a slow piece of verification, **splitting the module fits better.** Two test files in the same sketch directory become two modules, each with its own upload, so the state is independent too. But **every module you split off runs both the compile and the upload again.** The compile can be faster than the first thanks to the incremental build, but it is not free. A module per case is expensive, so carve out only the heavy ones.
 - **One failure does not stop the rest.** This one is unique to splitting. On hardware, though, the failure leaves the board in a bad state. What follows is not just unreliable: **the next test sees the half-finished state and unrelated failures pile up.** One suite had exactly that happening until cleanup was added. Continuing can do harm rather than good.
 
@@ -855,11 +868,62 @@ Whether merging is faster is unknown until you measure. In one suite, where fixe
 
 So **there is almost no positive reason to put several tests in one module. Treat one test per module as the rule.** When you want to split, first ask whether the module can be split instead, or whether reporting from the device would do. If you split anyway, the added time is governed by the formula further below.
 
+### When you merge, let the failure propagate
+
+Merging raises a practical question: what to do when one of the merged checks fails. **Do not catch it.** Write each check as a nested function, drive them from a list, and let a failure propagate on its own.
+
+```python
+def test_msc(dut):
+    def capacity():
+        dut.expect_exact("MSC_CAPACITY ok=1 blocks=16 block_size=512")
+
+    def readback():
+        dut.expect_exact("MSC_READ ok=1")
+
+    for check in (capacity, readback):
+        check()
+```
+
+**Either shape works.** Nested functions close over `dut` and take no arguments. Module-level functions named `_case(dut, peers)` take them explicitly and keep the file flat; that form **converts mechanically** — rename `def test_x(` to `def _x(` and generate the calls — so merging an existing module does not mean rewriting any bodies, and every case keeps its docstring.
+
+**The traceback is the reason.** Left uncaught, pytest names the failing frame after the check and shows the line and the value it was waiting for.
+
+```text
+test_usb_msc.py:61: in capacity
+    dut.expect_exact("MSC_CAPACITY ok=1 blocks=16 block_size=512")
+```
+
+Catch it and all of that collapses into whatever one-line summary you wrote by hand. **Catching discards the evidence and then asks you to rebuild a worse copy of it.**
+
+There is a second cost, specific to serial. **A check that timed out left the line it was waiting for unread.** If that line arrives late, the next check reads it and fails on the wrong thing, so continuing means draining the buffer between checks. That is complexity paid to arrive somewhere worse than stopping would have.
+
+This is the same conclusion as **One failure does not stop the rest** above, reached from the other side: once a check has failed on hardware the state is no longer trustworthy, and what follows is noise rather than information.
+
+**Driving from a list is not decoration.** Merging moves order dependence inside the test, so the reverse-order check has to move inside with it. A list can be reversed; a sequence of direct calls cannot.
+
+```python
+import os
+
+import pytest
+
+
+@pytest.fixture
+def run_checks():
+    def _run(checks):
+        order = list(checks)
+        if os.environ.get("REVERSE_CHECKS") == "1":
+            order.reverse()
+        for check in order:
+            check()
+
+    return _run
+```
+
 ### When splitting really is required
 
 Almost never, in truth. In one suite where the multi-test modules were counted and examined, **most of them had no reason beyond having been written that way.** Even so, two things are lost for good once you merge. Both have the same shape: wanting to attach something per case.
 
-**First, repeating over values can be written inside a test.** Trying a range of payload sizes needs no extra tests. Collect the failures and assert at the end, and it does not stop at the first one either.
+**First, repeating over values can be written inside a test.** Trying a range of payload sizes needs no extra tests. **Here, and only here, collecting the failures and asserting at the end earns its keep:** every iteration runs the same line, so the traceback cannot say which value failed. Collecting is what records the value at all. A sequence of differently-named checks is the opposite case, covered just above.
 
 ```python
 def test_payload(dut):
@@ -872,6 +936,8 @@ def test_payload(dut):
             failures.append(size)
     assert not failures, f"failed sizes: {failures}"
 ```
+
+**Stop early if a failure leaves the device unusable.** Collecting assumes the next value still means something. Where a failed operation leaves the board in a state the values after it cannot be trusted in, break out of the loop instead. Collecting is a convenience here, not a rule.
 
 **1. When something has to be attached per case.** This is the real dividing line. A loop cannot mark one of its values, nor select one of them to run.
 
@@ -901,7 +967,7 @@ But **finer is not automatically better.** That same allowlist also had an entry
 
 The reverse-order check only means anything **where state is shared**, and state is shared only inside a module. All three alternatives destroy the check.
 
-- **Merge into one test.** The order assumptions move into the test body, out of the check's reach.
+- **Merge into one test.** The order assumptions move into the test body, out of the check's reach — **unless you move the audit in with them.** Drive the checks from a list the test can reverse, as above, and the check survives the merge. That is machinery you have to write and keep, so weigh it against simply not merging.
 - **Split into modules.** Every module begins with an upload and a boot, so the premise always holds and the check runs empty.
 - **Report from the device.** The order is fixed in firmware; reordering means reflashing.
 
