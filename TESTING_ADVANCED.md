@@ -868,9 +868,9 @@ Whether merging is faster is unknown until you measure. In one suite, where fixe
 
 So **there is almost no positive reason to put several tests in one module. Treat one test per module as the rule.** When you want to split, first ask whether the module can be split instead, or whether reporting from the device would do. If you split anyway, the added time is governed by the formula further below.
 
-### When you merge, let the failure propagate
+### Break a large test into functions
 
-Merging raises a practical question: what to do when one of the merged checks fails. **Do not catch it.** Write each check as a nested function, drive them from a list, and let a failure propagate on its own.
+**Once a test has grown large, split it into functions.** Not into more tests — into named functions inside the one test. Each function holds one feature's worth of checking, so the test body reads as a list of what it verifies, and you can work on one piece without carrying the rest in your head. **This is ordinary structuring, done for readability**, and it applies the same whether the test grew on its own or arrived that size from merging a module.
 
 ```python
 def test_msc(dut):
@@ -885,6 +885,8 @@ def test_msc(dut):
 ```
 
 **Either shape works.** Nested functions close over `dut` and take no arguments. Module-level functions named `_case(dut, peers)` take them explicitly and keep the file flat; that form **converts mechanically** — rename `def test_x(` to `def _x(` and generate the calls — so merging an existing module does not mean rewriting any bodies, and every case keeps its docstring.
+
+**Then the rule that matters: do not catch the failures.** Drive the functions from a list, call them in order, and let a failure propagate on its own.
 
 **The traceback is the reason.** Left uncaught, pytest names the failing frame after the check and shows the line and the value it was waiting for.
 
