@@ -567,7 +567,7 @@ Make sure `loop()` does not start it either. That API distinguishes power-on, so
 
 **Be careful doing this to a peer.** A peer sitting idle answers no queries either, so **the symptom is indistinguishable from a dead board.** Keep at least a state query alive while idle, so the two can be told apart.
 
-**A reset restores only as far as the reset signal reaches.** A servo keeps its angle, a relay keeps its contact, a latching display keeps what it shows. Devices on I2C or SPI keep their own configuration. The other end of a radio link never learns you reset.
+**A reset restores only as far as the reset signal reaches.** A servo keeps its angle, a relay keeps its contact, a latching display keeps what it shows. **A sticky status or error bit keeps its value too**, because it sits in a peripheral rather than in your variables. Devices on I2C or SPI keep their own configuration. The other end of a radio link never learns you reset.
 
 **Some of what the reset does not reach sits on the same board.** A radio controller running on a companion chip, a communications module attached over UART, an external host controller. People think of one board as one device, so they expect a reset to stop the radio too. **It does not.** The main side restarts while the other chip holds its link or keeps advertising.
 
@@ -838,6 +838,8 @@ pytest my_app/test_my_app.py::test_count
 
 **This is the worst failure a suite can have.** A test that always fails gets fixed. One that fails sometimes gets re-run, and a suite people re-run is a suite people have stopped believing. One such test devalues every other test around it.
 
+**The usual name for the symptom is a flaky test**, whatever the cause turns out to be. The word describes the report rather than the mechanism, which is exactly why it pays to split it before acting.
+
 **"Race" here means a race condition:** the result depends on which of two things happens first, and nothing decides that order. Whether your read reaches the port before or after the line has finished arriving. Whether the peer has finished starting before the test writes to it. With nothing enforcing the order, **the same test on the same input can come out differently from one run to the next.** A race is not a test that is wrong. It is **a test whose answer is not determined** — which is exactly why re-running it looks like a fix.
 
 **Start by separating three shapes, because they have different causes and different fixes.** Run the same selection twice, changing nothing.
@@ -879,6 +881,13 @@ For the environmental kind, a bigger number is most of the answer, and these mak
 - **Radio state can sit in a companion chip** the reset signal never reaches, so the peer's link or advertising can outlive its own reboot.
 
 The result is a test that passes on your bench today and fails on the same bench tomorrow, with nothing in the suite having changed. **A single test is not proof of independence when a peer is involved.**
+
+**Latching state — a *sticky* flag — is the other carrier, and it hides somewhere else entirely.** A status or error bit that stays set once raised until something clears it: a peripheral's overrun or framing error, an accumulated fault register, a counter that only goes up. Two properties make it awkward in a test.
+
+- **It often survives a software reset**, because it lives in a peripheral rather than in your variables. *A reset does not necessarily clean anything* applies directly: the reset reaches only as far as its signal goes.
+- **Reading it may clear it**, which turns it into something two readers compete for. If a log audit consumes it, the test cannot see it. If one check consumes it, the next check reads zero. **A read-to-clear flag is not an observation, it is a withdrawal.**
+
+So an assertion of "no errors" can come out either way depending on who read the register first and on what happened several tests earlier. **Clear it at the start of the test, and treat reading it as consuming it.**
 
 **Prevention, in the order that pays.**
 
