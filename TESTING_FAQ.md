@@ -97,9 +97,15 @@ Nothing stops it unless you stop it. Put the stop in a fixture so it runs on an 
 
 ### A test passes alone but fails in the full run, or the other way round
 
-It depends on something an earlier test did. Three shapes account for most of it: riding on state an earlier test accumulated, depending on being first, and assuming a pristine state that another test dirties. **Fix the dependency, not the order** — pinning the order hides a design error rather than removing it.
+**If it is consistent both ways**, it depends on something an earlier test did. Three shapes account for most of it: riding on state an earlier test accumulated, depending on being first, and assuming a pristine state that another test dirties. **Fix the dependency, not the order** — pinning the order hides a design error rather than removing it.
 
 → [Advanced Testing](TESTING_ADVANCED.md), *Three shapes that do not work*
+
+### The same test passes sometimes and fails sometimes
+
+**Separate three shapes before hunting.** Run the same selection twice, changing nothing. Two runs that disagree mean a real race — a fixed delay, something announced once, a check after a timed-out `expect`, or a retry papering over a failure. Two runs that agree mean it is deterministic after all: either order dependence inside the run, or **state left behind by a previous run.** The last one reproduces neither alone nor in reverse, and **a peer is its likeliest carrier** — pairing data outlives the upload, and a peer may be a device nobody resets at all.
+
+→ [Advanced Testing](TESTING_ADVANCED.md), *A test that passes and fails at random*
 
 ### A peer test is skipped and I did not ask for that
 

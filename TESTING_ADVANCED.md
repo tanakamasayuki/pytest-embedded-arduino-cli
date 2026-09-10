@@ -339,7 +339,7 @@ In CI it is easier to skip `.env` and pass the values as environment variables f
 
 ### Terminate a trailing variable-length field at the end of the line
 
-A serial line arrives in fragments. If the last part of your pattern is variable-length and is not terminated by a newline, the match can settle before the rest of the line arrives, and you read a truncated value.
+A serial line arrives in fragments. If the last part of your pattern is variable-length and is not terminated by a newline, the match can settle before the rest of the line arrives, and you read a truncated value. **This is a race**: nothing decides whether your read arrives before or after the rest of the line, so the same test can pass on one run and fail on the next, and it can also pass while handing you the wrong value. *A test that passes and fails at random* covers the whole class.
 
 In one real case a device printed `data=abcdef12` and the test read `data=abcdef1`.
 
@@ -809,6 +809,62 @@ pytest my_app/test_my_app.py::test_count
 **Running is not sufficient either, and no one route finds everything.** In an audit of restore code, the defects came out by different routes and each route found exactly one of them: the ordinary full run, the reverse run, and re-reading the sketches, which accounted for the rest. The one the reverse run caught appeared neither alone nor in a normal run. The ones reading caught never fired in any run at all, because the test that would have exposed them happened to sit late in its module. **Run the checks, and read the restore paths too.**
 
 **Searching for them mechanically did not work.** A rule of "file-scope variables not assigned in `setup()`" cannot see a callback registration or a value written into a server attribute, because **neither of those is a variable.** A search shaped like a variable cannot find state that is not held in one. And where the state was in a variable, the rule classified it backwards: nothing in the type or the name of a `bool` separates a setting you may restore from a record that something irreversible has happened. Narrowing a large candidate list left a handful, of which one was real.
+
+### A test that passes and fails at random
+
+**This is the worst failure a suite can have.** A test that always fails gets fixed. One that fails sometimes gets re-run, and a suite people re-run is a suite people have stopped believing. One such test devalues every other test around it.
+
+**"Race" here means a race condition:** the result depends on which of two things happens first, and nothing decides that order. Whether your read reaches the port before or after the line has finished arriving. Whether the peer has finished starting before the test writes to it. With nothing enforcing the order, **the same test on the same input can come out differently from one run to the next.** A race is not a test that is wrong. It is **a test whose answer is not determined** — which is exactly why re-running it looks like a fix.
+
+**Start by separating three shapes, because they have different causes and different fixes.** Run the same selection twice, changing nothing.
+
+| What you see | Shape | Where to look |
+| --- | --- | --- |
+| Two runs of the same selection disagree | **Non-deterministic.** Something is timing-dependent | the next paragraph, then the list below |
+| Fails in the full run, passes alone, every time | **Order dependence inside the run** | *Three shapes that do not work* |
+| Passes now, fails after some other run, and reproduces neither alone nor in reverse | **State left from a previous run** | further down this section |
+
+Only the first is non-deterministic. The other two are deterministic and are already answered elsewhere in this guide; calling them flaky sends you looking in the wrong place.
+
+**And non-deterministic does not always mean a race.** Two runs also disagree when something outside your control took a variable amount of time: associating with an access point, DHCP, a network service coming up. **The question to ask is whether the outcome is determined and merely late, or not determined at all.** An association that succeeds in a variable time is the first kind — **the short timeout was the bug**, so raising it is the fix and not a paper-over. A read that may or may not have the complete line is the second kind, and no timeout value repairs it.
+
+For the environmental kind, a bigger number is most of the answer, and these make it better than only that.
+
+- **Time out generously but keep a ceiling, and name the dependency in the message.** A run that dies after a long wait saying which access point it was waiting for is diagnosable; one that just times out is not.
+- **Report it as an environment error, not a test failure**, wherever the connection is a precondition rather than the subject. That is the `error` versus `failed` distinction above — scoring a dead access point as a product failure is how a tally comes to lie.
+- **Retry the precondition, never the assertion.** A bounded retry while establishing a precondition is rig robustness. A retry wrapped around the thing under test hides the defect. **That is where the line sits**, not at the word retry.
+- **Hoist it out of the per-test path.** If every test re-associates, every test pays the variance.
+- **Reduce the variance where you own the rig.** A test-only access point rather than the office network, a fixed channel, credentials pinned in `.env`. This is the only measure that removes the cause instead of tolerating it.
+- **Do not assert on elapsed time** unless the connection time is itself the subject.
+
+**What tends to become a race.**
+
+- **A pattern that does not wait for the end of the line.** A serial line arrives in pieces. If the last thing in the pattern is variable-length and is not terminated by the newline, the match settles the moment what has arrived satisfies it, and you read a truncated value. **Whether the whole field is there depends on arrival timing alone**, so the same test can pass, can fail, and — worst of all — **can pass carrying a wrong value.** Terminate the pattern with `\r?\n`; `[^\r\n]*` is not enough, because it also matches zero characters. *Terminate a trailing variable-length field at the end of the line* has the detail.
+- **Waiting for something announced once.** If the line can be emitted before you start reading, the test is a race by construction — and `expect` discards what came before its match. **Query the state instead**, which the next section covers.
+- **A check that runs after a timed-out `expect`.** The awaited line can still arrive, late, and the next check consumes it and fails on the wrong thing. Stop at the first failure rather than continuing.
+- **Asserting after a fixed delay** instead of on an observable condition. It passes on a quiet machine and fails on a busy one.
+- **Boot-time interference.** The primary is already running `setup()` while the peer is being flashed, so it can observe the peer's resets. Timing decides whether it does. *Do not affect the outside world at boot* is the fix.
+- **A receiver that does not filter what it accepts.** Advertising from a neighbouring device, an infrared frame from somebody else's remote, any traffic your test never sent. It can fail the test, arriving as a malformed frame that you then report as an error. **Worse, it can pass the test**, by satisfying an assertion your own peer never satisfied. Either way the outcome depends on what happened to be in the air during your window, which is why it looks intermittent rather than wrong.
+- **Retries.** An unbounded retry converts a hard failure into an intermittent one. It does not fix the defect, it hides it and makes the suite untrustworthy at the same time.
+- **Two independently timed sides**, such as both ends of a radio link, where neither waits for the other to be ready.
+
+**A peer is the likeliest carrier of state from a previous run.** The primary is the thing you are watching, and it gets a fresh upload and boot at every module boundary, so its state stays on your mind. A peer's does not, and several kinds of peer state outlive the upload.
+
+- **Pairing, bonding and stored settings live in non-volatile storage**, which an upload does not necessarily erase — the same board-dependence as on the primary.
+- **A peer need not be a board you flash at all.** A commercial device, an instrument, a rig shared with another project: nothing resets it between your runs.
+- **Radio state can sit in a companion chip** the reset signal never reaches, so the peer's link or advertising can outlive its own reboot.
+
+The result is a test that passes on your bench today and fails on the same bench tomorrow, with nothing in the suite having changed. **A single test is not proof of independence when a peer is involved.**
+
+**Prevention, in the order that pays.**
+
+- **Establish the premise on both sides, inside the test.** Rebuilding the primary's state and trusting the peer's is the common half-measure. The peer needs the same treatment.
+- **Normalize at the start, not only at the end.** Cleanup is skipped by an early exit; the start of a test always runs. Anything that survives a run has to be cleared where it is certain to be cleared.
+- **Assert on observable conditions, never on elapsed time.** Timeout generously. Retry only while building a precondition, never around an assertion.
+- **Use a test-only identifier** so a neighbouring bench cannot satisfy your assertion for you, and narrow the acceptance at the receiver rather than after the fact. **Confirm it by running the test with the peer switched off: if it still passes, you are not filtering.** That check costs one run and it is the only thing that distinguishes a test that verifies your device from one that verifies the room.
+- **Stop on the first failure**, so a broken state cannot produce a second, unrelated symptom.
+
+**You cannot show a race is fixed with one green run.** Run the same selection repeatedly and require it to agree with itself. And if you cannot make it deterministic, consider that the test may be reporting a race in the product. **That is a finding, not a nuisance.** Do not paper it over with a longer timeout — and note that this is the opposite of the environmental case above, where a longer timeout is exactly the right answer. **The two look identical in the report and are treated in opposite ways**, which is why the two-run triage comes first.
 
 ### Query the state instead of waiting for an announcement
 
