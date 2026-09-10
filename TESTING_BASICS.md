@@ -242,16 +242,18 @@ The names are yours to choose. **What matters is the criterion: split by what a 
 
 **One hardware test in there turns CI red, not yellow.** A peer whose port or profile cannot be resolved is skipped quietly, but **the primary is never skipped.** The absence of the thing under test is treated as a configuration error, so with no port you get a `ValueError`. **A unit test that runs on hardware therefore goes in `single/`, not in `unit/`, whatever it is called** — checking a function inside the board with Unity or ArduTest is exactly that case. The equipment decides where it lives, not the category.
 
-Name test files after their sketch directory, as `test_<sketch name>.py`, so that they are **unique across the whole project**. Two files with the same name fail at collection time when someone runs everything. Set the default target in `pyproject.toml`.
+Name test files after their sketch directory, as `test_<sketch name>.py`, so that they are **unique across the whole project**. Two files with the same name fail at collection time when someone runs everything. Set the default target in `pyproject.toml`. **Prefer excluding to listing.**
 
 ```toml
 [tool.pytest.ini_options]
-testpaths = ["unit", "single", "loopback", "peer"]
+# The default becomes everything, minus what is deliberately out of it.
+# Listing instead means a directory added later can be left off in silence.
+norecursedirs = ["manual", "*/build", "*/output"]
 ```
 
 ```bash
 cd tests
-uv run --env-file .env pytest              # only what testpaths names
+uv run --env-file .env pytest              # everything except the excluded directories
 uv run --env-file .env pytest manual/      # name the occasional ones explicitly
 uv run pytest unit/                        # what CI runs; no --env-file needed
 ```
