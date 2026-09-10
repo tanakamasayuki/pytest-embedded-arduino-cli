@@ -406,6 +406,22 @@ This is what happens at each level.
 - **Test end**: the serial port is closed.
 - **Module end**: the device lock is released.
 
+**One caveat, though: whether an upload erases non-volatile storage depends on the board.** Settings, logs, pairing information. **In many cases it is not erased by default.** Where that holds, data a test wrote persists across modules and across runs, and that becomes **a place where "a module boundary is always clean" does not hold.**
+
+There are two ways to deal with it, and which one fits depends on the situation.
+
+- **Clear it from the sketch at the start of the test.** If the sketch can reach the storage, this works on any platform. It is the one to reach for when in doubt.
+- **Erase before flashing.** Available where the platform offers a full-erase setting. **There is no unified way to write it, each platform spells it differently, and some platforms offer no full erase at all.** On ESP32, for example, it is offered as a modifier on the profile's `fqbn`.
+
+```yaml
+# one example, for ESP32. Other platforms spell it differently
+profiles:
+  esp32:
+    fqbn: esp32:esp32:esp32:EraseFlash=all
+```
+
+Forgetting either is nasty. A failure that depends on a previous run **reproduces neither when run alone nor in reverse.**
+
 One important conclusion follows. **The upload always resets the board. Whether the per-test connection resets it depends on the board.** On some boards the next test sees exactly what the previous test left behind; on others every connection resets it away. Boards that wire DTR and RTS straight to EN reset; boards with an auto-reset circuit in between, and native USB boards, usually do not.
 
 So when you add a second test to the same module, the board state that test sees depends on the board's circuit. **Writing tests that depend on neither is the only safe approach.**
