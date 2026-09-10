@@ -442,7 +442,45 @@ When a test fails right after you change how a fixture is placed or ordered, it 
 
 There are two kinds, and they behave differently.
 
-**Serial logs are managed by `pytest-embedded`.** Every run creates a directory stamped with a UTC timestamp, holding one directory per test with its `dut.log`. **Because each run gets its own directory, an earlier run's logs are never overwritten.** `--root-logdir` changes where they go. This plugin also writes result files into the same place (`PASSED.txt` / `FAILED.txt` and friends, `SUMMARY.txt`, `summary.json`).
+**Serial logs are managed by `pytest-embedded`.** They go under **`pytest-embedded/` inside the system temporary directory** by default, with one timestamped directory per run, and inside that one directory per test holding its `dut.log`. **Because each run gets its own directory, an earlier run's logs are never overwritten.** This plugin also writes result files into the same place (`PASSED.txt` / `FAILED.txt` and friends, `SUMMARY.txt`, `summary.json`).
+
+To help you find it, these are the usual defaults.
+
+| OS | Typical temporary directory | So the logs are in |
+| --- | --- | --- |
+| Linux | `/tmp` | `/tmp/pytest-embedded/` |
+| macOS | `/var/folders/.../T` (per user) | `.../T/pytest-embedded/` |
+| Windows | `C:\Users\<user>\AppData\Local\Temp` | `...\Temp\pytest-embedded\` |
+
+**Do not hardcode any of them, though.** The location comes from Python's `tempfile.gettempdir()`, and **`TMPDIR`, `TEMP` or `TMP` takes precedence whenever one of them is set.** The table is what you get with none of them set — a typical case, not a rule. **When you need to know for certain, ask the environment.**
+
+```bash
+python -c "import tempfile; print(tempfile.gettempdir())"
+```
+
+**And if a script or a set of instructions depends on the path, set it yourself with `--root-logdir`.** Not having to look is more reliable than looking.
+
+**Treat it as somewhere that gets cleared.** When it is cleared is environment-dependent too — some setups empty it on reboot. Use `--root-logdir` for anything you want to keep. It is also the place that quietly accumulates if nothing tidies it.
+
+**`--save-state` adds one record that does survive across runs.** It writes `.pytest-results/state.json` (moveable with `--save-state-dir`) holding, **per profile and per test**, the last result and when it happened. Unlike the logs it is not split per run; the same file is updated in place.
+
+```json
+"app/test_app.py::test_ok": {
+  "last_result": "failed",
+  "last_run_at":     "2026-09-10T18:56:08+09:00",
+  "last_success_at": "2026-09-10T18:55:39+09:00"
+}
+```
+
+**It answers two questions, both useful while developing.** *Did I actually run this one?* — the entries are per profile, so it also covers "on that board, though?". And *when did this last pass?* — a failure leaves `last_success_at` pointing at the previous success, which tells you roughly when it broke.
+
+**It is not a report and not an audit trail**, and three measured limits say why.
+
+- **Only the last result is kept, not a history.** It cannot tell you how often something fails, so it is no help against a race.
+- **An `error` is not recorded at all.** A test that ended in an environment failure has no entry, which is indistinguishable from one that never ran.
+- **Entries for tests that no longer exist stay.** Renaming a test and running again left the old node id in place, still carrying its old `failed`. So a name in the file is not evidence the test still exists, and a red entry may belong to something deleted long ago.
+
+**So treat the file as disposable.** Delete it when you release, or on whatever schedule suits you. Nothing depends on it, and a short fresh file tells you more than a long stale one.
 
 So **archiving logs after a run is usually unnecessary**. Consider it only when you want to collect them somewhere specific as CI artifacts, or to tidy up an accumulation.
 
