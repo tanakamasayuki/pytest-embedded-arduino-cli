@@ -170,6 +170,30 @@ These are the settings you reach for most.
 
 This plugin's own repository sets `testpaths = ["tests"]` in `pyproject.toml`, so a bare `pytest` runs only the plugin's own tests. Running anything under `examples/` means naming it explicitly.
 
+**Whether to write `testpaths` at all is worth deciding deliberately.** Writing it defines what a bare `pytest` runs and keeps `manual/` out without needing a marker. Leaving it out means a directory added later is picked up on its own. The argument against writing it is real: **add a suite directory, forget to list it, and its tests silently drop out of the default run.** Nothing warns. The run reports all green while a whole directory goes unexecuted, which is the same shape as a check that quietly stops checking.
+
+**The two mistakes are not symmetric.** Forgetting to extend an allowlist gives you a **silent** under-run. Forgetting to extend a denylist gives you a **loud** over-run — a manual test firing in CI is annoying, but you find out. **When in doubt, put the explicitness where a mistake is loud:** leave `testpaths` unset and exclude only what must not run by default, with a marker or `norecursedirs`.
+
+**If you do write it, make the omission fail.** One test that counts the directories and compares them against the setting turns the silent case into a red one. It needs no hardware, so it belongs wherever your hardware-free tests live.
+
+```python
+TESTS_ROOT = Path(__file__).resolve().parents[1]
+EXCLUDED = {"manual"}          # deliberately out of the default run
+NOT_SUITES = {"sketch_support", "__pycache__"}
+
+
+def test_testpaths_cover_every_suite(pytestconfig):
+    listed = set(pytestconfig.getini("testpaths"))
+    found = {
+        p.name for p in TESTS_ROOT.iterdir()
+        if p.is_dir() and not p.name.startswith(".") and p.name not in NOT_SUITES
+    }
+    unaccounted = found - listed - EXCLUDED
+    assert not unaccounted, f"in neither the default set nor the excluded set: {sorted(unaccounted)}"
+```
+
+That settles the argument rather than picking a side in it: **you keep the explicit list, and the one real objection to it becomes a failing test.** Naming a path on the command line ignores `testpaths` as usual, so `pytest manual/` is unaffected.
+
 How to separate tests whose availability depends on the bench is covered in the next section.
 
 ## Permanent bench equipment versus occasional equipment

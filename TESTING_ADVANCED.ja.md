@@ -170,6 +170,30 @@ TOML では値に型があるので、複数行の設定は配列で書きます
 
 この plugin のリポジトリでは `pyproject.toml` に `testpaths = ["tests"]` を書いているため、引数なしの `pytest` は plugin 自身のテストだけを実行します。`examples/` を動かすときは対象を明示します。
 
+**`testpaths` を書くかどうかは、意識して決める価値があります。** 書けば `pytest` 単体で流す範囲が定義でき、`manual/` を marker 無しで外せます。書かなければ、後で足したディレクトリが自動で対象に入ります。そして**書かない側の言い分には実害の裏づけがあります。** ディレクトリを足して `testpaths` に書き忘れると、**そのディレクトリのテストは既定の実行から静かに落ちます。** 警告は出ません。**1 つのディレクトリが丸ごと実行されていないのに、実行結果はオールグリーンになります。** これは、検査が黙って検査をやめる形と同じです。
+
+**2 つの間違いは対称ではありません。** 許可リストへの追加を忘れると、**静かな取りこぼし**になります。拒否リストへの追加を忘れると、**うるさい取り込み過ぎ**になります。manual のテストが CI で走り出すのは迷惑ですが、**気づけます。** **迷うなら、間違いがうるさく出る側に明示を置いてください。** `testpaths` を書かず、既定から外したいものだけを marker や `norecursedirs` で外す形です。
+
+**書くなら、書き忘れが落ちるようにしてください。** ディレクトリを数えて設定と突き合わせるテストを 1 本置けば、静かな取りこぼしが赤に変わります。実機は要らないので、ボード無しで動くテストの置き場所に入ります。
+
+```python
+TESTS_ROOT = Path(__file__).resolve().parents[1]
+EXCLUDED = {"manual"}          # 意図的に既定から外しているもの
+NOT_SUITES = {"sketch_support", "__pycache__"}
+
+
+def test_testpaths_cover_every_suite(pytestconfig):
+    listed = set(pytestconfig.getini("testpaths"))
+    found = {
+        p.name for p in TESTS_ROOT.iterdir()
+        if p.is_dir() and not p.name.startswith(".") and p.name not in NOT_SUITES
+    }
+    unaccounted = found - listed - EXCLUDED
+    assert not unaccounted, f"既定にも除外にも入っていません: {sorted(unaccounted)}"
+```
+
+これはどちらかの立場を選ぶのではなく、議論そのものを解きます。**明示の利点を保ったまま、唯一の実害だった「静かに落ちる」が、落ちるテストに変わるからです。** コマンドラインでパスを指定すれば `testpaths` は従来どおり無視されるので、`pytest manual/` に影響はありません。
+
 環境によって有効無効が変わるテストの分け方は、次の節で扱います。
 
 ## 常設の機材と、そのときだけの機材
