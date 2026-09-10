@@ -28,6 +28,13 @@
 
 - **[EspUsbDevice](https://github.com/tanakamasayuki/EspUsbDevice)** — 大きな構成の例です。2 通りのつなぎ方が同居しています。ESP32-S3 を 2 台使って peer 経由で確認するものと、ESP32-P4 を 1 台だけ使い、その 2 つの USB コントローラをケーブルで繋いで、ボードが自分自身をテストするものです。同じライブラリを別の構成で検証している例として読めます。`tests/conftest.py` では、シリアルログを検査して pytest の報告に足しています。
 
+## core も使わないユニットテスト
+
+Arduino API に触れない純粋な C++ なら、host core すら要りません。テストから直接コンパイラを呼び、できたバイナリを実行する形です。**手に入る中で最も速く**、引き換えに OS 依存の部分は誰も包んでくれません。
+
+- **[EspBle / tests/unit](https://github.com/tanakamasayuki/EspBle/tree/main/tests/unit)** — 題材ごとにディレクトリを分け、それぞれに `.cpp` と、それをビルドして実行する pytest ファイルを置いています。codec、parser、変換表など。コンパイルフラグにも注目してください。`char` の符号を固定しているものがあります。host とターゲットで一致しないためです。
+- **[EspUsbDevice / tests/unit/keymap](https://github.com/tanakamasayuki/EspUsbDevice/tree/main/tests/unit/keymap)** — 同じ形ですが、読む価値のある工夫があります。対象のロジックが host ではコンパイルできないファイルの中にあるため、コピーするのではなく、**実行時に本物のソースから必要な部分を取り出してコンパイル**しています。複製がずれていく心配なく、製品側の表そのものに対して assert できます。
+
 ## CI でのビルドテスト
 
 ガイドではビルドテストをこのプラグインの外に置いています。device も serial も無く、matrix で `arduino-cli compile` を回すだけのものです。[応用編](TESTING_ADVANCED.ja.md)で説明した形の、実物のワークフローです。

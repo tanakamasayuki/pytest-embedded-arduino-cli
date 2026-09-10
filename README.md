@@ -15,6 +15,7 @@ This package does not depend on `pytest-embedded-arduino`. It is intended to sta
 - [Testing Basics](TESTING_BASICS.md): what a test is, how a run works, what only real hardware can tell you, how many boards to use, and how to keep tests independent. Start here if you are new to pytest.
 - [Advanced Testing](TESTING_ADVANCED.md): collection rules, traps in `expect`, where logs and artifacts live, cleaning up after an early exit, when a `conftest.py` is justified, and principles for peer tests.
 - [Example Projects](TESTING_EXAMPLES.md): real projects that use all of the above, from the smallest host-core setup to a large multi-board one.
+- [FAQ](TESTING_FAQ.md): a symptom-first index into the two guides above, for when something has already gone wrong.
 
 ## Design
 
