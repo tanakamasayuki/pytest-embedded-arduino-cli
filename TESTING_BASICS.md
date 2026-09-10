@@ -242,14 +242,14 @@ The names are yours to choose. **What matters is the criterion: split by what a 
 
 **One hardware test in there turns CI red, not yellow.** A peer whose port or profile cannot be resolved is skipped quietly, but **the primary is never skipped.** The absence of the thing under test is treated as a configuration error, so with no port you get a `ValueError`. **A unit test that runs on hardware therefore goes in `single/`, not in `unit/`, whatever it is called** — checking a function inside the board with Unity or ArduTest is exactly that case. The equipment decides where it lives, not the category.
 
-Name test files after their sketch directory, as `test_<sketch name>.py`, so that they are **unique across the whole project**. Two files with the same name fail at collection time when someone runs everything. Set the default target in `pyproject.toml`. **Prefer excluding to listing.**
+Name test files after their sketch directory, as `test_<sketch name>.py`, so that they are **unique across the whole project**. Two files with the same name fail at collection time when someone runs everything. **The default set comes out right without any configuration.** pytest already refuses to descend into hidden directories such as `.venv`, and into `build` and `dist`. Add the rule that **anything you do not want in the default run is not named `test_`**, and that is the whole arrangement.
 
-```toml
-[tool.pytest.ini_options]
-# The default becomes everything, minus what is deliberately out of it.
-# Listing instead means a directory added later can be left off in silence.
-norecursedirs = ["manual", "*/build", "*/output"]
+```bash
+cd tests
+uv run --env-file .env pytest    # unit, single, loopback and peer
 ```
+
+**Writing no setting is the safest choice.** Listing the targets (`testpaths`) and excluding them (`norecursedirs`) both introduce room for a mistake the moment you write them — something left off, or a default overwritten. Neither is needed to keep the default run correct.
 
 ```bash
 cd tests

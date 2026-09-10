@@ -175,7 +175,22 @@ This plugin's own repository sets `testpaths = ["tests"]` in `pyproject.toml`, s
 
 It has a second weakness, in the direction people usually argue about. **Add a suite directory, forget to list it, and its tests silently drop out of the default run.** Nothing warns; the run reports all green while a whole directory goes unexecuted, which is the same shape as a check that quietly stops checking.
 
+**Before any of this, check whether you need a setting at all.** With no configuration, pytest's own defaults already exclude hidden directories, `build`, `dist`, `node_modules` and `venv`, and the naming rule keeps out whatever you did not prefix with `test_`. Measured on a tree holding `manual/` without the prefix, a duplicate test basename inside a `build/`, and a `test_*.py` inside `.venv`: the bare run and `pytest .` collected exactly the intended suites, and naming the manual file still ran it. **A realistic `manual/conftest.py` — one that defines fixtures and does no work at import — changed nothing either.** The earlier point about conftest imports only bites a conftest that fails or acts while being imported, and that conftest is the thing to fix.
+
+**So the setting is load-bearing in one case only: when tests you want out of the default run are still named `test_*.py`.** Then `norecursedirs` is what excludes them, and the paragraph below applies. Otherwise, **prefer writing nothing.** This session's own record is the argument: writing this setting produced two defects — a config that dropped `.*` and so walked into `.venv`, and a guide example that repeated the same mistake — while writing nothing produced none.
+
 **`norecursedirs` is the better tool for the same job.** It names directories collection does not descend into, so the default becomes everything minus what you excluded. **A directory added later is picked up on its own**, which removes the silent case entirely — that is the whole difference, and it is why one project switched to it with the reasoning written into the config comment.
+
+**What excluding `manual/` actually buys you, once the files there have no `test_` prefix, is that its `conftest.py` is never imported.** Collection still walks an unexcluded directory looking for matches, and **a `conftest.py` it finds there is loaded even when nothing in that directory is collected.** Measured: a `manual/conftest.py` that raises on import stopped the whole default run with a collection error; adding `manual` to `norecursedirs` made the same run pass. Since a `manual/conftest.py` is exactly where this guide suggests putting your equipment checks, that is worth knowing. It also acts as a backstop for the naming rule — a `test_`-prefixed file dropped in there by habit joins the default run without it.
+
+**One trap: setting `norecursedirs` replaces the defaults, it does not add to them.** The built-in value is `*.egg .* _darcs build CVS dist node_modules venv {arch}`, and **`.*` is the entry that keeps collection out of `.venv`.** Write `norecursedirs = ["manual", "*/build"]` and pytest starts walking into `tests/.venv` on every run. Restate the defaults alongside your own.
+
+```toml
+norecursedirs = [
+    "*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}",
+    "manual", "output",
+]
+```
 
 **Neither of them is a guard, though.** Measured against naming the directory directly, both let it run.
 
@@ -263,10 +278,11 @@ Put the conftest in a directory and it applies only below that directory.
 
 **A test that needs a person cannot be gated on an environment variable.** Neither the plugin nor the test can know whether someone is standing there. A test that takes a very long time is similar: the hardware is present, but you do not want it on every run. Keep these out of the default run and name them when you want them. There are three ways.
 
-**Separate by directory.** Leave it out of `testpaths` and name it when you want it.
+**Separate by directory.** Keep it out of collection with `norecursedirs` and name it when you want it. **This is the method for files that keep the `test_` prefix** — drop the prefix instead, as in the third method, and no setting is needed at all.
 
 ```bash
-pytest                 # only what testpaths names; manual is not included
+pytest                 # everything but the excluded ones; manual is not included
+pytest .               # the same; norecursedirs applies here too
 pytest manual/         # only when you want it
 ```
 
@@ -308,6 +324,18 @@ pytest manual/manual_power_cycle/manual_power_cycle.py  # only this collects it
 ```
 
 **Note that naming the directory does not collect it.** You have to name the file. To run several, use shell expansion.
+
+**This is where it collides with your instructions.** A README that says `pytest manual/` **returns nothing** once the files lose the prefix. Someone follows the documented command, sees no tests, and cannot tell whether there are none or something is broken. It has happened. **If you drop the prefix, rewrite the instructions down to the filename.**
+
+**Which of the three you want comes down to what should happen when someone names it.** That is the dividing line; all three keep it out of the default run equally well.
+
+| What you want | What to use |
+| --- | --- |
+| Naming the directory should run it | `norecursedirs`, keeping the `test_` prefix |
+| Only naming the file should run it | drop the prefix |
+| Select it by marker, never by default | a marker plus `addopts` |
+
+**You can also use two of them.** Drop the prefix *and* list the directory in `norecursedirs`: the bare run and `pytest .` exclude it, `pytest manual/` collects nothing, and **only naming the file runs it** — the strictest form, confirmed by measurement. What `norecursedirs` adds there is the earlier point, that **`manual/conftest.py` is no longer imported.**
 
 ```bash
 pytest manual/*/*.py
