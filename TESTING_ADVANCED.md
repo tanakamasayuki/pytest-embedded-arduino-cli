@@ -193,11 +193,13 @@ So an extra board usually needs no conftest at all. Where the board is attached 
 
 **This skipping is for peers only.** The primary DUT is never skipped; it fails instead, in one of three shapes.
 
-| The primary's situation | What happens |
+**The upload runs before the connection.** So when nothing is behind the port you named, it fails at the upload, not at the connection. That changes where in the log to look, so here they are in order.
+
+| The primary's situation | Where it fails |
 | --- | --- |
-| No port configured at all | `ValueError` while preparing the connection |
-| The string resolves, but nothing is behind it | `arduino-cli upload` fails |
-| A path that does not exist | `FileNotFoundError` at connection time |
+| No port configured at all | Preparing the connection, with `ValueError` |
+| Nothing behind the port you named, including a dangling symlink | **The upload.** `arduino-cli` fails and you get `CalledProcessError` |
+| The device disappears between upload and connection | The connection, with `FileNotFoundError` |
 
 Writing a symlink such as `/dev/serial/by-id/...` into `.env` makes the middle case easy to hit: **the string resolves while the device is absent.** On a bench where a supposedly permanent board has been unplugged, the default run fails right there. The primary is the thing under test, so its absence is treated as a configuration error, never a skip.
 
@@ -351,7 +353,7 @@ dut.expect(re.compile(rb"data=([0-9a-f]+)\r?\n"))
 
 If another literal from the same pattern follows the capture, there is no problem: the match cannot settle until that literal arrives.
 
-**Writing `[^\r\n]*` to "stop at the end of the line" is not enough either.** It matches zero characters too, so the match settles before the line has finished arriving. To guarantee a complete line, include `\r?\n` in the pattern. In one suite an audit found three patterns of this shape, and one of them **used a value that could be truncated.**
+**Writing `[^\r\n]*` to "stop at the end of the line" is not enough either.** It matches zero characters too, so the match settles before the line has finished arriving. To guarantee a complete line, include `\r?\n` in the pattern. In one suite an audit found patterns of this shape across several files, and **the one that actually broke a test was not the one that used a value which could be truncated.**
 
 ### Output after the match is not guaranteed
 
@@ -530,9 +532,13 @@ void setup()
 
 Make sure `loop()` does not start it either. That API distinguishes power-on, software reset, panic, watchdogs and more, and which reasons should lead to staying idle is yours to decide. **On a board with no equivalent, this branch cannot be written.** There, do not lean on a reset; call the API that stops the thing.
 
-**Resetting the MCU does not put the outside world back.** A servo keeps its angle, a relay keeps its contact, a latching display keeps what it shows. Devices on I2C or SPI keep their own configuration. The other end of a radio link never learns you reset. **Treat a reset as affecting the inside of the MCU only.** That much is true on any board.
+**Be careful doing this to a peer.** A peer sitting idle answers no queries either, so **the symptom is indistinguishable from a dead board.** Keep at least a state query alive while idle, so the two can be told apart.
 
-**Non-volatile storage survives by design.** Settings or logs a test wrote are still there after a reset. Clear them explicitly, or use whatever erase-on-upload facility your core offers. On ESP32 with NVS, that is the erase setting applied at upload time.
+**A reset restores only as far as the reset signal reaches.** A servo keeps its angle, a relay keeps its contact, a latching display keeps what it shows. Devices on I2C or SPI keep their own configuration. The other end of a radio link never learns you reset.
+
+**Some of what the reset does not reach sits on the same board.** A radio controller running on a companion chip, a communications module attached over UART, an external host controller. People think of one board as one device, so they expect a reset to stop the radio too. **It does not.** The main side restarts while the other chip holds its link or keeps advertising.
+
+**Non-volatile storage survives by design.** Settings or logs a test wrote are still there after a reset. Clear them explicitly, or use a full-erase-on-upload facility if the platform has one. **The latter is spelled differently on each platform, and some platforms do not offer it at all.** On ESP32, for example, it is a modifier on the profile's `fqbn`. **The one that works everywhere is the former: clearing from the sketch.**
 
 **On some boards a reset drops the port and re-enumerates it**, which is the case for native USB boards. A reset meant as cleanup can change what the next run connects to.
 
@@ -678,7 +684,7 @@ A project that truly needs it has a way out. `pytest-embedded`'s `Serial` accept
 
 ## Building a clean test plan
 
-Adding a second test to a module is cheap in itself. The upload happens once per module, so a test after the first adds only a reconnect. Two things make it expensive: **per-test setup and cleanup**, and **order dependence**. The first costs time, the second costs complexity.
+Adding a second test to a module is cheap in itself. The upload happens once per module, so a test after the first adds only a reconnect. **That much is board-dependent, though: where opening the connection resets the board, it re-runs the boot as well.** Two things make it expensive: **per-test setup and cleanup**, and **order dependence**. The first costs time, the second costs complexity.
 
 A test plan breaks down when tests start depending on each other, not when they multiply. And **the moment you have to care about order, that test is designed wrong.** The reverse-order check below is not a tool for managing order. **It is a tool for finding design errors.** When it finds one, fix the design rather than pinning the order.
 
@@ -711,11 +717,27 @@ The same goes for a test that runs for a long time to measure how a resource gro
 
 ### Two checks
 
-**Run the module once in reverse.** This is the everyday check. It costs one upload and catches all three shapes above. **The second one in particular is invisible to running tests alone**, because a test run by itself is always first.
+**Run the module once in reverse.** This is the everyday check. It costs one upload and catches all three shapes above. **Reverse the module's tests within a single pytest invocation**; do not run them one at a time in reverse order, which pays an upload per test and turns into the other, more expensive check. **The second one in particular is invisible to running tests alone**, because a test run by itself is always first.
 
 ```bash
 pytest $(pytest my_app --collect-only -q | grep '::' | tac)
 ```
+
+**That one-liner does not get along with parametrize.** A node id such as `test_payload[512]` is unquoted, so the shell may treat it as a glob, and a parameter containing a space is word-split. The dependable form is a tiny plugin that only reverses, passed with `-p`, which also keeps your conftest clean.
+
+```python
+# revorder.py
+def pytest_collection_modifyitems(session, config, items):
+    items.reverse()
+```
+
+```bash
+PYTHONPATH=. pytest -p revorder my_app/
+```
+
+**Read the results as three values**, not two: `passed`, `failed` and `error`. **An `error` is an environment failure, not a test failure** — the upload died, the port was missing. Count in two values and you will score environment failures as successes; a real tally script did exactly that.
+
+**When many fail at once, suspect the environment rather than the tests.** A run of consecutive errors is worth stopping for, to check the wiring and the ports.
 
 You can also put it in a `conftest.py` and switch it on when you want it.
 
@@ -758,9 +780,13 @@ If the device can be stopped and started again, that state can be rebuilt at any
 stop -> start -> wait until ready -> assert
 ```
 
+**This shape assumes the stop actually clears that state.** Some libraries keep a cache or a registration across a stop, and copying the shape will not fix anything there. **Confirm from the device log that the stop really cleared it.** Do not assume what a library's stop discards.
+
 Stop and start commands usually exist for a different reason, to avoid affecting the outside world at boot. **Machinery added to close the flashing window turns out, as a by-product, to be the means of fixing order dependence.** Gating does not only make the error findable through the reverse-order check; it makes the error fixable.
 
-The price is the time to rebuild: whatever enumerating or reconnecting costs. It is still cheaper than a reverse-order check that stays red forever, and cheaper again when once per module is enough.
+The price is the time to rebuild: whatever enumerating or reconnecting costs. It is still cheaper than a reverse-order check that stays red forever.
+
+**This cost is not the same as the stop and start that closes the flashing window.** That window opens once per module, so that one is paid once. This one is **paid once for every test that needs a pristine state.** Do not conflate them.
 
 **Before concluding that merging is the only option because nothing can put the device back, check whether you can build that means.** A merge is usually the result of skipping that check.
 
@@ -778,7 +804,7 @@ Note that needing the device to present itself differently per case is not a rea
 
 ### What splitting buys is less than it looks
 
-Time alone makes merging look like the obvious win. So lay out what splitting gives you, and every item turns out to be better served some other way.
+Whether merging is faster is unknown until you measure. In one suite, where fixed cost is a small share of each test, neither merging nor splitting moved the total. If time does not decide, the benefits have to. Lay them out, and every item turns out to be better served some other way.
 
 - **The name tells you where it broke.** But a merged test still prints the line that failed, and you read where it stopped either way. Having a name adds little beyond being easier to pick out of a result list. **If per-check records are what you want, reporting from the device is more reliable.**
 - **You can run just one.** To carve out a slow piece of verification, **splitting the module fits better.** Two test files in the same sketch directory become two modules, each with its own upload, so the state is independent too. But **every module you split off runs both the compile and the upload again.** The compile can be faster than the first thanks to the incremental build, but it is not free. A module per case is expensive, so carve out only the heavy ones.
@@ -812,7 +838,7 @@ def test_payload(dut):
 - **Selection with `-k` or a node id.** Running one specific value to investigate it is not something a loop offers.
 - **Project-specific machinery keyed on node id**, such as a conftest that audits serial logs and holds an allowlist of lines permitted for one particular case.
 
-The third has a real instance. In a module of eighteen operations, exactly one legitimately provokes an error line that the specification allows. Keyed per case, only that one is permitted. **Merge the module and the permission has to widen to cover all of it, so the same line goes unnoticed where it should not be allowed.**
+The third has a real instance. In a module of many operations, exactly one legitimately provokes an error line that the specification allows. Keyed per case, only that one is permitted. **Merge the module and the permission has to widen to cover all of it, so the same line goes unnoticed where it should not be allowed.**
 
 When a value-driven repetition needs this, use `@pytest.mark.parametrize`. **The compile and the upload still happen once per module**, each value becomes an independent test named like `test_payload[512]`, and markers can be attached per value.
 
@@ -828,7 +854,7 @@ def test_payload(dut, size):
     dut.expect_exact(f"SENT {size}")
 ```
 
-But **finer is not automatically better.** That same allowlist also had an entry written broadly on purpose, for a transient that lands on a different case every run: a property of the run, not of any one case. **Match the key to the actual scope of the thing.**
+But **finer is not automatically better.** That same allowlist also had an entry written broadly on purpose, for a transient that lands on a different case every run: a property of the run, not of any one case. **Match the key to the actual scope of the thing.** And if your implementation stops at the first matching rule, **put the specific rules ahead of the broad ones**, or a broad rule will swallow a specific one.
 
 **2. When you want to find vacuous assertions.** This differs in kind from the other one: it is about the quality of the tests rather than of the product.
 
@@ -862,7 +888,9 @@ Argue about splitting versus merging without measuring the second factor and you
 
 **When it turns out to be heavy, the fix is to hoist it, not to merge.** Merging does make it faster, but the cost comes back once per module: twenty modules pay it twenty times. Move the setup out of the per-test path and the saving holds regardless of test count. **Try hoisting first, and consider merging only if that is not enough.**
 
-There are two ways to hoist.
+**Hoisting is not only about the start.** Make the start idempotent and it still buys nothing **if the teardown stops the thing on every test**: by the next test the stop has already happened, so the idempotence check never fires and the whole cost is paid again. In one real case the start had been written idempotent from day one and the cost remained in full. **If making the start idempotent did not make it faster, look at whether the stop runs every test.**
+
+There are two ways to hoist the start.
 
 **Make it idempotent on the device.** Write the start command so that later invocations do nothing. Nothing has to be tracked on the Python side, which makes this the simpler of the two.
 
@@ -888,6 +916,19 @@ def start_once(request, dut, peers):
         dut.write("begin\n")
         dut.expect_exact("BEGUN")
     yield
+```
+
+**The stop side needs a decision about when.** There is nothing to make idempotent, so the trick used for the start does not apply. If the window opens once per module, stop once, after the module's last test.
+
+```python
+@pytest.fixture(autouse=True)
+def usb_host(dut, peers, request):
+    dut.write("begin\n")          # idempotent on the device: a no-op after the first
+    yield
+    items = [i for i in request.session.items if i.module is request.node.module]
+    if not items or request.node is items[-1]:
+        dut.write("stop\n")
+        dut.expect_exact("STOPPED")
 ```
 
 **The fixture scope is constrained.** `dut` and `peers` are function-scoped, so **a fixture that requests them cannot be module-scoped.** Setup fails outright. That constraint is why the guard above uses a flag.
