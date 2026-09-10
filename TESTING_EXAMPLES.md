@@ -28,6 +28,13 @@ Sizes and layouts keep changing, so this page only says **what you can see** in 
 
 - **[EspUsbDevice](https://github.com/tanakamasayuki/EspUsbDevice)** — an example of a large setup, with two wiring styles side by side: two ESP32-S3 boards checked through a peer, and a single ESP32-P4 whose two USB controllers are joined by a cable, so the board tests itself. It reads as one library verified through two different arrangements. Its `tests/conftest.py` audits the serial logs and adds the findings to pytest's report.
 
+## Unit tests with no core at all
+
+Pure C++ that touches no Arduino API does not need a host core either. These tests call the compiler themselves and run the resulting binary. It is the fastest option available, and the trade-off is that nothing wraps the OS-dependent parts for you.
+
+- **[EspBle / tests/unit](https://github.com/tanakamasayuki/EspBle/tree/main/tests/unit)** — a directory per subject, each holding a `.cpp` and the pytest file that builds and runs it. Codecs, parsers and lookup tables. Note the compiler flags: one of them pins the signedness of `char`, because the host and the target do not agree on it.
+- **[EspUsbDevice / tests/unit/keymap](https://github.com/tanakamasayuki/EspUsbDevice/tree/main/tests/unit/keymap)** — the same shape with a twist worth reading. The logic under test lives in a source file that cannot be compiled on the host, so instead of copying it the test extracts the pieces it needs from the real sources at run time and compiles those. The assertions run against the production tables rather than a duplicate that could drift.
+
 ## Build tests in CI
 
 The guides put build tests outside this plugin: no device, no serial, just `arduino-cli compile` over a matrix. These are real workflows in the shapes [Advanced Testing](TESTING_ADVANCED.md) describes.

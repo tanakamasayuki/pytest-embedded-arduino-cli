@@ -2,7 +2,7 @@
 
 [日本語](TESTING_ADVANCED.ja.md)
 
-A follow-on from [Testing Basics](TESTING_BASICS.md). It covers the traps that are easy to fall into on real hardware, and what to do when the standard features are not enough.
+A follow-on from [Testing Basics](TESTING_BASICS.md). It covers the traps that are easy to fall into on real hardware, and what to do when the standard features are not enough. When something has already gone wrong, [the FAQ](TESTING_FAQ.md) indexes this guide by symptom.
 
 ## pytest fundamentals
 
@@ -697,6 +697,14 @@ A plan is not one run. It is several layers, cheap and frequent at the bottom, e
 3. **A clean full run, with `--clean`.** Everything, from scratch, in one invocation. This is where order dependence and leftover state surface, which is exactly what running a subset hides. Before a merge or a release.
 4. **Build tests.** Compile the examples for every profile you claim to support. No device, no serial, no judgement about behaviour — only "does it still build".
 5. **Manual tests, where they apply.** Things a person has to look at, listen to, or unplug. They stay out of the default run, and where they belong in the order depends on what they check.
+
+**Plain pytest coexists with all of this.** A test that takes neither `dut` nor `peers` is an ordinary pytest test, and it runs in the same invocation as everything else. Checking a data table, a generated header, the bytes of a descriptor — none of that involves a core, so write it as normal Python and simply do not depend on the device fixtures.
+
+**There is one condition, and it is not the fixtures.** What triggers a compile and an upload is **an `.ino` sitting in the same directory**, not whether a test asked for `dut`. Put a hardware-free test next to a sketch and the build runs before it anyway, for nothing. **Keep those tests in a directory with no `.ino`** and the plugin does nothing at all for them.
+
+**Below the host core there is one more option.** Code that touches no Arduino API at all — a codec, a parser, a lookup table — can be compiled straight with the system compiler and run as an ordinary program. The test calls the compiler, then runs the binary and checks its exit status. It needs neither a board nor a core install, and it is the fastest thing available.
+
+**What you give up is the wrapping.** A host core hides the OS-dependent parts for you; a bare compiler call does not. The compiler's name, the flags, the path the binary lands at, even the signedness of `char` — which differs between your machine and the target — are all yours to get right, and nothing checks them for you. **The result may not run on another OS, or on a CI runner that is not yours.** Take this route when the code under test really is OS-independent, and go in knowing the harness around it is not.
 
 **About `--clean` on the full run.** It passes through to the compile, so nothing from a previous build is reused, and this plugin also clears the ArduTest artifacts before the run. **Most of the time you can leave it off** — an incremental build is much faster and nothing goes wrong. **Put it on when you have bumped a library or the core version.** Reuse is what makes the ordinary build fast, and a version bump is exactly when you no longer want it. **Before a release, run the full test with `--clean`.**
 
