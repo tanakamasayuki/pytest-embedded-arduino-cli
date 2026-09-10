@@ -688,6 +688,39 @@ Adding a second test to a module is cheap in itself. The upload happens once per
 
 A test plan breaks down when tests start depending on each other, not when they multiply. And **the moment you have to care about order, that test is designed wrong.** The reverse-order check below is not a tool for managing order. **It is a tool for finding design errors.** When it finds one, fix the design rather than pinning the order.
 
+### The layers of a plan
+
+A plan is not one run. It is several layers, cheap and frequent at the bottom, expensive and rare at the top. Each layer answers a question the layer under it cannot.
+
+1. **Unit tests on a host core.** No hardware, so they run anywhere including CI, and several can run at once. Logic, parsing, state machines. Run these the most often — they are the cheapest thing you own, and nothing above them tells you a boundary condition is wrong as quickly.
+2. **Module tests for what you just touched.** Real hardware, but only the modules related to the change in front of you. This is the loop you sit in while working.
+3. **A clean full run, with `--clean`.** Everything, from scratch, in one invocation. This is where order dependence and leftover state surface, which is exactly what running a subset hides. Before a merge or a release.
+4. **Build tests.** Compile the examples for every profile you claim to support. No device, no serial, no judgement about behaviour — only "does it still build".
+5. **Manual tests, where they apply.** Things a person has to look at, listen to, or unplug. They stay out of the default run, and where they belong in the order depends on what they check.
+
+**About `--clean` on the full run.** It passes through to the compile, so nothing from a previous build is reused, and this plugin also clears the ArduTest artifacts before the run. **Most of the time you can leave it off** — an incremental build is much faster and nothing goes wrong. **Put it on when you have bumped a library or the core version.** Reuse is what makes the ordinary build fast, and a version bump is exactly when you no longer want it. **Before a release, run the full test with `--clean`.**
+
+**The build layer is the one this plugin does not cover.** Everything else here runs through it, manual tests included — those are the same machinery, merely excluded from the default selection. A build test has no device, no serial port and no fixture to ask for: it is `arduino-cli compile` over a matrix. Wire it up separately rather than waiting for the plugin to grow into it.
+
+**Nothing below the build layer asks its question**, because each of those runs builds one sketch for one profile. A change can pass every device test you own and still break a profile you never flash.
+
+### Build tests grow with the product, not the sum
+
+Examples times profiles. One more example adds a row, one more profile adds a column, and a compile is not fast. Run the whole grid on every push and you will stop pushing. Split it in two.
+
+- **A narrow check on every push.** The profiles that matter most, all examples. Enough to catch a change that breaks the build.
+- **The full sweep on demand.** Every profile, or every core version. Before a release, by hand, not on every push.
+
+**Parallelism is what makes the sweep bearable**, and hosted CI hands it to you: one job per profile or per core version, running at the same time, so the wall clock becomes the slowest job instead of the sum. GitHub Actions' matrix is the usual way. What matters in practice:
+
+- **One failure must not cancel the other jobs.** A build matrix is a coverage report and you want every cell, so turn off fail-fast.
+- **Cache the installed platform**, keyed on whatever pins its version, so a job that is not bumping the core does not download it again.
+- **A coverage matrix should record pass, fail or not-applicable per cell and still exit successfully.** A red cell is information. A gate that has to block a merge is a separate job with a separate rule.
+- **Watch the disk.** A platform install can be large, and several in one job may not fit. Decomposing into one core version per job is the way out.
+- **Skip cleanly.** An example that does not declare a given profile should be reported as not applicable, not as a failure.
+
+Real workflows in the shapes above are linked from [Example Projects](TESTING_EXAMPLES.md).
+
 ### Three shapes that do not work
 
 These three turned up in practice. All of them depend on what an earlier test did, and all of them are design errors. Remove the dependency rather than working around it by fixing the order.

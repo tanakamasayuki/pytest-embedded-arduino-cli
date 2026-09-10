@@ -28,6 +28,15 @@ Sizes and layouts keep changing, so this page only says **what you can see** in 
 
 - **[EspUsbDevice](https://github.com/tanakamasayuki/EspUsbDevice)** — an example of a large setup, with two wiring styles side by side: two ESP32-S3 boards checked through a peer, and a single ESP32-P4 whose two USB controllers are joined by a cable, so the board tests itself. It reads as one library verified through two different arrangements. Its `tests/conftest.py` audits the serial logs and adds the findings to pytest's report.
 
+## Build tests in CI
+
+The guides put build tests outside this plugin: no device, no serial, just `arduino-cli compile` over a matrix. These are real workflows in the shapes [Advanced Testing](TESTING_ADVANCED.md) describes.
+
+- **[EspUsbHost / build-check.yml](https://github.com/tanakamasayuki/EspUsbHost/blob/main/.github/workflows/build-check.yml)** — the every-push shape. A matrix runs one job per profile, each building all the examples, with fail-fast turned off and the platform cache keyed on the `sketch.yaml` files. An example that does not declare a profile is skipped for that target rather than failing it.
+- **[EspUsbHost / version-matrix.yml](https://github.com/tanakamasayuki/EspUsbHost/blob/main/.github/workflows/version-matrix.yml)** — the on-demand sweep. Manual only, decomposed into one job per core version because several installs do not fit in one runner, then aggregated into a Markdown matrix that is committed to the repository. It records pass, fail or not-applicable per cell and exits successfully, so a red cell does not fail the job.
+- **[EspBle / compile-examples.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/compile-examples.yml)** — the simplest shape: one job walking every `sketch.yaml` under `examples/` and compiling each with its own profile. Start here when a matrix is more than you need.
+- **[EspBle / board-matrix.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/board-matrix.yml)** — every example against every target board for one core version, kept manual, writing a coverage document into the repository.
+
 ## Reference
 
 - **[ArduTest](https://github.com/tanakamasayuki/ArduTest)** — a library for deciding pass or fail on the device, used through the `arduino_test` fixture. It is one way to put the judgement on the device and you do not need it: Unity works, and so does simply printing the result from the sketch and checking it on the host. Convenient when it fits, nothing more.

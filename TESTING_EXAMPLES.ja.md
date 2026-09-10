@@ -28,6 +28,15 @@
 
 - **[EspUsbDevice](https://github.com/tanakamasayuki/EspUsbDevice)** — 大きな構成の例です。2 通りのつなぎ方が同居しています。ESP32-S3 を 2 台使って peer 経由で確認するものと、ESP32-P4 を 1 台だけ使い、その 2 つの USB コントローラをケーブルで繋いで、ボードが自分自身をテストするものです。同じライブラリを別の構成で検証している例として読めます。`tests/conftest.py` では、シリアルログを検査して pytest の報告に足しています。
 
+## CI でのビルドテスト
+
+ガイドではビルドテストをこのプラグインの外に置いています。device も serial も無く、matrix で `arduino-cli compile` を回すだけのものです。[応用編](TESTING_ADVANCED.ja.md)で説明した形の、実物のワークフローです。
+
+- **[EspUsbHost / build-check.yml](https://github.com/tanakamasayuki/EspUsbHost/blob/main/.github/workflows/build-check.yml)** — 毎 push 側の形です。matrix で profile ごとに 1 ジョブを立て、各ジョブが全 example をビルドします。fail-fast は切ってあり、platform のキャッシュは `sketch.yaml` の内容をキーにしています。ある profile を宣言していない example は、失敗ではなくその対象で飛ばされます。
+- **[EspUsbHost / version-matrix.yml](https://github.com/tanakamasayuki/EspUsbHost/blob/main/.github/workflows/version-matrix.yml)** — 必要なときだけ回す掃き出しです。手動起動のみで、複数の core を 1 つのランナーに入れられないため **core version ごとにジョブを分解**し、最後に Markdown の matrix にまとめてリポジトリへコミットします。セルごとに成功・失敗・対象外を記録した上で正常終了するので、赤いセルがあってもジョブは落ちません。
+- **[EspBle / compile-examples.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/compile-examples.yml)** — いちばん単純な形です。1 ジョブで `examples/` 以下の `sketch.yaml` を辿り、それぞれの profile でコンパイルします。matrix が大げさなときはここから始めてください。
+- **[EspBle / board-matrix.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/board-matrix.yml)** — 1 つの core version に対して、全 example を全対象ボードでビルドします。手動起動のままにして、結果をカバレッジの文書としてリポジトリに書き出しています。
+
 ## 参考
 
 - **[ArduTest](https://github.com/tanakamasayuki/ArduTest)** — device 側で判定するためのライブラリです。`arduino_test` fixture から使います。判定を device 側に置く手段の 1 つで、これがなくても構いません。Unity でもよく、素朴に sketch から結果を print して host 側で判定しても同じことができます。用途に合うなら便利、という位置付けです。
