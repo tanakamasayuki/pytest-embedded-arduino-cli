@@ -223,30 +223,37 @@ As the tests grow, split what is under `tests/` by purpose.
 
 ```text
   tests/
-    unit/                  <- tests that need no board; no .ino here
-    suites/                <- hardware tests in the default run
+    unit/                  <- tests that need no board
+    single/                <- one board
+    loopback/              <- one board, with an output wired back to an input
+    peer/                  <- two or more boards
+    manual/                <- needs a person, or occasional equipment
       my_app/
         my_app.ino
         sketch.yaml
         test_my_app.py
-    manual/                <- tests needing occasional equipment or a person
     sketch_support/        <- headers shared by the sketches
     conftest.py            <- only once you actually need one
 ```
 
-The names are yours to choose. What matters is that **what runs by default is separated from what does not.**
+The names are yours to choose. **What matters is the criterion: split by what a test requires, not by what it verifies.** A directory is what you name when you run, so a directory that promises a set of equipment can be turned straight into the condition for running it, and **what runs by default stays separated from what does not.**
+
+**And keep `unit/` runnable with no board.** That is what puts it in CI: on GitHub it can run on every push and pull request alongside your other actions, because a service with no board attached can still run it. The contents can be plain Python or a host core — **a host core sketch belongs there, and an `.ino` is no problem.**
+
+**One hardware test in there turns CI red, not yellow.** A peer whose port or profile cannot be resolved is skipped quietly, but **the primary is never skipped.** The absence of the thing under test is treated as a configuration error, so with no port you get a `ValueError`. **A unit test that runs on hardware therefore goes in `single/`, not in `unit/`, whatever it is called** — checking a function inside the board with Unity or ArduTest is exactly that case. The equipment decides where it lives, not the category.
 
 Name test files after their sketch directory, as `test_<sketch name>.py`, so that they are **unique across the whole project**. Two files with the same name fail at collection time when someone runs everything. Set the default target in `pyproject.toml`.
 
 ```toml
 [tool.pytest.ini_options]
-testpaths = ["unit", "suites"]
+testpaths = ["unit", "single", "loopback", "peer"]
 ```
 
 ```bash
 cd tests
 uv run --env-file .env pytest              # only what testpaths names
 uv run --env-file .env pytest manual/      # name the occasional ones explicitly
+uv run pytest unit/                        # what CI runs; no --env-file needed
 ```
 
 ## How many boards to use
