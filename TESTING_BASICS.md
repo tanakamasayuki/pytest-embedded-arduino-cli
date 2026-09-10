@@ -164,7 +164,7 @@ With a host core you can run the sketch as a PC program. It is fast and needs no
 | The shape of a protocol exchanged over serial | Yes |
 | Peripherals such as GPIO, I2C, SPI | No |
 | Real-time timing, interrupts | No |
-| Persistence in Flash or NVS | No |
+| Persistence in non-volatile storage | No |
 | Board-specific APIs, Wi-Fi, BLE, USB | No |
 
 Running on a host core is not a substitute for testing on hardware. Results can also shift with the PC's OS, the gcc version, and how the host core implements `Serial`. Treat it as a way to iterate on logic quickly.
@@ -271,6 +271,8 @@ default_profile: host
 ```
 
 This suits checking logic, and no board has to be shared.
+
+**But a host core means one test per module.** Closing the connection ends the executable, so **a second test in the same module cannot connect**; measured, it is refused. `parametrize` fails for the same reason. To split, split the module. With no flashing to wait for and no board to share, adding a module costs comparatively little here.
 
 **Being able to run in CI is a major benefit.** A CI service such as GitHub Actions cannot have a board attached, but a host core needs none, so it just runs. Even without a bench of your own, the logic unit tests get checked automatically on every change. For a public open-source repository the free tier covers it, so it costs nothing.
 
@@ -408,9 +410,9 @@ One important conclusion follows. **The upload always resets the board. Whether 
 
 So when you add a second test to the same module, the board state that test sees depends on the board's circuit. **Writing tests that depend on neither is the only safe approach.**
 
-## Prefer one test per module
+## As a rule, one test per module
 
-Start with this shape.
+**Use this shape unless you have a specific reason not to.** The difference is not a matter of taste; treat it as the default.
 
 ```text
 tests/
@@ -420,20 +422,49 @@ tests/
     test_blink.py      <- a single def test_blink(dut)
 ```
 
-When you have more to verify, consider these two options before adding a test function.
+When you have more to verify, consider these three options before adding a test function.
 
 1. **Put it all in one larger test.** If you send commands in sequence and check the replies, you can chain as many steps as you like inside a single test.
-2. **Split the sketch itself.** A separate sketch directory becomes a separate module, each with its own upload, so the board state is always reset. If the features are genuinely different, this is the natural choice.
+2. **Keep the sketch and add a module.** Put a second test file in the same sketch directory and each becomes its own module. **This is the one to reach for when you want to split while sharing the sketch.**
+3. **Split the sketch itself.** For when the features are genuinely different and the sketch should differ too.
+
+**Options 2 and 3 behave identically.** Both produce separate modules, so **the compile and the upload run each time, and the board is reset and starts clean on each one.** The only difference is whether the sketch is shared. It costs more than splitting tests, but state independence is guaranteed. "Splitting while keeping independence" below covers it in detail.
 
 ## When multiple tests are fine
 
 Multiple tests are fine only when **every test passes when run on its own**. This is what stateless means.
 
-A test that just sends a command to `dut` and checks the reply does not depend on earlier tests, so it is stateless. Note, though, that the same thing can be achieved by sending those commands in sequence inside one larger test.
+**Some tests are naturally stateless and some are not.**
 
-Splitting is genuinely worth it when **one test takes a very long time and you want to run just that one**. Being able to try a single test without running everything speeds up development.
+- **Naturally stateless: anything determined by its inputs and outputs.** Checking a computation or a parser, or sending one command and checking the reply. No device state is involved, so the result is the same whatever position it runs in. **This is the shape of a unit test.**
+- **Not naturally stateless: anything that builds device state first.** Tests that connect, enumerate, or configure a peripheral. Left alone, they run on top of whatever the previous test left behind. Making them stateless means rebuilding the state yourself at the start.
 
-Splitting has one more benefit. **It is easier to see where a failure happened.** With five steps of verification in one test, you read the output to work out which step broke. With five tests, the name of the failing test is the answer.
+**The first kind is safe to split; the second kind is where splitting causes trouble.** The second is exactly where one test per module pays off.
+
+The first kind, the unit-test shape, is **cheaper to run on a host core**: no flashing and no hardware. But **a host core cannot split tests**, as noted above: a second test in the same module cannot connect. So **the place where they are cheapest to run is the place where they cannot be split.** For granularity there, check things in sequence inside one test, or add a module; adding a module is comparatively cheap on a host core.
+
+Note also that the first kind can be done by sending the commands in sequence inside one larger test. Splitting is not required.
+
+Beyond that, **decide whether to split by weighing the benefits against the costs.**
+
+**Laid out, the benefits are smaller than they look.**
+
+- **The name tells you where it broke.** But a merged test still prints the line that failed, and you read where it stopped either way. Having a name adds little beyond being easier to pick out of a result list. If per-check records are all you want, reporting from the device is more reliable.
+- **You can run just one.** But to carve out a slow piece of verification, **splitting the module is the better fit**: put two test files in the same sketch directory and each gets its own upload, so the state is independent too.
+- **One failure does not stop the rest from running.** This one is unique to splitting. On hardware, though, the board is often left in a bad state by the failure, so what follows may not be worth much.
+
+**Costs**
+
+- **Every test reconnects.** The upload happens once per module, so reconnecting is all that a test after the first adds. It is a small cost.
+- **Every test needs its own setup and cleanup.** When that is heavy, the time multiplies by the number of tests. In a setup that stops and restarts radio or USB each time, this becomes most of the run.
+- **The port is opened and closed once per test.** On some boards, opening it resets the board, which means **an unintended reset per test.** Where that happens the start-up runs every time and its cost is added too. And since it varies by board, **the same tests behave differently on different boards.**
+- **It opens the door to order dependence.** You then have to check that none crept in.
+
+**The rule of thumb.** Splitting is not expensive, but **it does not buy much either.** And on some boards you pay an unintended reset and a boot for every test you split off. **Take one test per module as the rule, and split only for one of the limited reasons.** When you want to split, first ask whether the sketch or the module can be split instead, or whether reporting from the device would do.
+
+If you still split, two conditions apply: **the tests stay stateless**, and **per-test setup and cleanup are light**. What decides it is the time each extra test adds, not the count.
+
+Some cases have no substitute, such as repeating with a value that varies on the host, or wanting a marker per case. They are collected under "When splitting really is required" in [Advanced Testing](TESTING_ADVANCED.md).
 
 ## The trap: depending on an earlier test breaks single runs
 
@@ -516,17 +547,25 @@ def test_count(dut):
 
 Each test establishes the state it needs. Either one passes when run alone.
 
-**Checking this is easy.** Run the tests one at a time; if they all pass, they are stateless.
+**There are two ways to check.**
+
+One is to run the tests one at a time. If they all pass, they are stateless. This is also the criterion for being able to run a single test with `-k` or a node id.
 
 ```bash
 pytest my_app/test_my_app.py::test_count
 ```
 
-In CI you can verify it mechanically by iterating over the collected node ids one by one.
+The other is to **run the module once with its tests reversed.** It costs one upload, so it is the practical everyday check. Order dependence usually shows up right here.
+
+```bash
+pytest $(pytest my_app --collect-only -q | grep '::' | tac)
+```
+
+What kinds of dependence arise, and how to fix each, is collected in "Building a clean test plan" in [Advanced Testing](TESTING_ADVANCED.md).
 
 ### Splitting while keeping independence
 
-Put two test files in the same sketch directory and each becomes its own module. The upload runs once per module, so the board is reset each time.
+This is the second option listed earlier. Put two test files in the same sketch directory and each becomes its own module. The upload runs once per module, so the board is reset each time.
 
 ```text
 tests/
@@ -537,7 +576,7 @@ tests/
     test_slow.py       <- module 2, gets another upload
 ```
 
-You pay for an extra upload, but state independence is guaranteed. This is a good way to carve out a slow test.
+**Splitting the module runs both the compile and the upload again.** The compile can be faster than the first thanks to Arduino CLI's incremental build, but it is not free. In exchange, state independence is guaranteed. This is a good way to carve out a slow test.
 
 ## The device does not answer at the start of a test
 
@@ -676,8 +715,8 @@ If you use method B on real hardware, either have the sketch repeat `READY` or m
 - Running on a host core suits logic. Peripherals, timing, persistence and radio can only be checked on hardware.
 - Zero, one, two, or three-plus boards each unlock different tests. Adding a peer is just adding a name.
 - The upload is per module, the serial connection is per test. The upload always resets the board; whether a connection does depends on the board.
-- Prefer one test per module. To verify more, use one larger test or split the sketch.
-- If you do write several tests, every one of them must pass on its own and must not depend on an earlier test.
+- **As a rule, one test per module.** Split only for one of the limited reasons. The benefits are small and the costs vary by board.
+- If you do write several tests, every one of them must pass on its own, must not depend on an earlier test, and should pass in reverse order too.
 - Wait for a reply, not for a fixed amount of time.
 
 More advanced topics are in [Advanced Testing](TESTING_ADVANCED.md). Real, working projects are collected in [Example Projects](TESTING_EXAMPLES.md).

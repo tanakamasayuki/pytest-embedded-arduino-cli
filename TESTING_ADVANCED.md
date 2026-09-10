@@ -351,6 +351,8 @@ dut.expect(re.compile(rb"data=([0-9a-f]+)\r?\n"))
 
 If another literal from the same pattern follows the capture, there is no problem: the match cannot settle until that literal arrives.
 
+**Writing `[^\r\n]*` to "stop at the end of the line" is not enough either.** It matches zero characters too, so the match settles before the line has finished arriving. To guarantee a complete line, include `\r?\n` in the pattern. In one suite an audit found three patterns of this shape, and one of them **used a value that could be truncated.**
+
 ### Output after the match is not guaranteed
 
 `dut.expect(...)` stops reading as soon as the pattern matches. Bytes the device sends after that are not guaranteed to reach `dut.log`, which can end mid-line. When you need the tail, either print an end marker and `expect` it, or drain explicitly.
@@ -361,6 +363,12 @@ import pexpect
 dut.expect_exact("the last line I care about")
 dut.expect(pexpect.TIMEOUT, timeout=2)   # read whatever still arrives
 ```
+
+### Do not blame a structural change for a failure it merely exposed
+
+When a test fails right after you change how a fixture is placed or ordered, it is tempting to conclude the change broke it. But there is a case where **all the change did was alter when lines arrive, and what was broken was the reading side, which had always been wrong.** The device log showed the state was correct; only the string the test received was cut short.
+
+**When you see a failure, check the device log first to confirm the code under test is actually wrong.** Timing-dependent bugs surface the moment you change the structure. The change exposed it; the change did not create it.
 
 ## Where logs and artifacts live
 
@@ -488,6 +496,48 @@ What to stop is up to the project. These judgements have held up in practice.
 
 **Cleanup is not a substitute for normalizing state at the start of a test.** Cleanup protects the environment. A test's own correctness, and being able to run it alone with `-k`, are the job of its own start-up. Never write a test that assumes the previous test's cleanup succeeded.
 
+### A reset does not necessarily clean anything
+
+It is tempting to think that resetting the board instead of cleaning up puts it back. **That depends on the board.** Some come back exactly as they do from power-on; on others, parts keep running. **Do not assume it without checking.**
+
+**How far a software reset initializes things is up to the board and its core.** If PWM output or driven GPIO survives, a reset is not a cleanup. And where a pin-hold feature is enabled, a reset may not release it.
+
+Take ESP32 as an example. Arduino's `ESP.restart()` calls ESP-IDF's `esp_restart()`, whose contract reads:
+
+> Peripherals (except for Wi-Fi, BT, UART0, SPI1, and legacy timers) are not reset.
+
+So on that family, PWM and GPIO keep driving. With pin hold enabled, it stays held until power is removed or the release API is called. **Other boards behave differently.** Find out what comes back on the board you use, from the core's documentation or by measuring.
+
+**A reset also runs the start-up code, which dirties things again.** This holds on any board. `setup()` executes a second time, so the advertising or the output you just stopped is recreated. The cleanup undoes itself. Avoiding that requires the sketch to start nothing at boot, as described under "Do not affect the outside world at boot".
+
+**On a board that can tell you why it started, you can branch on it.** Distinguish a cleanup restart from a normal boot and start nothing in the former case. On ESP32 that is `esp_reset_reason()`.
+
+```cpp
+// on ESP32
+void setup()
+{
+  Serial.begin(115200);
+
+  if (esp_reset_reason() == ESP_RST_SW)
+  {
+    // restarted for cleanup: start nothing that reaches outside
+    return;
+  }
+
+  startEverything();
+}
+```
+
+Make sure `loop()` does not start it either. That API distinguishes power-on, software reset, panic, watchdogs and more, and which reasons should lead to staying idle is yours to decide. **On a board with no equivalent, this branch cannot be written.** There, do not lean on a reset; call the API that stops the thing.
+
+**Resetting the MCU does not put the outside world back.** A servo keeps its angle, a relay keeps its contact, a latching display keeps what it shows. Devices on I2C or SPI keep their own configuration. The other end of a radio link never learns you reset. **Treat a reset as affecting the inside of the MCU only.** That much is true on any board.
+
+**Non-volatile storage survives by design.** Settings or logs a test wrote are still there after a reset. Clear them explicitly, or use whatever erase-on-upload facility your core offers. On ESP32 with NVS, that is the erase setting applied at upload time.
+
+**On some boards a reset drops the port and re-enumerates it**, which is the case for native USB boards. A reset meant as cleanup can change what the next run connects to.
+
+**How to initialize state differs per board and per feature.** There is no single procedure. For each thing you want stopped, find and call the API that stops it. **A reset is the last resort.** Calling the stop API is faster, more certain, and easier to reason about.
+
 ### A backstop for when the cleanup command never arrives
 
 A sketch that has hung or crashed never reads the cleanup command. **And those are exactly the runs that leave the worst residue.** On a bench shared with other projects, the board is handed over still transmitting or still presenting USB.
@@ -608,7 +658,7 @@ For work such as symlinking a local platform into the Arduino directory. It has 
 
 It is tempting to check the board's state after a run, but **connecting to the same board and asking gives an answer you cannot trust.**
 
-Opening the serial port makes pyserial assert DTR and RTS. That is the default behaviour of opening a port, not something the plugin does to force a reset. On a board that wires those two lines straight to EN, it is a reset. What answers your query is then a freshly booted sketch. Check that advertising really stopped and you get the boot state back, which looks like a failure. Dropping both lines before opening does not help. In one real case the peer answered `ADVERTISING 1` and a Classic DUT simply replayed its startup output.
+Opening the serial port makes pyserial assert DTR and RTS. That is the default behaviour of opening a port, not something the plugin does to force a reset. On a board that wires those two lines straight to the reset pin, it is a reset. What answers your query is then a freshly booted sketch. Check that advertising really stopped and you get the boot state back, which looks like a failure. Dropping both lines before opening does not help. In one real case the peer answered `ADVERTISING 1` and a Classic DUT simply replayed its startup output.
 
 **Whether it resets depends on the board.** Boards with an auto-reset circuit in between usually do not reset on a plain open. Nor do native USB CDC boards, though they reboot when the port is opened at 1200 bps. **Either way, connecting to the target board to check is not trustworthy.** On a resetting board you read the boot state, and even on a board that does not reset, the connection itself can affect what the sketch does.
 
@@ -626,6 +676,229 @@ There is one condition that could justify it: **a board that resets on connect t
 
 A project that truly needs it has a way out. `pytest-embedded`'s `Serial` accepts an already-constructed pyserial object in place of a port string. A conftest can override the `serial` fixture, prepare the object with `do_not_open=True`, set DTR and RTS, and then open it. The right choice is board-specific, which makes it conftest material rather than a plugin option.
 
+## Building a clean test plan
+
+Adding a second test to a module is cheap in itself. The upload happens once per module, so a test after the first adds only a reconnect. Two things make it expensive: **per-test setup and cleanup**, and **order dependence**. The first costs time, the second costs complexity.
+
+A test plan breaks down when tests start depending on each other, not when they multiply. And **the moment you have to care about order, that test is designed wrong.** The reverse-order check below is not a tool for managing order. **It is a tool for finding design errors.** When it finds one, fix the design rather than pinning the order.
+
+### Three shapes that do not work
+
+These three turned up in practice. All of them depend on what an earlier test did, and all of them are design errors. Remove the dependency rather than working around it by fixing the order.
+
+**1. Free-riding on state an earlier test created.** Asserting on an accumulating value, such as a counter or a connection count, that an earlier test produced.
+
+- Symptom: it fails when run on its own.
+- Fix: establish the state yourself at the start.
+
+**2. Depending on being first.** Waiting for a line the sketch prints once at boot. Let another test run first and that line has already gone by.
+
+- Symptom: it passes alone but fails with the whole module, and fails when reordered.
+- Fix: stop waiting for the announcement and query the state instead.
+
+**3. Asserting a pristine state that another test dirties.** One test assumes nothing is connected while another deliberately leaves a connection up.
+
+- Symptom: the result changes with the execution order.
+- Fix: rebuild the state you assume at the start of the test. If there seems to be no way to rebuild it, read the next section but one.
+
+### Split the module for a destructive test
+
+Some tests leave the board unusable: they disable a peripheral, or write a setting that only a reset undoes. Such a test looks as though it has to run last.
+
+**That is not a reason to order several tests; it is a reason to split the module.** Put it in its own module and the next upload restores the board, so **the ordering constraint disappears entirely.** Separating the test files inside the same sketch directory is enough.
+
+The same goes for a test that runs for a long time to measure how a resource grows. If you do not want it mixed in with the others, arrange things so it is not mixed in. Making the shape that needs no rule beats writing down a rule that says "this one runs last".
+
+### Two checks
+
+**Run the module once in reverse.** This is the everyday check. It costs one upload and catches all three shapes above. **The second one in particular is invisible to running tests alone**, because a test run by itself is always first.
+
+```bash
+pytest $(pytest my_app --collect-only -q | grep '::' | tac)
+```
+
+You can also put it in a `conftest.py` and switch it on when you want it.
+
+```python
+def pytest_collection_modifyitems(items):
+    items.reverse()
+```
+
+**Run them one at a time.** This is the criterion for being able to run a single test with `-k` or a node id. It pays one upload per test, so use it to confirm the rule rather than as the daily check.
+
+```bash
+pytest my_app/test_my_app.py::test_count
+```
+
+**With either check, the point is to actually run it.** The suspicion that a test only passes because of an earlier test's side effect **cannot be settled by reading the code or grepping for it.** In practice the misreadings went both ways: a test classified as querying turned out to be reading start-up output, and a test assumed to be waiting for a connection notice turned out to query first. Do not take comfort in a static count. Change the order and run it.
+
+### Query the state instead of waiting for an announcement
+
+Shapes 2 and 3 both disappear with one change. **Stop waiting for a line printed once at boot, and give the sketch a command that reports the current value at any time.**
+
+```cpp
+  else if (line == "state?")
+  {
+    Serial.print("STATE conn=");
+    Serial.println(connected ? 1 : 0);
+  }
+```
+
+The test asks for it. Whatever position it runs in, an answer comes back.
+
+**Merging into one larger test removes the symptom; querying removes the cause.** Merging fixes the order by freezing it, but the dependency is still there. Querying makes the test work in any order.
+
+### Being able to stop and start widens what you can fix
+
+A test asserting a state that only holds right after boot fails as soon as another test runs first. That is a design error, but **you cannot fix it without a means to.** There is a real case of someone concluding "no command exists to put the host back, so the order has to live inside the test" and merging two tests. Merging only pins the order; the dependency is still there.
+
+If the device can be stopped and started again, that state can be rebuilt at any time. Stop at the top of the test, start again, wait for the enumeration or the connection, then assert. The dependency on order disappears and the one-test-per-module shape survives.
+
+```text
+stop -> start -> wait until ready -> assert
+```
+
+Stop and start commands usually exist for a different reason, to avoid affecting the outside world at boot. **Machinery added to close the flashing window turns out, as a by-product, to be the means of fixing order dependence.** Gating does not only make the error findable through the reverse-order check; it makes the error fixable.
+
+The price is the time to rebuild: whatever enumerating or reconnecting costs. It is still cheaper than a reverse-order check that stays red forever, and cheaper again when once per module is enough.
+
+**Before concluding that merging is the only option because nothing can put the device back, check whether you can build that means.** A merge is usually the result of skipping that check.
+
+### Get granularity from the device side
+
+Splitting tests gives you the name of what broke, but the device can give you the same thing. The sketch runs several checks, prints the results and the counts, and one pytest test reads that. One upload, one connection, and the sketch names the check that failed.
+
+```text
+TEST_END pass=37 fail=0
+```
+
+**This form has a limit.** It can only judge what the device knows. **Evidence that exists only on the host cannot be judged there**: what the other side parsed out of a descriptor, which endpoint addresses it assigned, and so on. Keep those checks on the host side.
+
+Note that needing the device to present itself differently per case is not a reason to abandon the form. A device can re-enumerate without being reflashed, so one sketch can rebuild itself as something else. That costs enumeration time, not an upload.
+
+### What splitting buys is less than it looks
+
+Time alone makes merging look like the obvious win. So lay out what splitting gives you, and every item turns out to be better served some other way.
+
+- **The name tells you where it broke.** But a merged test still prints the line that failed, and you read where it stopped either way. Having a name adds little beyond being easier to pick out of a result list. **If per-check records are what you want, reporting from the device is more reliable.**
+- **You can run just one.** To carve out a slow piece of verification, **splitting the module fits better.** Two test files in the same sketch directory become two modules, each with its own upload, so the state is independent too. But **every module you split off runs both the compile and the upload again.** The compile can be faster than the first thanks to the incremental build, but it is not free. A module per case is expensive, so carve out only the heavy ones.
+- **One failure does not stop the rest.** This one is unique to splitting. On hardware, though, the failure leaves the board in a bad state. What follows is not just unreliable: **the next test sees the half-finished state and unrelated failures pile up.** One suite had exactly that happening until cleanup was added. Continuing can do harm rather than good.
+
+**The reverse-order check also only exists once you have split.** That one can be a reason to split, and the next section covers it.
+
+So **there is almost no positive reason to put several tests in one module. Treat one test per module as the rule.** When you want to split, first ask whether the module can be split instead, or whether reporting from the device would do. If you split anyway, the added time is governed by the formula further below.
+
+### When splitting really is required
+
+Almost never, in truth. In one suite where the multi-test modules were counted and examined, **most of them had no reason beyond having been written that way.** Even so, two things are lost for good once you merge. Both have the same shape: wanting to attach something per case.
+
+**First, repeating over values can be written inside a test.** Trying a range of payload sizes needs no extra tests. Collect the failures and assert at the end, and it does not stop at the first one either.
+
+```python
+def test_payload(dut):
+    failures = []
+    for size in (1, 64, 512):
+        dut.write(f"send {size}\n")
+        try:
+            dut.expect_exact(f"SENT {size}", timeout=5)
+        except Exception:
+            failures.append(size)
+    assert not failures, f"failed sizes: {failures}"
+```
+
+**1. When something has to be attached per case.** This is the real dividing line. A loop cannot mark one of its values, nor select one of them to run.
+
+- **pytest markers.** `xfail` for a known bug, `slow` for the heavy one, `skipif` for an environment dependency. You cannot mark part of a test.
+- **Selection with `-k` or a node id.** Running one specific value to investigate it is not something a loop offers.
+- **Project-specific machinery keyed on node id**, such as a conftest that audits serial logs and holds an allowlist of lines permitted for one particular case.
+
+The third has a real instance. In a module of eighteen operations, exactly one legitimately provokes an error line that the specification allows. Keyed per case, only that one is permitted. **Merge the module and the permission has to widen to cover all of it, so the same line goes unnoticed where it should not be allowed.**
+
+When a value-driven repetition needs this, use `@pytest.mark.parametrize`. **The compile and the upload still happen once per module**, each value becomes an independent test named like `test_payload[512]`, and markers can be attached per value.
+
+**But parametrize is board-dependent too.** On a board that resets on every connection, you re-run the boot once per value, and re-establish per-value state on top of that. Where closing the connection ends the process, as with a host core, the second case cannot even connect. **Repeating over values alone can be written as a loop, so look at how your board behaves before choosing.**
+
+```python
+import pytest
+
+
+@pytest.mark.parametrize("size", [1, 64, 512])
+def test_payload(dut, size):
+    dut.write(f"send {size}\n")
+    dut.expect_exact(f"SENT {size}")
+```
+
+But **finer is not automatically better.** That same allowlist also had an entry written broadly on purpose, for a transient that lands on a different case every run: a property of the run, not of any one case. **Match the key to the actual scope of the thing.**
+
+**2. When you want to find vacuous assertions.** This differs in kind from the other one: it is about the quality of the tests rather than of the product.
+
+The reverse-order check only means anything **where state is shared**, and state is shared only inside a module. All three alternatives destroy the check.
+
+- **Merge into one test.** The order assumptions move into the test body, out of the check's reach.
+- **Split into modules.** Every module begins with an upload and a boot, so the premise always holds and the check runs empty.
+- **Report from the device.** The order is fixed in firmware; reordering means reflashing.
+
+And what the check finds is not only order dependence. It also finds **assertions satisfied by the environment rather than by the code under test.** In one real case, an assertion meant to verify that discovery does not claim a device was only ever zero because it ran right after boot. **That assertion could not fail.** Rewritten to establish its premise explicitly, it can.
+
+Take any of the alternatives and such an assertion stays in place, silently, and always green.
+
+In short: **several tests are not required for expressiveness. They are required for detection.**
+
+**Economics is not a reason.** "Rebuilding per case is cheaper than uploading per case" is true, but it is a comparison against several modules. Merging into one test costs about the same, so economics never argues for several tests.
+
+**"Only this case needs a different environment" deserves checking before you say it.** In one instance, four tests believed to need a separate profile all passed on the same profile once the feature they depended on had shipped. Reasons of this shape can evaporate on inspection.
+
+### Hoist heavy setup out of the per-test path
+
+The time that splitting adds is governed by this.
+
+```text
+added time = (number of tests - 1) x measured per-test setup and cleanup
+```
+
+Argue about splitting versus merging without measuring the second factor and you will not reach an answer. **"It is slow because there are many tests" is a misdiagnosis. It is slow because per-test setup is heavy.** The very same act of adding one test costs wildly different amounts depending on the arrangement: reconnecting and nothing else is not remotely comparable to stopping and restarting radio or USB every time.
+
+**"That mechanism is expensive" and "paying for that mechanism every time is expensive" are different statements.** In practice, paying for the machinery that closes the flashing window on every test stretched the run substantially, while moving it to once per module produced the same cleanliness in nearly the same time as not having it at all. **Almost all of the added time came from where it sat, not from the feature itself.** When something feels expensive, suspect its placement first.
+
+**When it turns out to be heavy, the fix is to hoist it, not to merge.** Merging does make it faster, but the cost comes back once per module: twenty modules pay it twenty times. Move the setup out of the per-test path and the saving holds regardless of test count. **Try hoisting first, and consider merging only if that is not enough.**
+
+There are two ways to hoist.
+
+**Make it idempotent on the device.** Write the start command so that later invocations do nothing. Nothing has to be tracked on the Python side, which makes this the simpler of the two.
+
+```cpp
+  else if (line == "begin")
+  {
+    if (!started)
+    {
+      started = true;
+      // the actual start-up work
+    }
+    Serial.println("BEGUN");
+  }
+```
+
+**Do it once from Python.** Guard the work with a per-module flag.
+
+```python
+@pytest.fixture(autouse=True)
+def start_once(request, dut, peers):
+    if not getattr(request.module, "_started", False):
+        request.module._started = True
+        dut.write("begin\n")
+        dut.expect_exact("BEGUN")
+    yield
+```
+
+**The fixture scope is constrained.** `dut` and `peers` are function-scoped, so **a fixture that requests them cannot be module-scoped.** Setup fails outright. That constraint is why the guard above uses a flag.
+
+```text
+ScopeMismatch: You tried to access the function scoped fixture peers
+with a module scoped request object.
+```
+
+**Ordering has a trap too.** An autouse fixture that starts something **runs before the peer upload unless it takes `peers` as an argument.** Take it for the ordering alone, even when you never use the value. Forget it and the start happens while the peer is being flashed, so whatever you put in place to avoid exactly that never takes effect. In the log you see the start recorded, immediately followed by errors caused by the flashing.
+
 ## Principles for peer tests
 
 Policies that have held up for tests with two or more boards.
@@ -636,7 +909,7 @@ Policies that have held up for tests with two or more boards.
 - **Allow a timeout for transient radio delays, but do not retry without limit.** Unlimited retries hide defects.
 - **Cross-check the disconnect reason, the MTU and the security state on both sides** wherever you can.
 - **Where possible, make one side a direct implementation over the standard library.** Two copies of your own library cannot demonstrate interoperability.
-- **For tests that carry state, state the state at start and at end explicitly.** This matters most for things that survive a run, such as bonds and NVS.
+- **For tests that carry state, state the state at start and at end explicitly.** This matters most for things that survive a run, such as pairing information and non-volatile storage.
 
 ## Do not affect the outside world at boot
 
