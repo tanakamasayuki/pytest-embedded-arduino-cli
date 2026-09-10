@@ -242,16 +242,18 @@ uv run --env-file .env pytest my_app
 
 **実機テストが 1 本混ざると、CI は赤くなります。skip ではありません。** peer は port や profile を解決できなければ静かに skip されますが、**primary は skip されません。** 被テスト対象が無いことは設定の誤りとして扱われるので、port が無ければ `ValueError` になります。**「実機で走るユニットテスト」は、ユニットという名前でも `unit/` ではなく `single/` などに置いてください。** Unity や ArduTest でボードの中の関数を確かめるものがこれにあたります。分類ではなく、必要な機材で置き場所が決まります。
 
-テストファイルの名前は `test_<sketch 名>.py` のように、**プロジェクト全体で一意になるよう**付けてください。同じ名前のファイルが 2 つあると、全体を流したときに collection のエラーになります。既定の対象は `pyproject.toml` で決められます。
+テストファイルの名前は `test_<sketch 名>.py` のように、**プロジェクト全体で一意になるよう**付けてください。同じ名前のファイルが 2 つあると、全体を流したときに collection のエラーになります。既定の対象は `pyproject.toml` で決められます。**列挙するより、除外するほうを勧めます。**
 
 ```toml
 [tool.pytest.ini_options]
-testpaths = ["unit", "single", "loopback", "peer"]
+# 既定は「全部から、既定で流さないものを引いたもの」。
+# 列挙にすると、後で足したディレクトリを書き忘れたときに静かに落ちます。
+norecursedirs = ["manual", "*/build", "*/output"]
 ```
 
 ```bash
 cd tests
-uv run --env-file .env pytest              # testpaths のものだけ
+uv run --env-file .env pytest              # 除外したディレクトリ以外の全部
 uv run --env-file .env pytest manual/      # 臨時のものを明示して実行
 uv run pytest unit/                        # CI で回すのはここだけ。--env-file も要りません
 ```

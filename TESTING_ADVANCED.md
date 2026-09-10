@@ -164,17 +164,31 @@ These are the settings you reach for most.
 | Setting | What it does |
 | --- | --- |
 | `testpaths` | Which directories to run when given no arguments |
+| `norecursedirs` | Which directories collection does not descend into |
 | `addopts` | Options added to every run |
 | `markers` | Registering your own markers |
 | `filterwarnings` | How warnings are treated |
 
 This plugin's own repository sets `testpaths = ["tests"]` in `pyproject.toml`, so a bare `pytest` runs only the plugin's own tests. Running anything under `examples/` means naming it explicitly.
 
-**Whether to write `testpaths` at all is worth deciding deliberately.** Writing it defines what a bare `pytest` runs and keeps `manual/` out without needing a marker. Leaving it out means a directory added later is picked up on its own. The argument against writing it is real: **add a suite directory, forget to list it, and its tests silently drop out of the default run.** Nothing warns. The run reports all green while a whole directory goes unexecuted, which is the same shape as a check that quietly stops checking.
+**`testpaths` is a convenience, not a guard, and it is worth being clear which one you wanted.** It decides what a bare `pytest` collects. **Name a path and it is ignored**, so `pytest manual` runs everything named `test_*.py` under `manual/` regardless of what `testpaths` says. If you were relying on it to keep something from running by accident, it was never doing that job.
 
-**The two mistakes are not symmetric.** Forgetting to extend an allowlist gives you a **silent** under-run. Forgetting to extend a denylist gives you a **loud** over-run — a manual test firing in CI is annoying, but you find out. **When in doubt, put the explicitness where a mistake is loud:** leave `testpaths` unset and exclude only what must not run by default, with a marker or `norecursedirs`.
+It has a second weakness, in the direction people usually argue about. **Add a suite directory, forget to list it, and its tests silently drop out of the default run.** Nothing warns; the run reports all green while a whole directory goes unexecuted, which is the same shape as a check that quietly stops checking.
 
-**If you do write it, make the omission fail.** One test that counts the directories and compares them against the setting turns the silent case into a red one. It needs no hardware, so it belongs wherever your hardware-free tests live.
+**`norecursedirs` is the better tool for the same job.** It names directories collection does not descend into, so the default becomes everything minus what you excluded. **A directory added later is picked up on its own**, which removes the silent case entirely — that is the whole difference, and it is why one project switched to it with the reasoning written into the config comment.
+
+**Neither of them is a guard, though.** Measured against naming the directory directly, both let it run.
+
+| Mechanism | Bare `pytest` | The directory named | A directory added later |
+| --- | --- | --- | --- |
+| `testpaths` | excluded | **runs** | **silently dropped** |
+| `norecursedirs` | excluded | **runs** | picked up |
+| a marker plus `addopts = -m "not manual"` | excluded | deselected | picked up |
+| dropping the `test_` prefix | excluded | nothing collected | picked up |
+
+The marker survives a named path because `addopts` is added to every run, not just the bare one. **Dropping the prefix is stronger still, because it depends on no configuration at all** — the file is invisible to collection until you name the file itself, so no config mistake can expose it. That is the form *What cannot be detected automatically stays out of the default run* recommends, and this is why.
+
+**So: exclude with `norecursedirs` rather than listing with `testpaths`, and guard with the prefix.** If you list with `testpaths` anyway, close the silent-omission case with one test that compares the directories against the setting. It needs no hardware.
 
 ```python
 TESTS_ROOT = Path(__file__).resolve().parents[1]
@@ -191,8 +205,6 @@ def test_testpaths_cover_every_suite(pytestconfig):
     unaccounted = found - listed - EXCLUDED
     assert not unaccounted, f"in neither the default set nor the excluded set: {sorted(unaccounted)}"
 ```
-
-That settles the argument rather than picking a side in it: **you keep the explicit list, and the one real objection to it becomes a failing test.** Naming a path on the command line ignores `testpaths` as usual, so `pytest manual/` is unaffected.
 
 How to separate tests whose availability depends on the bench is covered in the next section.
 
