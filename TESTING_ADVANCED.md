@@ -186,6 +186,8 @@ It has a second weakness, in the direction people usually argue about. **Add a s
 | a marker plus `addopts = -m "not manual"` | excluded | deselected | picked up |
 | dropping the `test_` prefix | excluded | nothing collected | picked up |
 
+**And `pytest .` is not the same as `pytest`.** Naming a path ignores `testpaths`, and `.` is a path. So a suite kept out only by `testpaths` starts running the moment somebody types the dot — measured, the bare run collected the listed directory alone while `pytest .` collected the excluded one as well. An absolute path and `./` behave the same way. **`norecursedirs` is unaffected**, because it governs what recursion descends into rather than where collection starts, and `.` still has to recurse. This is the same trap as naming the directory outright, except that **nobody thinks of `pytest .` as naming a directory**, which is what makes it the one worth knowing.
+
 The marker survives a named path because `addopts` is added to every run, not just the bare one. **Dropping the prefix is stronger still, because it depends on no configuration at all** — the file is invisible to collection until you name the file itself, so no config mistake can expose it. That is the form *What cannot be detected automatically stays out of the default run* recommends, and this is why.
 
 **So: exclude with `norecursedirs` rather than listing with `testpaths`, and guard with the prefix.** If you list with `testpaths` anyway, close the silent-omission case with one test that compares the directories against the setting. It needs no hardware.
