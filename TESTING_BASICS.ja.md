@@ -223,30 +223,37 @@ uv run --env-file .env pytest my_app
 
 ```text
   tests/
-    unit/                  <- ボードを使わないテスト。.ino を置かない
-    suites/                <- 既定で流す実機テスト
+    unit/                  <- ボードが要らないテスト
+    single/                <- ボード 1 台
+    loopback/              <- ボード 1 台 + 出力を入力へ折り返した配線
+    peer/                  <- ボード 2 台以上
+    manual/                <- 人の操作や、臨時の機材が必要なもの
       my_app/
         my_app.ino
         sketch.yaml
         test_my_app.py
-    manual/                <- 臨時の機材や人の操作が必要なテスト
     sketch_support/        <- sketch 側で共有するヘッダ
     conftest.py            <- 必要になったときだけ
 ```
 
-名前はプロジェクトの自由です。大事なのは、**既定で流すものと、そうでないものが分かれていること**です。
+名前はプロジェクトの自由です。**大事なのは切り方で、「何を確かめるか」ではなく「何を必要とするか」で分けてください。** 実行するときに選ぶのはディレクトリなので、ディレクトリが機材の約束になっていると、その約束をそのまま実行の条件にできます。
+
+**そして `unit/` だけは、ボード無しで動くようにしてください。** そうすると CI に載ります。GitHub なら push や pull request のたびに、他のアクションと一緒に回せます。ボードを繋げないサービスでも、`unit/` は繋ぐ必要が無いからです。中身は素の Python でも host core でも構いません。**host core の sketch を置くのは想定どおりで、`.ino` があっても問題ありません。**
+
+**実機テストが 1 本混ざると、CI は赤くなります。skip ではありません。** peer は port や profile を解決できなければ静かに skip されますが、**primary は skip されません。** 被テスト対象が無いことは設定の誤りとして扱われるので、port が無ければ `ValueError` になります。**「実機で走るユニットテスト」は、ユニットという名前でも `unit/` ではなく `single/` などに置いてください。** Unity や ArduTest でボードの中の関数を確かめるものがこれにあたります。分類ではなく、必要な機材で置き場所が決まります。
 
 テストファイルの名前は `test_<sketch 名>.py` のように、**プロジェクト全体で一意になるよう**付けてください。同じ名前のファイルが 2 つあると、全体を流したときに collection のエラーになります。既定の対象は `pyproject.toml` で決められます。
 
 ```toml
 [tool.pytest.ini_options]
-testpaths = ["unit", "suites"]
+testpaths = ["unit", "single", "loopback", "peer"]
 ```
 
 ```bash
 cd tests
 uv run --env-file .env pytest              # testpaths のものだけ
 uv run --env-file .env pytest manual/      # 臨時のものを明示して実行
+uv run pytest unit/                        # CI で回すのはここだけ。--env-file も要りません
 ```
 
 ## 何台のボードを使うか

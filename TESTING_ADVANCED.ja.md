@@ -141,7 +141,7 @@ pytest の設定は 1 つのファイルから読まれます。候補は 4 つ�
 ```ini
 # tests/pytest.ini
 [pytest]
-testpaths = unit suites
+testpaths = unit single loopback peer
 addopts = -m "not manual"
 markers =
     manual: 人の操作を必要とする
@@ -150,7 +150,7 @@ markers =
 ```toml
 # tests/pyproject.toml
 [tool.pytest.ini_options]
-testpaths = ["unit", "suites"]
+testpaths = ["unit", "single", "loopback", "peer"]
 addopts = "-m 'not manual'"
 markers = [
     "manual: 人の操作を必要とする",
@@ -466,7 +466,7 @@ def cleanup_device(dut):
 ```text
   tests/
     unit/                  <- ここには効かせない
-    suites/
+    single/
       conftest.py          <- ここに置く
       my_app/
         test_my_app.py

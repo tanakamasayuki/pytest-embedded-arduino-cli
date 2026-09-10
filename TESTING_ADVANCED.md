@@ -141,7 +141,7 @@ The syntax differs by format.
 ```ini
 # tests/pytest.ini
 [pytest]
-testpaths = unit suites
+testpaths = unit single loopback peer
 addopts = -m "not manual"
 markers =
     manual: needs a person
@@ -150,7 +150,7 @@ markers =
 ```toml
 # tests/pyproject.toml
 [tool.pytest.ini_options]
-testpaths = ["unit", "suites"]
+testpaths = ["unit", "single", "loopback", "peer"]
 addopts = "-m 'not manual'"
 markers = [
     "manual: needs a person",
@@ -466,7 +466,7 @@ When writing the same cleanup into many modules gets tedious, move it into a `co
 ```text
   tests/
     unit/                  <- keep it out of here
-    suites/
+    single/
       conftest.py          <- put it here
       my_app/
         test_my_app.py
