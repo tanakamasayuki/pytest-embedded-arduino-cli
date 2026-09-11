@@ -245,13 +245,17 @@ Use `pytest-embedded` standard options for runtime control, such as:
 `pytest-embedded-serial` is installed as a normal dependency so hardware tests can use the serial service without extra package installation.
 If `--embedded-services` is not specified, this plugin enables `serial` by default.
 
-For profile-specific serial ports, the plugin resolves ports in this order:
+When upload and runtime serial communication use the same port, pass only `--port`. On a board whose bootloader and running sketch use different ports, pass the upload destination as `--flash-port` and the runtime connection as `--port`.
+
+The port passed to `arduino-cli upload` is resolved in this order:
 
 1. `--flash-port`
 2. `--port`
 3. `TEST_SERIAL_PORT_<PROFILE>`
 4. `TEST_SERIAL_PORT`
 5. `profiles.<PROFILE>.port` in `sketch.yaml`, only when it is a `socket://...` URL
+
+When both `--flash-port` and `--port` are present, the priority above selects `--flash-port` for upload while preserving `--port` for the pytest-embedded serial connection.
 
 Because of how `pytest` parses arguments, options that take path-like values such as `--port` and `--flash-port` are safer when written with `=`, for example `--port=/dev/ttyUSB0`.
 Depending on the environment, `uv run pytest --port /dev/ttyUSB0` may cause that path to be interpreted as another base path.

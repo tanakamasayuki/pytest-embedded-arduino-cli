@@ -63,6 +63,15 @@ ardutest/
 
 一方、`pyproject.toml`、`uv.lock`、`.python-version`、`sketch.yaml`、`.ino` / `.h` / `.cpp`、`test_*.py` は基本的にcommitします。特にこのガイドのように特定projectのCI環境を再現するtest workspaceでは、Python依存を固定する `uv.lock` もcommitすることを推奨します。除外項目の理由と運用上の例外は、[FAQ: Gitには何をcommitし、何を除外すればよいか](TESTING_FAQ.ja.md#gitには何をcommitし何を除外すればよいか)を参照してください。
 
+追加前にGitからどう見えているかも確認できます。`--no-index`を付けると、まだ存在しないbuild directoryもpatternだけで確認できます。
+
+```bash
+git status --short
+git check-ignore -v --no-index .env hello/build/
+```
+
+`.env`と`hello/build/`には、どの`.gitignore` ruleで除外されたかが表示されます。一方、`uv.lock`や`sketch.yaml`は除外されず、`git status`の追加対象に現れることを確認してください。
+
 ## 3. Arduino sketch を作る
 
 続けて `tests/` の中でArduino CLIにsketchを作らせます。
@@ -136,6 +145,15 @@ default_profile: uno
 ```
 
 実際のprojectでは、`fqbn` とcoreのversionを使用するboardに合わせてください。
+
+接続したboardの候補は `arduino-cli board list`、package indexに登録されたboardの検索は `arduino-cli board search` で確認できます。たとえばUnoを検索すると、board名、FQBN、platform IDが表示されます。
+
+```bash
+arduino-cli board list
+arduino-cli board search "Arduino Uno"
+```
+
+検索結果のFQBNをprofileの `fqbn` に、Platform IDとversionを `platforms` に書きます。`uno` や `esp32` というprofile名はproject内で決める名前であり、FQBNそのものではありません。`arduino-cli board listall` は導入済みplatformが提供するboardだけを列挙するcommandなので、coreを事前導入しないこの構成でFQBNを探す用途には `board search` を使います。
 
 ### coreのversionは必ず指定する
 
@@ -245,6 +263,14 @@ cd ..
 arduino-cli board list
 ```
 
+Linuxでは、同じboardを再接続しても名前が安定しやすい `/dev/serial/by-id/` も確認できます。
+
+```bash
+ls -l /dev/serial/by-id/
+```
+
+該当するentryがある場合は、`/dev/ttyACM0`などの代わりにそのpathを `--port=` へ指定できます。ただし、bootloaderとsketch実行時でUSBのidentity自体が変わるboardでは、別のentryになることがあります。
+
 Uno の例:
 
 ```bash
@@ -279,6 +305,8 @@ uv run pytest hello --profile=uno --port=/dev/ttyACM0 -s -v
 - `arduino-cli` が見つからない: Arduino CLI をインストールし、`PATH` に追加します。
 - platform や version が見つからない: package indexを更新し、`sketch.yaml` のplatform名、index URL、versionを確認します。coreを環境へ手動インストールして回避しないでください。
 - upload できない: `arduino-cli board list` で port を確認し、Arduino IDE の serial monitor など、同じ port を開いているプログラムを閉じます。
+- Linuxで `Permission denied` になる: [FAQ: Linuxでserial portを開くとPermission deniedになる](TESTING_FAQ.ja.md#linuxでserial-portを開くとpermission-deniedになる)を確認します。
+- upload後にport名が変わる: [FAQ: upload後にserial portの名前が変わり、接続できない](TESTING_FAQ.ja.md#upload後にserial-portの名前が変わり接続できない)を確認します。
 - 出力が文字化けする: `Serial.begin(115200)` と pytest の baud rate を合わせます。既定は 115200 です。
 - それ以外: [よくある質問](TESTING_FAQ.ja.md) を症状から探してください。
 

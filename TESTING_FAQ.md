@@ -152,6 +152,40 @@ Three shapes, and which one you get says where to look. No port configured gives
 
 → [Advanced Testing](TESTING_ADVANCED.md), *The plugin takes care of peer boards*
 
+### Opening a serial port on Linux fails with `Permission denied`
+
+First check the device file's owning group and the current user's groups.
+
+```bash
+ls -l /dev/ttyACM0
+id
+```
+
+On Debian or Ubuntu, when the device belongs to `dialout`, add the user to that group:
+
+```bash
+sudo usermod -aG dialout "$USER"
+```
+
+The new group does not apply to an already open login session. Log out and back in, then verify it with `id`. Group names vary with the distribution and udev rules, so use the group shown by `ls -l` rather than assuming it is always `dialout`. Do not use `sudo chmod 666 /dev/ttyACM0` as a permanent fix: reconnecting usually resets it, and it grants unnecessarily broad access.
+
+Testing hardware from Docker also requires passing the device into the container in addition to fixing host permissions. First verify that the corresponding device file is visible inside the container.
+
+### The serial port name changes after upload and the test cannot connect
+
+On boards with native USB, the bootloader and running sketch may enumerate as different USB devices. A port can therefore change from a name such as `/dev/ttyACM0` before upload to `/dev/ttyACM1` afterward. Compare `arduino-cli board list` before and after upload and, on Linux, inspect `/dev/serial/by-id/`.
+
+When the upload and runtime paths are known to differ, specify both:
+
+```bash
+uv run pytest tests/my_app \
+  --profile=uno \
+  --flash-port=/dev/ttyACM0 \
+  --port=/dev/ttyACM1
+```
+
+`--flash-port` is passed to `arduino-cli upload`, while `--port` is used for pytest serial communication after upload. A `/dev/serial/by-id/...` path can avoid number changes when the board keeps the same USB identity. If the bootloader and sketch expose different identities, specify their respective paths.
+
 ### The run waits for a long time after compile and before upload
 
 Another pytest process may hold the device lock for that physical device. The default wait is up to 300 seconds. Check parallel pytest runs and adjust `--device-lock-timeout` if needed. A leftover lock file alone does not keep the device locked; the OS releases the file lock when its process exits.

@@ -65,6 +65,15 @@ Do not commit `.env`, because it can contain machine-specific serial ports and c
 
 Normally commit `pyproject.toml`, `uv.lock`, `.python-version`, `sketch.yaml`, `.ino` / `.h` / `.cpp`, and `test_*.py`. In particular, a project-specific test workspace such as this guide's should commit `uv.lock` so CI can reproduce its Python dependencies. See [FAQ: What should Git track and ignore?](TESTING_FAQ.md#what-should-git-track-and-ignore) for the reasons and exceptions.
 
+Before adding files, you can check how Git classifies them. `--no-index` also tests the pattern for a build directory that does not exist yet.
+
+```bash
+git status --short
+git check-ignore -v --no-index .env hello/build/
+```
+
+Git should report the `.gitignore` rules matching `.env` and `hello/build/`. Conversely, confirm that `uv.lock` and `sketch.yaml` are not ignored and appear as files to add in `git status`.
+
 ## 3. Create the Arduino sketch
 
 Continue from inside `tests/` and let Arduino CLI create the sketch:
@@ -138,6 +147,15 @@ default_profile: uno
 ```
 
 In a real project, adjust the FQBN and core version to match the boards you support.
+
+Use `arduino-cli board list` for connected-board candidates and `arduino-cli board search` to search boards published in the package indexes. For example, an Uno search reports the board name, FQBN, and platform ID.
+
+```bash
+arduino-cli board list
+arduino-cli board search "Arduino Uno"
+```
+
+Put the result's FQBN in the profile's `fqbn`, and combine its platform ID with a version under `platforms`. Profile names such as `uno` and `esp32` are project-local names, not FQBNs. `arduino-cli board listall` lists only boards provided by installed platforms, so use `board search` to discover an FQBN in this setup, which does not preinstall cores.
 
 ### Always specify the core version
 
@@ -247,6 +265,14 @@ cd ..
 arduino-cli board list
 ```
 
+On Linux, also check `/dev/serial/by-id/` for a name that is more stable when reconnecting the same board.
+
+```bash
+ls -l /dev/serial/by-id/
+```
+
+When a matching entry exists, pass that path to `--port=` instead of a name such as `/dev/ttyACM0`. A board whose bootloader and running sketch expose different USB identities may still have separate entries.
+
 For an Uno:
 
 ```bash
@@ -281,6 +307,8 @@ On Linux, a saved log is typically under `/tmp/pytest-embedded/<run timestamp>/<
 - `arduino-cli` is not found: install Arduino CLI and add it to `PATH`.
 - A platform or version is not found: refresh the package index and check the platform name, index URL, and version in `sketch.yaml`. Do not work around it by manually installing the core into the environment.
 - Upload fails: check the port with `arduino-cli board list` and close other programs using it, such as the Arduino IDE serial monitor.
+- Linux reports `Permission denied`: see [FAQ: Opening a serial port on Linux fails with Permission denied](TESTING_FAQ.md#opening-a-serial-port-on-linux-fails-with-permission-denied).
+- The port name changes after upload: see [FAQ: The serial port name changes after upload and the test cannot connect](TESTING_FAQ.md#the-serial-port-name-changes-after-upload-and-the-test-cannot-connect).
 - Output is garbled: match the baud rate to `Serial.begin(115200)`. The default is 115200.
 - For other symptoms, search the [FAQ](TESTING_FAQ.md).
 
