@@ -271,6 +271,70 @@ Nothing stops it unless you stop it. Put the stop in a fixture so it runs on an 
 
 ## Test plan
 
+### What should GitHub Actions run?
+
+A GitHub-hosted runner normally has no board attached, so start by putting hardware-free tests in independent jobs. The three common layers are:
+
+- pure C++ or Python unit tests that do not depend on Arduino APIs;
+- sketch tests using a host core;
+- build tests that only compile supported profiles without running on hardware.
+
+Run hardware tests separately on a self-hosted runner or another environment where devices can be managed. Mixing them into a hosted-runner job produces an error when no serial port is available.
+
+A minimal pure-unit-test job looks like this. It keys the uv cache on `tests/uv.lock`, runs in the `tests/` Python workspace, and needs neither a serial port nor `.env`.
+
+```yaml
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: tests/uv.lock
+      - name: Run unit tests
+        working-directory: tests
+        run: uv run pytest unit/ -v
+```
+
+This is the pattern used by [EspBle's unit-tests.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/unit-tests.yml). Include product sources, unit tests, `tests/pyproject.toml`, `tests/uv.lock`, and the workflow itself in its `paths`, so dependency-only and workflow-only changes also trigger the tests.
+
+Split build tests for multiple profiles into a matrix. Giving each job one profile enables parallel execution, while `fail-fast: false` prevents one failure from hiding every other profile's result.
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [esp32s3, esp32p4, esp32s2]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: arduino/setup-arduino-cli@v2
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/.cache/arduino
+          key: arduino-${{ runner.os }}-${{ matrix.profile }}-${{ hashFiles('examples/**/sketch.yaml') }}
+          restore-keys: |
+            arduino-${{ runner.os }}-${{ matrix.profile }}-
+      - name: Update Arduino indexes
+        run: |
+          arduino-cli core update-index
+          arduino-cli lib update-index
+      - name: Build examples
+        run: python3 tools/build_check.py ${{ matrix.profile }}
+```
+
+This generalizes [EspUsbDevice's build-check.yml](https://github.com/tanakamasayuki/EspUsbDevice/blob/main/.github/workflows/build-check.yml). That project uses a small script to inspect each `sketch.yaml`, compile only examples declaring the matrix profile, and report unsupported profiles as not applicable rather than failed. For a project that builds one sketch through pytest, replace the final command with `uv run pytest <sketch> --profile=${{ matrix.profile }} --run-mode=build`.
+
+Caching saves download time, but cached package and library indexes can be stale. Refresh the indexes **after restoring the cache and before building**. Including `sketch.yaml` in the cache key moves to a new cache when a core or library version changes.
+
+See [Advanced Testing: Build tests grow with the product, not the sum](TESTING_ADVANCED.md#build-tests-grow-with-the-product-not-the-sum) for `paths`, `concurrency.cancel-in-progress`, and separating a narrow per-push profile set from a manually triggered full matrix.
+
 ### A test passes alone but fails in the full run, or the other way round
 
 **If it is consistent both ways**, it depends on something an earlier test did. Three shapes account for most of it: riding on state an earlier test accumulated, depending on being first, and assuming a pristine state that another test dirties. **Fix the dependency, not the order** — pinning the order hides a design error rather than removing it.

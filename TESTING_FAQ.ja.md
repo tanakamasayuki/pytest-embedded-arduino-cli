@@ -271,6 +271,70 @@ uv run pytest tests/my_app --root-logdir=.pytest-embedded
 
 ## テスト計画
 
+### GitHub Actionsではどのテストを実行すればよいか
+
+GitHub-hosted runnerには通常boardが接続されていないため、まず実機不要のテストを独立したjobにします。主な層は次の3つです。
+
+- Arduino APIに依存しないpure C++ / Pythonのunit test
+- host coreで動かすsketch test
+- 実機では動かさず、対応profileでcompileだけ行うbuild test
+
+実機testは、boardを接続したself-hosted runnerなど、deviceを管理できる環境で別に実行します。hosted runnerのjobへ実機testを混ぜると、portが無いことによるerrorになります。
+
+pure unit testの最小形は次のようになります。`tests/uv.lock`をcache keyにし、Python workspaceである`tests/`をworking directoryにします。serial portも`.env`も不要です。
+
+```yaml
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: tests/uv.lock
+      - name: Run unit tests
+        working-directory: tests
+        run: uv run pytest unit/ -v
+```
+
+これは[EspBleのunit-tests.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/unit-tests.yml)で使っている形です。workflowの`paths`にはproduct source、unit test、`tests/pyproject.toml`、`tests/uv.lock`、workflow自身を含めます。依存やworkflowだけを変更したときにもtestが起動するためです。
+
+複数profileのbuild testはmatrixに分けます。各jobが1つのprofileを担当すると並行実行でき、`fail-fast: false`により1つの失敗でほかのprofileの結果が隠れません。
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [esp32s3, esp32p4, esp32s2]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: arduino/setup-arduino-cli@v2
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/.cache/arduino
+          key: arduino-${{ runner.os }}-${{ matrix.profile }}-${{ hashFiles('examples/**/sketch.yaml') }}
+          restore-keys: |
+            arduino-${{ runner.os }}-${{ matrix.profile }}-
+      - name: Update Arduino indexes
+        run: |
+          arduino-cli core update-index
+          arduino-cli lib update-index
+      - name: Build examples
+        run: python3 tools/build_check.py ${{ matrix.profile }}
+```
+
+これは[EspUsbDeviceのbuild-check.yml](https://github.com/tanakamasayuki/EspUsbDevice/blob/main/.github/workflows/build-check.yml)を一般化した形です。同projectでは、各`sketch.yaml`を調べてそのprofileを宣言したexampleだけをcompileし、非対応profileはfailureではなく対象外として扱う小さなscriptを使っています。1つのsketchをpytestからbuildするprojectでは、最後のcommandを `uv run pytest <sketch> --profile=${{ matrix.profile }} --run-mode=build` に置き換えられます。
+
+cacheはdownload時間を減らしますが、cache内のpackage/library indexも古い可能性があります。**cache restoreの後、buildの前**にindexを更新してください。`sketch.yaml`をcache keyへ含めると、coreやlibraryのversion変更時に新しいcacheへ切り替わります。
+
+不要な実行を減らす`paths`、古い同一branch実行を止める`concurrency.cancel-in-progress`、毎pushで回すprofileと手動の全面matrixを分ける考え方は、[テストの応用: ビルドテストは和ではなく積で増える](TESTING_ADVANCED.ja.md#ビルドテストは和ではなく積で増える)を参照してください。
+
 ### 単独では通るのに全体で落ちる、またはその逆
 
 **どちらも毎回同じ結果になるなら**、前のテストがしたことに依存しています。よくあるのは 3 つで、積み上がった状態への相乗り、最初に走ることへの依存、他のテストが汚す状態をきれいな前提で assert すること、です。**順序ではなく依存を直してください。** 順序を固定するのは、設計の誤りを消すのではなく隠すだけです。

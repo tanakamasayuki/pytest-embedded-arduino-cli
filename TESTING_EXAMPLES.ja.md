@@ -40,9 +40,14 @@ Arduino API に触れない純粋な C++ なら、host core すら要りませ�
 全example × 全profileのmatrixを組む責務はpluginの外に置きます。各jobのcompileには `--run-mode=build` を使うことも、`arduino-cli compile` を直接使うこともできます。[応用編](TESTING_ADVANCED.ja.md)で説明した形の、実物のワークフローです。
 
 - **[EspUsbHost / build-check.yml](https://github.com/tanakamasayuki/EspUsbHost/blob/main/.github/workflows/build-check.yml)** — 毎 push 側の形です。matrix で profile ごとに 1 ジョブを立て、各ジョブが全 example をビルドします。fail-fast は切ってあり、platform のキャッシュは `sketch.yaml` の内容をキーにしています。ある profile を宣言していない example は、失敗ではなくその対象で飛ばされます。
+- **[EspUsbDevice / build-check.yml](https://github.com/tanakamasayuki/EspUsbDevice/blob/main/.github/workflows/build-check.yml)** — profileごとのmatrix、Arduino CLI cache、cache復元後のindex更新を組み合わせた実運用例です。小さなPython scriptが各`sketch.yaml`を調べ、対象profileを宣言したexampleだけをcompileします。
 - **[EspUsbHost / version-matrix.yml](https://github.com/tanakamasayuki/EspUsbHost/blob/main/.github/workflows/version-matrix.yml)** — 必要なときだけ回す掃き出しです。手動起動のみで、複数の core を 1 つのランナーに入れられないため **core version ごとにジョブを分解**し、最後に Markdown の matrix にまとめてリポジトリへコミットします。セルごとに成功・失敗・対象外を記録した上で正常終了するので、赤いセルがあってもジョブは落ちません。
 - **[EspBle / compile-examples.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/compile-examples.yml)** — いちばん単純な形です。1 ジョブで `examples/` 以下の `sketch.yaml` を辿り、それぞれの profile でコンパイルします。matrix が大げさなときはここから始めてください。
 - **[EspBle / board-matrix.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/board-matrix.yml)** — 1 つの core version に対して、全 example を全対象ボードでビルドします。手動起動のままにして、結果をカバレッジの文書としてリポジトリに書き出しています。
+
+## CI でのpure unit test
+
+- **[EspBle / unit-tests.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/unit-tests.yml)** — boardもArduino coreも使わず、systemの`g++`で製品sourceの純粋なC++部分をbuildしてpytestから実行する例です。`tests/uv.lock`をuv cacheのkeyにし、`tests/`をworking directoryにしています。serial portや`.env`は渡しません。
 
 ## 参考
 
