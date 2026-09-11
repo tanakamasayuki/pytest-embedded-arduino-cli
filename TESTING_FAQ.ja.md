@@ -2,7 +2,7 @@
 
 [English](TESTING_FAQ.md)
 
-症状から引くための索引です。各項目は、原因と、詳しく説明している節への案内だけを書いています。新しい内容はありません。ここで解決するなら、その先を読む必要はありません。
+症状や疑問から引くための索引です。各項目に短い回答を書き、必要に応じて詳しいguideへ案内します。ここで解決するなら、その先を読む必要はありません。
 
 ## 収集と起動
 
@@ -46,6 +46,45 @@ filterwarnings =
 ```
 
 → [テストの応用](TESTING_ADVANCED.ja.md) の *設定ファイル: pytest.ini と pyproject.toml*
+
+## project fileとGit
+
+### Gitには何をcommitし、何を除外すればよいか
+
+テストを同じ条件で再現するために必要な入力はcommitし、machine固有の設定と再生成できる出力は除外します。
+
+**基本的にcommitするもの:**
+
+- `pyproject.toml`: Pythonの直接依存とpytest設定
+- `uv.lock`: 解決済みのPython依存version
+- `.python-version`: projectでPython versionを揃える場合
+- `sketch.yaml`: board、core、libraryのversionとprofile
+- `.ino`、`.h`、`.cpp`、`test_*.py`: sketchとテスト本体
+- `.env.example`: secretや実際のportを含まない設定例
+
+**基本的に`.gitignore`へ追加するもの:**
+
+```gitignore
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.env
+.pytest-results/
+.pytest-embedded/
+ardutest/
+**/build/
+```
+
+`**/build/` はArduino CLIのcompile結果で、profileごとに再生成できます。`.pytest-results/` は `--save-state` の状態、`.pytest-embedded/` は `--root-logdir=.pytest-embedded` とした場合のserial log、`ardutest/` はArduTestのartifactです。既定のserial logがsystemの一時directoryにある場合はrepository外なので、Gitの除外対象には現れません。
+
+特定projectのCIを再現するtest workspaceでは、`uv.lock`をcommitすることを推奨します。一方、libraryとして複数versionのPython依存との互換性を意図的に検査する場合は、lockを使わないjobも別に用意できます。lockを除外するだけで目的が達成されるわけではないため、通常の再現テストと依存範囲の互換性テストを分けてください。
+
+`.env` は実際のserial portだけでなく、Wi-Fi credentialなどを含む可能性があります。実値はcommitせず、必要な変数名だけを `.env.example` で共有してください。すでに追跡されているfileは `.gitignore` へ追加しただけでは追跡解除されないため、secretをcommitしていた場合はrepositoryの履歴とcredential自体の交換も確認が必要です。
+
+→ [最初のテスト](FIRST_TEST.ja.md#2-python-workspace-を作る) の `.gitignore` 例
 
 ## ビルドと転送
 

@@ -2,7 +2,7 @@
 
 [日本語](TESTING_FAQ.ja.md)
 
-A symptom-first index into the other guides. Each entry says what causes it and points at the section that explains it in full. Nothing here is new material — if an entry is enough to unblock you, you do not need to read further.
+This index is organized by symptom or question. Each entry gives a short answer and points to a more detailed guide when useful. If the entry solves the problem, there is no need to follow the link.
 
 ## Collection and startup
 
@@ -46,6 +46,45 @@ filterwarnings =
 ```
 
 → [Advanced Testing](TESTING_ADVANCED.md), *Config files: pytest.ini and pyproject.toml*
+
+## Project files and Git
+
+### What should Git track and ignore?
+
+Commit the inputs needed to reproduce a test, and ignore machine-specific settings and output that can be regenerated.
+
+**Normally commit:**
+
+- `pyproject.toml`: direct Python dependencies and pytest settings
+- `uv.lock`: resolved Python dependency versions
+- `.python-version`: when the project standardizes its Python version
+- `sketch.yaml`: board profiles and core and library versions
+- `.ino`, `.h`, `.cpp`, and `test_*.py`: the sketch and tests
+- `.env.example`: an example without secrets or real port values
+
+**Normally add to `.gitignore`:**
+
+```gitignore
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.env
+.pytest-results/
+.pytest-embedded/
+ardutest/
+**/build/
+```
+
+`**/build/` contains Arduino CLI compile output and can be regenerated per profile. `.pytest-results/` contains `--save-state` data, `.pytest-embedded/` is the serial-log root when using `--root-logdir=.pytest-embedded`, and `ardutest/` contains ArduTest artifacts. The default serial logs live in the system temporary directory outside the repository and therefore do not normally appear as Git candidates.
+
+Commit `uv.lock` for a project-specific test workspace when reproducible CI is the goal. A library that deliberately tests compatibility across a range of Python dependency versions may also have separate jobs that run without the lock. Merely ignoring the lock does not create that coverage, so keep reproducibility tests and dependency-range tests explicit.
+
+`.env` may contain Wi-Fi credentials as well as real serial ports. Never commit the real values; share only the required variable names through `.env.example`. Adding an already tracked file to `.gitignore` does not remove it from history. If credentials were committed, check the repository history and rotate the credentials as well.
+
+→ [Your First Test](FIRST_TEST.md#2-create-a-python-workspace), `.gitignore` example
 
 ## Build and upload
 
