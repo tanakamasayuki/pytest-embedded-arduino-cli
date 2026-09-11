@@ -152,7 +152,7 @@ import pexpect
 import pytest
 
 
-STARTUP_TIMEOUT = 60.0
+STARTUP_TIMEOUT = 20.0
 PROBE_INTERVAL = 0.5
 
 
@@ -174,9 +174,9 @@ def test_ping(dut):
 
 最初の `ping` がboardへ届かなければ、対応する `PONG` も返らないため、最初の `dut.expect_exact(...)` はtimeoutします。これは起動中には想定した動作です。1回の待機は `PROBE_INTERVAL` の0.5秒で区切り、直後の `except` がtimeoutを捕まえます。そのためpytestのテスト全体はまだfailせず、次の `ping` を送れます。
 
-再試行全体は `STARTUP_TIMEOUT` の60秒で打ち切ります。この値には2つの役割があります。正常な環境で起こる起動のばらつきを許すことと、deviceが本当に停止している場合にテストを有限時間でfailさせることです。
+再試行全体は `STARTUP_TIMEOUT` の20秒で打ち切ります。この値には2つの役割があります。正常な環境で起こる起動のばらつきを許すことと、deviceが本当に停止している場合にテストを有限時間でfailさせることです。
 
-短すぎると、環境が遅いだけの正常なboardをfailにします。一方、長くしすぎると、本当の故障や配線ミスを検出するまで毎回待たされます。**最も遅い正常環境で実測した起動時間に余裕を足し、それでも異常時に待てる長さ**を選んでください。60秒はこの導入例の寛容な初期値であり、すべてのprojectに対する正解ではありません。
+短すぎると、環境が遅いだけの正常なboardをfailにします。一方、長くしすぎると、本当の故障や配線ミスを検出するまで毎回待たされます。多くのboardは数秒で応答し、起動が遅い環境でも20秒程度をひとつの目安にできます。そのうえで、**最も遅い正常環境で実測した起動時間に余裕を足し、それでも異常時に待てる長さ**を選んでください。20秒はこの導入例の初期値であり、すべてのprojectに対する正解ではありません。
 
 起動時間そのものを性能要件として検査したい場合は、このhandshakeと分けます。まず寛容な上限で「起動して応答できること」を確認し、別のテストで計測値をassertしてください。起動確認のtimeoutを厳しくすると、機能停止と単なる性能低下を区別できなくなります。
 
@@ -236,22 +236,48 @@ Windows では port を `COM3` などに置き換えます。成功すると、�
 
 ## うまくいかないとき
 
+まず `-s` と `-v` を付けて再実行すると、どの段階で止まっているかを確認しやすくなります。
+
+```bash
+uv run pytest hello --profile=uno --port=/dev/ttyACM0 -s -v
+```
+
+- `-s`: boardから受信したserial出力を、テストの実行中にconsoleへ表示します。表示と並行してserial logの収集も続き、`dut.log`にも保存されます。sketchがどこまで起動したか、期待していた文字列が実際にはどう出力されたかをその場で確認するときに使います。
+- `-v`: 収集したtest名に加え、pluginが実行する `arduino-cli compile` / `arduino-cli upload` のcommandを表示します。さらに詳しい `cwd`、sketch directory、build path、profile、portまで確認する場合は `-vv` を使います。
+
+`-s` と `-v` は役割が異なるため、組み合わせて使えます。serial通信をその場で見るなら `-s`、compile・uploadや設定の解決を調べるなら `-v` または `-vv` が中心になります。`-s` を付けなくてもserial logは収集されるため、通常実行では外し、問題を調べるときだけ付けても構いません。
+
+保存されたlogは、Linuxでは通常 `/tmp/pytest-embedded/<実行日時>/<テスト名>/dut.log` にあります。ただしrootはOSや一時directoryの設定によって変わります。保存場所、`-s`との違い、任意のdirectoryへ固定する方法は、[FAQ: serial出力を実行中に見たい、あとからlogも確認したい](TESTING_FAQ.ja.md#serial出力を実行中に見たいあとからlogも確認したい)を参照してください。
+
 - `arduino-cli` が見つからない: Arduino CLI をインストールし、`PATH` に追加します。
 - platform や version が見つからない: package indexを更新し、`sketch.yaml` のplatform名、index URL、versionを確認します。coreを環境へ手動インストールして回避しないでください。
 - upload できない: `arduino-cli board list` で port を確認し、Arduino IDE の serial monitor など、同じ port を開いているプログラムを閉じます。
 - 出力が文字化けする: `Serial.begin(115200)` と pytest の baud rate を合わせます。既定は 115200 です。
-- それ以外: [よくある質問](TESTING_FAQ.ja.md) を症状から探してください。詳細なコマンドを見るには pytest に `-v` または `-vv` を付けます。
+- それ以外: [よくある質問](TESTING_FAQ.ja.md) を症状から探してください。
 
 ## 実機なしで試す
 
-host core を使うと、sketch を PC 用の実行ファイルとして build し、serial port の代わりに TCP socket で接続できます。ボードは不要ですが、host core と C++ toolchain の導入が必要で、実機固有の動作は検査できません。
+host core を使うと、sketch を PC 用の実行ファイルとして build し、serial port の代わりに TCP socket で接続できます。ボードは不要ですが、host machineに `gcc` / `g++` 互換のC/C++ toolchainが必要で、実機固有の動作は検査できません。host coreのpackageにはcompilerやlinkerが含まれないため、これらはOS側へ事前に導入します。
 
-このリポジトリを clone 済みなら、次のサンプルで確認できます。
+Debian / Ubuntu系のLinuxでtoolchainが未導入なら、次のpackageを導入します。ほかのOSを含む詳しい手順は、[host-arduino-core: 事前準備](https://github.com/tanakamasayuki/host-arduino-core/blob/main/README.ja.md#事前準備)を参照してください。
 
 ```bash
-uv sync
-uv run pytest examples/09_host_arduino_core --profile=host
+sudo apt update
+sudo apt install build-essential
+gcc --version
+g++ --version
 ```
+
+host coreのサンプルは、このページで作ったArduino projectではなく、`pytest-embedded-arduino-cli` repositoryの `examples/09_host_arduino_core` に含まれています。Linuxで `/tmp` に新しくcloneして試す場合は、次のように実行します。
+
+```bash
+cd /tmp
+git clone https://github.com/tanakamasayuki/pytest-embedded-arduino-cli.git
+cd pytest-embedded-arduino-cli
+uv run pytest examples/09_host_arduino_core --profile=host -s -v
+```
+
+`uv run`がrepositoryの設定から必要なPython環境を用意するため、事前の `uv sync` は不要です。すでに別の場所へcloneしている場合は、`cd /tmp` と `git clone` の代わりに、そのrepositoryのrootへ移動して同じ `uv run pytest ...` を実行してください。
 
 設定と制約は [`examples/09_host_arduino_core`](examples/09_host_arduino_core/README.ja.md) を参照してください。
 

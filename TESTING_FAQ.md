@@ -139,6 +139,33 @@ The startup-only `READY` may have passed before pytest opened the serial port. T
 
 → [Testing Basics](TESTING_BASICS.md), *The device does not answer at the start of a test*
 
+### I want to watch serial output during the run and inspect it afterward
+
+Pass `-s` to watch serial output received from the board in the console while the test runs.
+
+```bash
+uv run pytest tests/my_app --profile=uno --port=/dev/ttyACM0 -s
+```
+
+`-s` controls the live display. Serial output is still collected and saved to `dut.log` when `-s` is present. A normal run without `-s` also collects and saves the serial log; it simply does not show the stream live in the console.
+
+By default, the log root is `pytest-embedded/` inside the system temporary directory. A typical Linux layout is:
+
+```text
+/tmp/pytest-embedded/<run timestamp>/<test name>/dut.log
+```
+
+The temporary directory varies with the operating system and environment settings such as `TMPDIR`, `TEMP`, and `TMP`, so it is not always `/tmp`. Use `--root-logdir` when you want a predictable location.
+
+```bash
+uv run pytest tests/my_app --root-logdir=.pytest-embedded
+```
+
+For saved contents and platform-specific locations, see:
+
+- [README: Log Directory Summary](README.md#log-directory-summary)
+- [Advanced Testing: Where logs and artifacts live](TESTING_ADVANCED.md#where-logs-and-artifacts-live)
+
 ### The end of `dut.log` is missing or cut mid-line
 
 If the test ends at its last match, the connection may close before later received bytes reach the log. Have the device emit an end marker and `expect` it, or wait for `pexpect.TIMEOUT` at the end to drain the remaining output.
