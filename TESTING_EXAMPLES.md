@@ -40,9 +40,14 @@ Pure C++ that touches no Arduino API does not need a host core either. These tes
 The full example-by-profile matrix is orchestrated outside this plugin. Each job may use `--run-mode=build` or invoke `arduino-cli compile` directly. These are real workflows in the shapes [Advanced Testing](TESTING_ADVANCED.md) describes.
 
 - **[EspUsbHost / build-check.yml](https://github.com/tanakamasayuki/EspUsbHost/blob/main/.github/workflows/build-check.yml)** — the every-push shape. A matrix runs one job per profile, each building all the examples, with fail-fast turned off and the platform cache keyed on the `sketch.yaml` files. An example that does not declare a profile is skipped for that target rather than failing it.
+- **[EspUsbDevice / build-check.yml](https://github.com/tanakamasayuki/EspUsbDevice/blob/main/.github/workflows/build-check.yml)** — A production example combining a per-profile matrix, Arduino CLI caching, and an index refresh after cache restoration. A small Python script inspects each `sketch.yaml` and compiles only examples declaring the selected profile.
 - **[EspUsbHost / version-matrix.yml](https://github.com/tanakamasayuki/EspUsbHost/blob/main/.github/workflows/version-matrix.yml)** — the on-demand sweep. Manual only, decomposed into one job per core version because several installs do not fit in one runner, then aggregated into a Markdown matrix that is committed to the repository. It records pass, fail or not-applicable per cell and exits successfully, so a red cell does not fail the job.
 - **[EspBle / compile-examples.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/compile-examples.yml)** — the simplest shape: one job walking every `sketch.yaml` under `examples/` and compiling each with its own profile. Start here when a matrix is more than you need.
 - **[EspBle / board-matrix.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/board-matrix.yml)** — every example against every target board for one core version, kept manual, writing a coverage document into the repository.
+
+## Pure unit tests in CI
+
+- **[EspBle / unit-tests.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/unit-tests.yml)** — Uses neither a board nor an Arduino core. Pytest invokes the system `g++` to build and run pure C++ product code, keys the uv cache on `tests/uv.lock`, and runs with `tests/` as its working directory. It passes no serial port or `.env`.
 
 ## Reference
 

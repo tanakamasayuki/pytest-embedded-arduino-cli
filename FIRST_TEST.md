@@ -344,3 +344,4 @@ See [`examples/09_host_arduino_core`](examples/09_host_arduino_core/README.md) f
 - [examples](examples/README.md): runnable samples organized by purpose
 - [README](README.md): options and configuration reference
 - [FAQ](TESTING_FAQ.md): diagnosing errors and unstable tests
+- [What should GitHub Actions run?](TESTING_FAQ.md#what-should-github-actions-run): separating pure unit, host-core, and per-profile build tests

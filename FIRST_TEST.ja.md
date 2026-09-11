@@ -342,3 +342,4 @@ uv run pytest examples/09_host_arduino_core --profile=host -s -v
 - [examples](examples/README.ja.md): 目的別に選べる実行可能なサンプル
 - [README](README.ja.md): option と設定のリファレンス
 - [よくある質問](TESTING_FAQ.ja.md): エラーや不安定なテストの調べ方
+- [GitHub Actionsではどのテストを実行すればよいか](TESTING_FAQ.ja.md#github-actionsではどのテストを実行すればよいか): pure unit test、host core、profile別build testの分け方
