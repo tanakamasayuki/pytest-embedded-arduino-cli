@@ -37,7 +37,7 @@ Pure C++ that touches no Arduino API does not need a host core either. These tes
 
 ## Build tests in CI
 
-The guides put build tests outside this plugin: no device, no serial, just `arduino-cli compile` over a matrix. These are real workflows in the shapes [Advanced Testing](TESTING_ADVANCED.md) describes.
+The full example-by-profile matrix is orchestrated outside this plugin. Each job may use `--run-mode=build` or invoke `arduino-cli compile` directly. These are real workflows in the shapes [Advanced Testing](TESTING_ADVANCED.md) describes.
 
 - **[EspUsbHost / build-check.yml](https://github.com/tanakamasayuki/EspUsbHost/blob/main/.github/workflows/build-check.yml)** — the every-push shape. A matrix runs one job per profile, each building all the examples, with fail-fast turned off and the platform cache keyed on the `sketch.yaml` files. An example that does not declare a profile is skipped for that target rather than failing it.
 - **[EspUsbHost / version-matrix.yml](https://github.com/tanakamasayuki/EspUsbHost/blob/main/.github/workflows/version-matrix.yml)** — the on-demand sweep. Manual only, decomposed into one job per core version because several installs do not fit in one runner, then aggregated into a Markdown matrix that is committed to the repository. It records pass, fail or not-applicable per cell and exits successfully, so a red cell does not fail the job.

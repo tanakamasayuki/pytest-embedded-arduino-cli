@@ -6,7 +6,7 @@
 
 対象 board core:
 
-- package index: `https://tanakamasayuki.github.io/host-arduino-core/package_index.json`
+- package index: `https://tanakamasayuki.github.io/lang-ship-arduino-core/package_lang-ship_index.json`
 - FQBN: `lang-ship:host:host`
 
 `arduino-cli compile` はローカルの gcc などを使って host 用の実行ファイルをビルドします。

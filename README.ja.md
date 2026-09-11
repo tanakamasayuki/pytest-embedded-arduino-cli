@@ -12,9 +12,11 @@
 
 ## ガイド
 
+- [最初のテスト](FIRST_TEST.ja.md): 実機1台で最初のtestを作り、各ファイル、pytestの合否、起動待ちとtimeoutまで理解する導入ガイド。
 - [テストの基本](TESTING_BASICS.ja.md): テストとは何か、どういう仕組みで動くか、実機でないと分からないこと、何台のボードを使うか、テストを独立に保つ方法。pytest が初めてならここから。
 - [テストの応用](TESTING_ADVANCED.ja.md): 収集規則、`expect` の落とし穴、ログとアーティファクトの置き場所、中断時の後片付け、`conftest.py` が正当化される場面、peer テストの原則。
-- [実例集](TESTING_EXAMPLES.ja.md): 上記を実際に使っているプロジェクト。最小の host core 構成から大規模な複数台構成まで。
+- [ローカルサンプル一覧](examples/README.ja.md): このリポジトリで実行できるexampleを、必要な機材と目的から選ぶ索引。
+- [実プロジェクト集](TESTING_EXAMPLES.ja.md): このpluginを実際に使っている外部プロジェクト。最小のhost core構成から大規模な複数台構成まで。
 - [よくある質問](TESTING_FAQ.ja.md): 症状から引くための索引。何かが起きた後はここから。
 
 ## 設計方針
@@ -26,13 +28,25 @@
 - sketch 設定は `sketch.yaml` と `--profile` から解決する
 - テストファイルのあるディレクトリを sketch ディレクトリとして扱う
 
-## セットアップ
+## クイックスタート
+
+Arduino projectでは、Python環境を分離するためproject rootの `tests/` をworkspaceにする構成を推奨します。
 
 ```bash
+mkdir tests
+cd tests
 uv init
 uv add pytest-embedded-arduino-cli
-uv sync
+arduino-cli sketch new hello
+cd hello
+touch sketch.yaml test_hello.py
+
+# sketch.yaml、hello.ino、test_hello.py を編集した後
+cd ..
+uv run pytest hello --profile=<PROFILE> --port=<PORT>
 ```
+
+ファイルの内容と各行の意味は [最初のテスト](FIRST_TEST.ja.md) で説明しています。
 
 通常依存として次を含みます。
 
@@ -44,10 +58,11 @@ uv sync
 ## 前提条件
 
 - `arduino-cli` が `PATH` に入っていること
-- 必要な Arduino board core がインストール済みであること
+- `sketch.yaml` のplatformにcoreのversionを必ず指定し、Arduino CLIのindexから解決できること。versionを省略して環境へ事前導入されたcoreに依存する運用は前提にしない
 - 実機テスト時にホストからアクセスできる serial port があること
 
 `sketch.yaml` で platform や library の version を指定する場合、Arduino CLI はローカルの package index / library index からそれらを解決します。
+platformのversionを省略すると環境に事前導入されたcoreが使われ、buildしたversionを設定から特定できません。coreが入っていない環境ではエラーになるため、versionは必ず固定してください。追加のBoard Manager URLが必要なplatformでは、profileに `platform_index_url` を指定することを推奨します。
 毎回のテスト実行で index を更新する必要はありませんが、定期的に、または CI / release 確認の前に更新しておく運用を推奨します。
 指定した platform や library の version が見つからず build に失敗する場合は、次のコマンドで index を更新してから再実行してください。
 
@@ -320,7 +335,7 @@ peer DUT は `peers` fixture を要求したテストでだけ upload / connect 
 3. primary DUT を upload する
 4. `peers` が要求された場合、peer DUT を peer 名順で upload する
 5. peer DUT に接続し、`peers` から参照できるようにする
-4. primary DUT に接続し、`dut` として参照できるようにする
+6. primary DUT に接続し、`dut` として参照できるようにする
 
 実機 serial では、reset や upload 直後に sketch が短時間だけ出力する起動メッセージを Python 側が取りこぼす可能性があります。
 host Arduino core の socket 実行では問題になりにくいですが、実機テストでは sketch 側で十分な待機、READY の再送、または Python 側からの入力を待つ handshake を用意することを推奨します。
@@ -463,25 +478,16 @@ def test_sample_rate(arduino_test):
 
 ## 例
 
-```python
-def test_hello(dut):
-    dut.expect_exact("hello from arduino")
+最小のsketch、`sketch.yaml`、pytestファイルを自分のprojectに作る手順は [最初のテスト](FIRST_TEST.ja.md) にあります。このリポジトリでは同じhandshakeを使う `examples/01_basic` を実行できます。
+
+```bash
+uv run pytest examples/01_basic --profile=esp32 --port=/dev/ttyUSB0
 ```
 
-```cpp
-void setup() {
-  Serial.begin(115200);
-  delay(1000);
-  Serial.println("hello from arduino");
-}
-
-void loop() {}
-```
-
-追加サンプル:
+目的別の一覧と必要な機材は [`examples/README.ja.md`](examples/README.ja.md) にあります。主なサンプル:
 
 - `examples/01_basic`
-  - 最小構成の hello world
+  - 起動時の取りこぼしを避けるhandshakeを使った、最小のserial往復
   - `esp32` をデフォルト profile としつつ `uno` もサポートする
   - `TEST_SERIAL_PORT` と `TEST_SERIAL_PORT_<PROFILE>` による serial port 解決も含む
 - `examples/02_env_define`

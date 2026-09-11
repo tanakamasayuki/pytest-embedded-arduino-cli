@@ -4,6 +4,8 @@
 
 この plugin で初めてテストを書く人向けのガイドです。pytest 自体が初めてでも読めるように、テストとは何かから始めます。
 
+初めてのtestを作る場合は、先に [最初のテスト](FIRST_TEST.ja.md) を実行してください。この文書は手順書ではなく、テストを増やしても壊れにくい構成にするための考え方を説明します。
+
 ## テストとは何か
 
 これまで手で確認していたことを、機械に毎回同じ手順で確認させる仕組みです。
@@ -44,7 +46,7 @@ host と device の 2 つは、この後ずっと出てきます。**host 側**�
 6. 期待した文字列が来れば次へ進み、来なければ時間切れで失敗します。
 7. シリアルポートを閉じます。
 
-いちばん小さな組み合わせはこれです。sketch とテストの 2 つのファイルが対になります。
+中心になる組み合わせはこれです。sketch とテストが対になり、実行には同じディレクトリか上位ディレクトリの `sketch.yaml` も必要です。完全な配置と実行コマンドは [最初のテスト](FIRST_TEST.ja.md) にあります。
 
 ```cpp
 // hello.ino
@@ -152,6 +154,8 @@ def test_unity(dut):
 
 Unity では各検査が junit のレポートにも記録されるので、`--junitxml` を使えば検査単位で結果が残ります。
 
+動く例は [`examples/04_unity_basic`](examples/04_unity_basic/README.ja.md) と [`examples/11_ardutest`](examples/11_ardutest/README.ja.md) にあります。
+
 どちらでもよく、混ぜても構いません。
 
 ## 実機でないと分からないこと
@@ -194,6 +198,8 @@ host core での実行は実機テストの代わりにはなりません。PC �
 
 Arduino のプロジェクトでは、ライブラリや sketch が root にあります。そこへ Python の道具を混ぜると散らかるので、**テスト関係は `tests/` の下にまとめ、root はきれいに保つ**構成を勧めます。
 
+sketchディレクトリの中はArduino IDEのprojectと同じ構成にします。主となる `.ino` を1つ置き、補助コードは `.h` / `.cpp` に分け、そこへテストファイルと `sketch.yaml` を加えます。
+
 ```text
 MyLibrary/                 <- Arduino ライブラリの root
   library.properties
@@ -211,6 +217,8 @@ MyLibrary/                 <- Arduino ライブラリの root
 ```
 
 依存を `tests/pyproject.toml` に書くので、Python の仮想環境も `tests/.venv` に作られます。Arduino 側のファイルと混ざりません。
+
+Arduinoライブラリ全体の構成は [`examples/07_arduino_library_project`](examples/07_arduino_library_project/README.ja.md)、Arduino IDEで開くsketch projectの構成は [`examples/08_arduino_ide_project`](examples/08_arduino_ide_project/README.ja.md) にあります。
 
 **コマンドは `tests/` の中で実行します。** このガイドの以降の例も、それを前提にします。
 
@@ -281,6 +289,8 @@ default_profile: host
 
 ロジックの確認に向いています。ボードの取り合いも起きません。
 
+動く構成は [`examples/09_host_arduino_core`](examples/09_host_arduino_core/README.ja.md) にあります。
+
 **ただし host core では 1 module に 1 テストです。** 接続を閉じると実行ファイルが終了するので、**同じ module の 2 本目は接続できません。** 実測では接続拒否になります。`parametrize` も同じ理由で使えません。分けたいなら module ごと分けてください。実機と違って書き込み待ちもボードの奪い合いも無いので、module を増やす費用は比較的小さくて済みます。
 
 **CI に乗せられることが大きな利点です。** GitHub Actions のような CI サービスには実機を繋げませんが、host core はボードを必要としないのでそのまま動きます。治具を自分で用意できない場合でも、ロジックのユニットテストだけは変更のたびに自動で確認できます。OSS の公開リポジトリなら無償の枠で回せるので、費用もかかりません。
@@ -296,6 +306,8 @@ pytest my_app --port=/dev/ttyUSB0
 ```
 
 毎回 `--port` を書かずに済ませる方法は、peer の説明の後でまとめて扱います。
+
+最小の実行例は [`examples/01_basic`](examples/01_basic/README.ja.md)、実行時に値を送る例は [`examples/03_dut_input`](examples/03_dut_input/README.ja.md) にあります。
 
 1 台でも、出力を自分の入力に配線して戻すループバックの形にすれば、送受信の両方を試せます。周辺機器、タイミング、永続化のように host core では分からないことは、ここから確かめられます。
 
@@ -326,6 +338,8 @@ def test_round_trip(dut, peers):
 sketch は 2 つ書きます。primary は `send` を受けたら実際の通信手段で peer へ送り、peer は受け取ったら `RECEIVED` を出します。通信手段が BLE でも Wi-Fi でも I2C でも、テスト側の形は変わりません。
 
 BLE や Wi-Fi のように相手が必要なものは当然 2 台要りますが、それ以外でも 2 台あったほうが楽なテストは多いです。相手側のログが直接読めるので、どちらが悪いのか切り分けられます。
+
+実機を使わず構成だけ確認できる例は [`examples/12_peer_host_core`](examples/12_peer_host_core/README.ja.md) にあります。
 
 ### 3 台以上: クラスタ系のテスト
 
@@ -416,6 +430,8 @@ tests/
 - **module の終了**: device lock を解放します。
 
 **ただし 1 つ注意があります。不揮発領域が upload で消えるかは board 次第です。** 設定、ログ、ペアリング情報などがこれにあたります。**多くの場合、既定では消えません。** その場合、テストが書いた永続データは module をまたいでも実行をまたいでも残り、**「module の境界はいつもきれい」が成り立たない場所**になります。
+
+この差を実際に観察できる対の例が [`examples/05_nvs_persistent`](examples/05_nvs_persistent/README.ja.md) と [`examples/06_erase_flash`](examples/06_erase_flash/README.ja.md) です。
 
 対処は 2 つあり、どちらを取るかは状況次第です。
 

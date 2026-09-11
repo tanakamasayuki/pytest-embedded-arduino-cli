@@ -6,7 +6,7 @@ This sample is intended for a board core that builds and runs Arduino sketches o
 
 Target board core:
 
-- package index: `https://tanakamasayuki.github.io/host-arduino-core/package_index.json`
+- package index: `https://tanakamasayuki.github.io/lang-ship-arduino-core/package_lang-ship_index.json`
 - FQBN: `lang-ship:host:host`
 
 `arduino-cli compile` builds a host executable with local tools such as gcc.

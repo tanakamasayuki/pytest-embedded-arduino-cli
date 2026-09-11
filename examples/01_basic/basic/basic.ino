@@ -1,10 +1,19 @@
 void setup()
 {
   Serial.begin(115200);
-  delay(1000);
-  Serial.println("hello from arduino");
 }
 
 void loop()
 {
+  if (Serial.available() == 0)
+  {
+    return;
+  }
+
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+  if (line == "ping")
+  {
+    Serial.println("PONG");
+  }
 }
