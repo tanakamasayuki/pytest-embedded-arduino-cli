@@ -12,6 +12,8 @@ Target board core:
 `arduino-cli compile` builds a host executable with local tools such as gcc.
 `arduino-cli upload` launches that executable on the host machine.
 
+The host-core package does not include a compiler or linker. Install a `gcc` / `g++`-compatible toolchain on the host machine before running the sample. Debian and Ubuntu Linux can use `build-essential`; see [host-arduino-core prerequisites](https://github.com/tanakamasayuki/host-arduino-core/blob/main/README.md#prerequisites) for other operating systems and details.
+
 The host executable prints or writes the TCP/IP port used for DUT communication.
 This sample's `sketch.yaml` sets `port: socket://localhost`, so the pytest command can omit `--port`.
 The plugin reads the runtime `port` from `*.host-arduino.json` under the build output directory and completes the actual connection URL.
@@ -34,10 +36,10 @@ It cannot validate real peripherals, timing, interrupts, memory layout, Flash/NV
 Also, compile success with this profile does not guarantee compile success with the board core and board options used in production.
 For real projects, run build tests with the actual board profile and run hardware tests separately.
 
-Expected command:
+Run this command from the root directory of this repository:
 
 ```bash
-uv run pytest examples/09_host_arduino_core --profile host
+uv run pytest examples/09_host_arduino_core --profile host -s -v
 ```
 
 If the port number is already known, specify it explicitly:

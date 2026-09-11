@@ -154,7 +154,7 @@ import pexpect
 import pytest
 
 
-STARTUP_TIMEOUT = 60.0
+STARTUP_TIMEOUT = 20.0
 PROBE_INTERVAL = 0.5
 
 
@@ -176,9 +176,9 @@ def test_ping(dut):
 
 If the first `ping` does not reach the board, there is no corresponding `PONG`, so the first `dut.expect_exact(...)` times out. That is expected while the board is starting. Each attempt is limited to the 0.5-second `PROBE_INTERVAL`, and the following `except` catches the timeout, so the whole pytest test does not fail and can send another `ping`.
 
-The retries have a separate 60-second `STARTUP_TIMEOUT`. It serves two purposes: tolerate normal startup variation and still fail in finite time when the device has actually stopped responding.
+The retries have a separate 20-second `STARTUP_TIMEOUT`. It serves two purposes: tolerate normal startup variation and still fail in finite time when the device has actually stopped responding.
 
-Too short a value rejects a healthy board in a slow environment. Too long a value delays every real failure, including a broken device or wiring error. **Measure the slowest healthy environment, add reasonable margin, and choose a duration you can still afford to wait on failure.** Sixty seconds is a forgiving initial value for this guide, not a universal answer.
+Too short a value rejects a healthy board in a slow environment. Too long a value delays every real failure, including a broken device or wiring error. Most boards respond within a few seconds, and about 20 seconds is a useful upper-end starting point even for slower environments. Still, **measure the slowest healthy environment, add reasonable margin, and choose a duration you can still afford to wait on failure.** Twenty seconds is the initial value for this example, not a universal answer.
 
 If startup time itself is a performance requirement, test it separately. First establish that the device eventually starts with a forgiving functional timeout, then assert measured timing in a dedicated test. A strict functional timeout cannot distinguish a stopped device from a mere performance regression.
 
@@ -238,22 +238,48 @@ See [Testing Basics: Keeping port settings in `.env`](TESTING_BASICS.md#keeping-
 
 ## If it does not work
 
+Start by rerunning with `-s` and `-v`; together they make it easier to see which stage has stopped progressing.
+
+```bash
+uv run pytest hello --profile=uno --port=/dev/ttyACM0 -s -v
+```
+
+- `-s` shows received serial output in the console while the test is running. Serial logging continues at the same time and is still saved to `dut.log`. Use it to see immediately how far the sketch starts and what text the board actually emits.
+- `-v` shows collected test names and the `arduino-cli compile` / `arduino-cli upload` commands executed by the plugin. Use `-vv` to also see details such as `cwd`, sketch directory, build path, profile, and port.
+
+The options have different roles and can be combined. Use `-s` to watch serial communication live and `-v` or `-vv` for compile, upload, and configuration resolution. Serial logs are collected even without `-s`, so it is reasonable to enable the noisier live display only while diagnosing a problem.
+
+On Linux, a saved log is typically under `/tmp/pytest-embedded/<run timestamp>/<test name>/dut.log`. The root varies with the operating system and temporary-directory configuration. See [FAQ: I want to watch serial output during the run and inspect it afterward](TESTING_FAQ.md#i-want-to-watch-serial-output-during-the-run-and-inspect-it-afterward) for the distinction from `-s` and for choosing a fixed log directory.
+
 - `arduino-cli` is not found: install Arduino CLI and add it to `PATH`.
 - A platform or version is not found: refresh the package index and check the platform name, index URL, and version in `sketch.yaml`. Do not work around it by manually installing the core into the environment.
 - Upload fails: check the port with `arduino-cli board list` and close other programs using it, such as the Arduino IDE serial monitor.
 - Output is garbled: match the baud rate to `Serial.begin(115200)`. The default is 115200.
-- For other symptoms, search the [FAQ](TESTING_FAQ.md). Add `-v` or `-vv` to pytest to see resolved commands and settings.
+- For other symptoms, search the [FAQ](TESTING_FAQ.md).
 
 ## Try it without hardware
 
-A host core builds the sketch as a PC executable and connects over a TCP socket instead of a serial port. It needs a host core and C++ toolchain, and it cannot test hardware-specific behavior.
+A host core builds the sketch as a PC executable and connects over a TCP socket instead of a serial port. The host machine must already provide a `gcc` / `g++`-compatible C/C++ toolchain, and the test cannot cover hardware-specific behavior. The host-core package does not install a compiler or linker, so install these through the operating system first.
 
-If you have cloned this repository, run:
+On Debian or Ubuntu Linux, install the toolchain as follows if it is not already present. See [host-arduino-core: Prerequisites](https://github.com/tanakamasayuki/host-arduino-core/blob/main/README.md#prerequisites) for other operating systems and details.
 
 ```bash
-uv sync
-uv run pytest examples/09_host_arduino_core --profile=host
+sudo apt update
+sudo apt install build-essential
+gcc --version
+g++ --version
 ```
+
+The sample belongs to `examples/09_host_arduino_core` in the `pytest-embedded-arduino-cli` repository, rather than to the Arduino project created on this page. To make a fresh clone under `/tmp` and try it on Linux, run:
+
+```bash
+cd /tmp
+git clone https://github.com/tanakamasayuki/pytest-embedded-arduino-cli.git
+cd pytest-embedded-arduino-cli
+uv run pytest examples/09_host_arduino_core --profile=host -s -v
+```
+
+There is no need to run `uv sync` first because `uv run` prepares the Python environment from the repository configuration. If you already cloned the repository elsewhere, replace the first two commands by changing to that repository root, then run the same `uv run pytest ...` command.
 
 See [`examples/09_host_arduino_core`](examples/09_host_arduino_core/README.md) for its configuration and limitations.
 

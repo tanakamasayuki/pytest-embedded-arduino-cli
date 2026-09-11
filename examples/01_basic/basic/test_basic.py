@@ -4,7 +4,7 @@ import pexpect
 import pytest
 
 
-STARTUP_TIMEOUT = 60.0
+STARTUP_TIMEOUT = 20.0
 PROBE_INTERVAL = 0.5
 
 

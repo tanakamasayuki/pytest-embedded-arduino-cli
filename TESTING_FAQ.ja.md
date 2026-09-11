@@ -139,6 +139,33 @@ pytestがserial portを開く前に、起動時の `READY` が流れ終わった
 
 → [テストの基本](TESTING_BASICS.ja.md) の *テストの最初は応答しない時間がある*
 
+### serial出力を実行中に見たい、あとからlogも確認したい
+
+`-s` を付けると、boardから受信したserial出力を実行中のconsoleで確認できます。
+
+```bash
+uv run pytest tests/my_app --profile=uno --port=/dev/ttyACM0 -s
+```
+
+`-s` はライブ表示のためのoptionです。付けた場合もserial logは収集され、`dut.log`へ保存されます。`-s` を付けない通常実行でも、consoleに表示されないだけでserial logの収集と保存は行われます。
+
+既定の保存先rootは、systemの一時directory内にある `pytest-embedded/` です。Linuxでは通常、次のような配置になります。
+
+```text
+/tmp/pytest-embedded/<実行日時>/<テスト名>/dut.log
+```
+
+一時directoryはOSや `TMPDIR`、`TEMP`、`TMP` などの環境設定で変わるため、常に `/tmp` とは限りません。保存先を分かりやすい場所へ固定したい場合は、`--root-logdir` を指定します。
+
+```bash
+uv run pytest tests/my_app --root-logdir=.pytest-embedded
+```
+
+詳しい保存内容とOSごとの場所は、次も参照してください。
+
+- [README: log directory の結果 summary](README.ja.md#log-directory-の結果-summary)
+- [テストの応用: ログとアーティファクトの置き場所](TESTING_ADVANCED.ja.md#ログとアーティファクトの置き場所)
+
 ### `dut.log` の末尾が無い、または行の途中で切れる
 
 最後に一致した時点でテストが終わると、それより後の受信がlogへ届く前に接続が閉じることがあります。deviceに終端markerを出させてそこまで `expect` するか、最後に `pexpect.TIMEOUT` を待って残りをdrainしてください。
