@@ -335,6 +335,61 @@ cacheはdownload時間を減らしますが、cache内のpackage/library index�
 
 不要な実行を減らす`paths`、古い同一branch実行を止める`concurrency.cancel-in-progress`、毎pushで回すprofileと手動の全面matrixを分ける考え方は、[テストの応用: ビルドテストは和ではなく積で増える](TESTING_ADVANCED.ja.md#ビルドテストは和ではなく積で増える)を参照してください。
 
+### host coreで描画した画面をGitHub Pagesへ公開できるか
+
+できます。[LGFXScreenBuilderScreenshotTestのscreenshots.yml](https://github.com/tanakamasayuki/LGFXScreenBuilderScreenshotTest/blob/main/.github/workflows/screenshots.yml)では、host coreの`mode=lgfx`とLovyanGFXのSDL2 backendを使い、実機なしのGitHub-hosted runnerで画面をPNGへ書き出しています。
+
+処理は次のように分かれています。
+
+1. runnerへ`libsdl2-dev`を導入する
+2. `sketch.yaml`にversion固定されたhost coreとlibraryを使ってsketchをbuild・実行する
+3. pytestが全profile × 全sceneのPNGが生成され、空でないことを確認する
+4. Pythonで`docs/`のHTML galleryを生成し、全画像が揃っていることを確認する
+5. 変更された`docs/`をcommitし、GitHub Pagesから公開する
+6. `if: always()`でgalleryをActions artifactとしても保存する
+
+workflow内で`arduino-cli core install`やBoard Manager URLのglobal登録は行いません。host coreのversionと`platform_index_url`、LovyanGFXなどのlibrary versionを`sketch.yaml`に宣言し、compile時に解決させています。Arduino CLI cacheを追加する場合は、ほかのbuild workflowと同様にcache復元後のindex更新も追加します。
+
+中心となるstepは次の形です。
+
+```yaml
+permissions:
+  contents: write
+
+steps:
+  - uses: actions/checkout@v4
+  - name: Install SDL2
+    run: |
+      sudo apt-get update
+      sudo apt-get install -y libsdl2-dev
+  - uses: arduino/setup-arduino-cli@v2
+  - uses: actions/setup-python@v5
+    with:
+      python-version: "3.13"
+  - uses: astral-sh/setup-uv@v5
+  - name: Capture screenshots and build gallery
+    run: uv run pytest screenshot/ -v
+  - name: Commit gallery
+    run: |
+      git config user.name "github-actions[bot]"
+      git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      git add docs
+      if ! git diff --cached --quiet; then
+        git commit -m "chore: update screenshot gallery [skip ci]"
+        git push
+      fi
+  - name: Upload gallery artifact
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: gallery
+      path: docs
+```
+
+branchの`docs/`をPages sourceにする場合、repositoryのSettings → Pagesで対象branchと`/docs`を一度設定し、workflowには`contents: write`を与えます。生成したgalleryのcommitでworkflowが再起動し続けないよう、triggerの`paths`には`docs/**`を含めず、生成commitにも`[skip ci]`を付けています。別案として、branchへ画像をcommitせずPages deploy artifactを使うこともできます。PNGの履歴でapplication repositoryが大きくなる場合は、専用のscreenshot repositoryへ分ける方が管理しやすくなります。
+
+この例が自動判定しているのは、PNGが生成されたこと、空でないこと、全profile × 全sceneがgalleryへ入ったことです。期待画像とのpixel比較まではしていないため、見た目の良否は[公開gallery](https://tanakamasayuki.github.io/LGFXScreenBuilderScreenshotTest/)で人が確認します。必要なら別途golden imageとの差分判定を追加します。また、headless描画は実LCDの色、panel初期化、転送速度などを保証しないため、最終確認は実機testと分けます。
+
 ### 単独では通るのに全体で落ちる、またはその逆
 
 **どちらも毎回同じ結果になるなら**、前のテストがしたことに依存しています。よくあるのは 3 つで、積み上がった状態への相乗り、最初に走ることへの依存、他のテストが汚す状態をきれいな前提で assert すること、です。**順序ではなく依存を直してください。** 順序を固定するのは、設計の誤りを消すのではなく隠すだけです。
