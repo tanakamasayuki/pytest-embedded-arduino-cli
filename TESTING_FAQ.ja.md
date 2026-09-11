@@ -152,6 +152,40 @@ Dockerfileのimage build時に一度だけ `core update-index` を実行して�
 
 → [テストの応用](TESTING_ADVANCED.ja.md) の *peer の board は plugin が面倒を見ます*
 
+### Linuxでserial portを開くと`Permission denied`になる
+
+まずdevice fileの所有groupと、現在のuserが所属するgroupを確認します。
+
+```bash
+ls -l /dev/ttyACM0
+id
+```
+
+Debian / Ubuntu系でdeviceのgroupが `dialout` の場合は、次のようにuserを追加します。
+
+```bash
+sudo usermod -aG dialout "$USER"
+```
+
+group追加は現在開いているlogin sessionには反映されません。logoutしてloginし直した後、`id`で反映を確認してください。distributionやudev ruleによってgroup名は異なるため、常に `dialout` と決めつけず、`ls -l`の結果に合わせます。恒久対策として `sudo chmod 666 /dev/ttyACM0` を使うと、再接続で元へ戻るうえアクセス範囲を広げるため推奨しません。
+
+Docker内から実機を使う場合は、host側の権限に加えてdeviceをcontainerへ渡す設定も必要です。まずcontainer内に該当するdevice fileが見えているか確認してください。
+
+### upload後にserial portの名前が変わり、接続できない
+
+native USBを使うboardなどでは、bootloaderと実行中のsketchが別のUSB deviceとして認識され、upload前後で `/dev/ttyACM0` から `/dev/ttyACM1` のように名前が変わることがあります。upload前後の `arduino-cli board list` と、Linuxなら `/dev/serial/by-id/` を比較してください。
+
+upload用と実行時通信用のpathが異なると分かっている場合は、両方を明示します。
+
+```bash
+uv run pytest tests/my_app \
+  --profile=uno \
+  --flash-port=/dev/ttyACM0 \
+  --port=/dev/ttyACM1
+```
+
+`--flash-port`は `arduino-cli upload` に使うport、`--port`はupload後にpytestがserial通信へ使うportです。同じUSB identityが維持されるboardでは、`/dev/serial/by-id/...`を使うと番号の変化を避けられる場合があります。bootloaderとsketchでidentity自体が異なる場合はそれぞれのpathを指定してください。
+
 ### compile後、uploadの前で長く待つ
 
 同じ物理deviceを使う別のpytest processがdevice lockを保持している可能性があります。既定では最大300秒待ちます。並行実行中のpytestを確認し、必要なら `--device-lock-timeout` を調整してください。lock fileが残っているだけではlock中になりません。OSのfile lockはprocess終了時に解放されます。

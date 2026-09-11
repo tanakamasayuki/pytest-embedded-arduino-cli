@@ -245,13 +245,17 @@ lock file は既定で user runtime/cache directory に置かれ、OS file lock 
 `pytest-embedded-serial` は通常依存に含めているため、実機テストで serial service を追加インストールなしで使えます。
 `--embedded-services` を指定しない場合、この plugin は `serial` をデフォルトで有効化します。
 
-profile ごとの serial port は次の順で解決します。
+uploadと実行時serial通信で同じportを使う場合は、`--port`だけを指定します。bootloaderとsketch実行時でportが異なるboardでは、upload先を`--flash-port`、実行時の接続先を`--port`として両方指定できます。
+
+`arduino-cli upload`へ渡すportは次の順で解決します。
 
 1. `--flash-port`
 2. `--port`
 3. `TEST_SERIAL_PORT_<PROFILE>`
 4. `TEST_SERIAL_PORT`
 5. `sketch.yaml` の `profiles.<PROFILE>.port`。ただし `socket://...` URL の場合のみ
+
+`--flash-port`と`--port`を両方指定した場合、上の優先順位によりuploadには`--flash-port`を使い、pytest-embeddedのserial接続には`--port`を残します。
 
 `pytest` の引数解釈の都合で、`--port` や `--flash-port` のように path を受け取る option は、`--port=/dev/ttyUSB0` のように `=` 付きで書く方が安全です。
 環境によっては `uv run pytest --port /dev/ttyUSB0` の形だと、その path を別の基準パスとして解釈してしまうことがあります。
