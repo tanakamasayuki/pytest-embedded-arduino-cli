@@ -49,6 +49,10 @@ Arduino API に触れない純粋な C++ なら、host core すら要りませ�
 
 - **[EspBle / unit-tests.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/unit-tests.yml)** — boardもArduino coreも使わず、systemの`g++`で製品sourceの純粋なC++部分をbuildしてpytestから実行する例です。`tests/uv.lock`をuv cacheのkeyにし、`tests/`をworking directoryにしています。serial portや`.env`は渡しません。
 
+## CI でのhost描画と生成物公開
+
+- **[LGFXScreenBuilderScreenshotTest / screenshots.yml](https://github.com/tanakamasayuki/LGFXScreenBuilderScreenshotTest/blob/main/.github/workflows/screenshots.yml)** — host coreの`mode=lgfx`とLovyanGFXのSDL2 backendで、全profile × 全sceneをheadless描画してPNGへ保存する例です。pytestが画像とgalleryの生成漏れを検査し、`docs/`をcommitして[GitHub Pages](https://tanakamasayuki.github.io/LGFXScreenBuilderScreenshotTest/)へ反映すると同時にActions artifactにも保存します。これは実LCDの検査やgolden imageとのpixel比較ではなく、生成の完全性を自動判定し、Pagesで全体を目視確認する構成です。
+
 ## 参考
 
 - **[ArduTest](https://github.com/tanakamasayuki/ArduTest)** — device 側で判定するためのライブラリです。`arduino_test` fixture から使います。判定を device 側に置く手段の 1 つで、これがなくても構いません。Unity でもよく、素朴に sketch から結果を print して host 側で判定しても同じことができます。用途に合うなら便利、という位置付けです。

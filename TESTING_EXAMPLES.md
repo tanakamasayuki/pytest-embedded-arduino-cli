@@ -49,6 +49,10 @@ The full example-by-profile matrix is orchestrated outside this plugin. Each job
 
 - **[EspBle / unit-tests.yml](https://github.com/tanakamasayuki/EspBle/blob/main/.github/workflows/unit-tests.yml)** — Uses neither a board nor an Arduino core. Pytest invokes the system `g++` to build and run pure C++ product code, keys the uv cache on `tests/uv.lock`, and runs with `tests/` as its working directory. It passes no serial port or `.env`.
 
+## Host rendering and generated-site publishing in CI
+
+- **[LGFXScreenBuilderScreenshotTest / screenshots.yml](https://github.com/tanakamasayuki/LGFXScreenBuilderScreenshotTest/blob/main/.github/workflows/screenshots.yml)** — Uses the host core's `mode=lgfx` and LovyanGFX's SDL2 backend to render every profile × scene headlessly to PNG. Pytest checks image and gallery completeness, commits `docs/` for [GitHub Pages](https://tanakamasayuki.github.io/LGFXScreenBuilderScreenshotTest/), and also retains it as an Actions artifact. This does not test a physical LCD or compare pixels to golden images; it automates completeness checks and presents the full gallery for visual review.
+
 ## Reference
 
 - **[ArduTest](https://github.com/tanakamasayuki/ArduTest)** — a library for deciding pass or fail on the device, used through the `arduino_test` fixture. It is one way to put the judgement on the device and you do not need it: Unity works, and so does simply printing the result from the sketch and checking it on the host. Convenient when it fits, nothing more.

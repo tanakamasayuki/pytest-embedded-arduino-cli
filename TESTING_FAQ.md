@@ -335,6 +335,61 @@ Caching saves download time, but cached package and library indexes can be stale
 
 See [Advanced Testing: Build tests grow with the product, not the sum](TESTING_ADVANCED.md#build-tests-grow-with-the-product-not-the-sum) for `paths`, `concurrency.cancel-in-progress`, and separating a narrow per-push profile set from a manually triggered full matrix.
 
+### Can a host core publish rendered screens to GitHub Pages?
+
+Yes. [LGFXScreenBuilderScreenshotTest's screenshots.yml](https://github.com/tanakamasayuki/LGFXScreenBuilderScreenshotTest/blob/main/.github/workflows/screenshots.yml) uses the host core's `mode=lgfx` and LovyanGFX's SDL2 backend to write screens to PNG files on a GitHub-hosted runner without physical hardware.
+
+The workflow separates the work as follows:
+
+1. install `libsdl2-dev` on the runner;
+2. build and run the sketch with host-core and library versions pinned in `sketch.yaml`;
+3. have pytest verify that every profile × scene PNG exists and is non-empty;
+4. generate the HTML gallery under `docs/` and verify that it contains every image;
+5. commit changed `docs/` files, which GitHub Pages then serves;
+6. also retain the gallery as an Actions artifact with `if: always()`.
+
+The workflow does not run `arduino-cli core install` or register a Board Manager URL globally. It declares the host-core version and `platform_index_url`, plus library versions such as LovyanGFX, in `sketch.yaml` and lets compilation resolve them. If you add an Arduino CLI cache, also add the post-restore index refresh used by the other build workflow.
+
+The central steps have this shape:
+
+```yaml
+permissions:
+  contents: write
+
+steps:
+  - uses: actions/checkout@v4
+  - name: Install SDL2
+    run: |
+      sudo apt-get update
+      sudo apt-get install -y libsdl2-dev
+  - uses: arduino/setup-arduino-cli@v2
+  - uses: actions/setup-python@v5
+    with:
+      python-version: "3.13"
+  - uses: astral-sh/setup-uv@v5
+  - name: Capture screenshots and build gallery
+    run: uv run pytest screenshot/ -v
+  - name: Commit gallery
+    run: |
+      git config user.name "github-actions[bot]"
+      git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      git add docs
+      if ! git diff --cached --quiet; then
+        git commit -m "chore: update screenshot gallery [skip ci]"
+        git push
+      fi
+  - name: Upload gallery artifact
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: gallery
+      path: docs
+```
+
+To publish the branch's `docs/`, configure the target branch and `/docs` once under repository Settings → Pages, and grant the workflow `contents: write`. To prevent the generated gallery commit from triggering the workflow again, omit `docs/**` from trigger `paths` and add `[skip ci]` to the generated commit. As an alternative, publish a Pages deployment artifact without committing images to the branch. A dedicated screenshot repository is easier to maintain when accumulated PNG history would make the application repository large.
+
+This example automatically checks that PNGs were produced, are non-empty, and cover every profile × scene in the gallery. It does not perform golden-image pixel comparison, so a person reviews visual quality through the [published gallery](https://tanakamasayuki.github.io/LGFXScreenBuilderScreenshotTest/). Add a separate golden-image comparison if required. Headless rendering also cannot validate physical LCD color, panel initialization, or transfer timing, so keep final hardware checks separate.
+
 ### A test passes alone but fails in the full run, or the other way round
 
 **If it is consistent both ways**, it depends on something an earlier test did. Three shapes account for most of it: riding on state an earlier test accumulated, depending on being first, and assuming a pristine state that another test dirties. **Fix the dependency, not the order** — pinning the order hides a design error rather than removing it.
