@@ -40,6 +40,31 @@ uv add pytest-embedded-arduino-cli
 
 `tests/` is now the Python-side workspace. The plugin, `.venv`, `uv.lock`, and pytest settings stay separate from the Arduino project itself.
 
+Next, create `tests/.gitignore` so local environments, build output, and generated test results do not enter Git.
+
+```gitignore
+# Python environment and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local settings and generated test results
+.env
+.pytest-results/
+.pytest-embedded/
+ardutest/
+
+# Arduino CLI build output under each test sketch
+**/build/
+```
+
+Do not commit `.env`, because it can contain machine-specific serial ports and credentials. Commit an `.env.example` without real values when the project needs to document shared variable names.
+
+Normally commit `pyproject.toml`, `uv.lock`, `.python-version`, `sketch.yaml`, `.ino` / `.h` / `.cpp`, and `test_*.py`. In particular, a project-specific test workspace such as this guide's should commit `uv.lock` so CI can reproduce its Python dependencies. See [FAQ: What should Git track and ignore?](TESTING_FAQ.md#what-should-git-track-and-ignore) for the reasons and exceptions.
+
 ## 3. Create the Arduino sketch
 
 Continue from inside `tests/` and let Arduino CLI create the sketch:
@@ -57,7 +82,9 @@ The relevant files now have this layout:
 
 ```text
 tests/
+  .gitignore
   pyproject.toml
+  uv.lock
   hello/
     hello.ino
     sketch.yaml
