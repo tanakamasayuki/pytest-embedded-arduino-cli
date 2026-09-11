@@ -12,9 +12,11 @@ This package does not depend on `pytest-embedded-arduino`. It is intended to sta
 
 ## Guides
 
+- [Your First Test](FIRST_TEST.md): create a first test with one physical board and understand each file, pytest pass/fail, startup waits, and timeout design.
 - [Testing Basics](TESTING_BASICS.md): what a test is, how a run works, what only real hardware can tell you, how many boards to use, and how to keep tests independent. Start here if you are new to pytest.
 - [Advanced Testing](TESTING_ADVANCED.md): collection rules, traps in `expect`, where logs and artifacts live, cleaning up after an early exit, when a `conftest.py` is justified, and principles for peer tests.
-- [Example Projects](TESTING_EXAMPLES.md): real projects that use all of the above, from the smallest host-core setup to a large multi-board one.
+- [Local Examples](examples/README.md): choose a runnable example in this repository by purpose and required hardware.
+- [Real Projects](TESTING_EXAMPLES.md): external projects that use the plugin, from the smallest host-core setup to a large multi-board one.
 - [FAQ](TESTING_FAQ.md): a symptom-first index into the two guides above, for when something has already gone wrong.
 
 ## Design
@@ -26,13 +28,25 @@ This package does not depend on `pytest-embedded-arduino`. It is intended to sta
 - Resolve sketch settings from `sketch.yaml` and `--profile`
 - Treat the test file directory as the sketch directory
 
-## Setup
+## Quick Start
+
+For an Arduino project, use `tests/` as the workspace to keep the Python environment separate from the project root.
 
 ```bash
+mkdir tests
+cd tests
 uv init
 uv add pytest-embedded-arduino-cli
-uv sync
+arduino-cli sketch new hello
+cd hello
+touch sketch.yaml test_hello.py
+
+# After editing sketch.yaml, hello.ino, and test_hello.py
+cd ..
+uv run pytest hello --profile=<PROFILE> --port=<PORT>
 ```
+
+[Your First Test](FIRST_TEST.md) provides the file contents and explains every part.
 
 Runtime dependencies include:
 
@@ -44,10 +58,11 @@ Runtime dependencies include:
 ## Requirements
 
 - `arduino-cli` available in `PATH`
-- Installed Arduino board core(s)
+- Every platform in `sketch.yaml` pins a core version that Arduino CLI can resolve from its indexes; the workflow must not depend on an unversioned core preinstalled in the environment
 - A serial port accessible from the host when running hardware tests
 
 When `sketch.yaml` declares platform or library versions, Arduino CLI resolves them through its local package and library indexes.
+Without a platform version, Arduino CLI uses a preinstalled core, so the build version cannot be identified from the configuration and an environment without that core fails. Always pin the version. Add `platform_index_url` to the profile when the platform needs an additional Board Manager URL.
 The indexes do not need to be refreshed on every test run, but they should be updated periodically or before CI/release verification.
 If a build fails because a declared platform or library version cannot be found, try:
 
@@ -319,7 +334,7 @@ Startup order is fixed:
 3. the primary DUT is uploaded
 4. when `peers` is requested, peer DUTs are uploaded in peer name order
 5. peer DUTs are connected and exposed through `peers`
-4. the primary DUT is connected and exposed as `dut`
+6. the primary DUT is connected and exposed as `dut`
 
 On real serial hardware, short boot-time messages can be missed if a sketch prints them immediately after reset or upload.
 Host Arduino core socket runs often keep enough output for this not to matter, but hardware tests should use a startup delay, repeated READY message, or an explicit handshake from Python before relying on early output.
@@ -458,25 +473,16 @@ Use environment variables, `.env`, or CI variables for values that depend on the
 
 ## Example
 
-```python
-def test_hello(dut):
-    dut.expect_exact("hello from arduino")
+[Your First Test](FIRST_TEST.md) creates the minimal sketch, `sketch.yaml`, and pytest file in your own project. This repository includes the same handshake in `examples/01_basic`:
+
+```bash
+uv run pytest examples/01_basic --profile=esp32 --port=/dev/ttyUSB0
 ```
 
-```cpp
-void setup() {
-  Serial.begin(115200);
-  delay(1000);
-  Serial.println("hello from arduino");
-}
-
-void loop() {}
-```
-
-Additional samples:
+See [`examples/README.md`](examples/README.md) for the purpose and hardware requirements of every example. Main samples:
 
 - `examples/01_basic`
-  - Minimal hello-world example
+  - Minimal serial round trip with a handshake that tolerates startup timing
   - Uses `esp32` as the default profile and also supports `uno`
   - Includes port resolution from `TEST_SERIAL_PORT` and `TEST_SERIAL_PORT_<PROFILE>`
 - `examples/02_env_define`

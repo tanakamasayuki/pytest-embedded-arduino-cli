@@ -2,7 +2,7 @@
 
 [日本語版 (Japanese)](README.ja.md)
 
-This is the smallest sample to try first.
+This is the smallest sample to try first and the runnable in-repository counterpart of [Your First Test](../../FIRST_TEST.md).
 
 - The default profile is `esp32`
 - Use `--profile` explicitly when you want another target such as `uno`
@@ -10,16 +10,20 @@ This is the smallest sample to try first.
 
 This sample defines `default_profile: esp32`, so it also works without `--profile`.
 
+Some boards cannot receive text immediately after startup even though the serial port can already be opened. Pytest can also miss text that the sketch prints only once at startup. A test that assumes either one-shot exchange can therefore fail even when the sketch is healthy.
+
+This test instead uses a readiness handshake: pytest repeatedly sends `ping` and checks the sketch's `PONG` response. It succeeds after bidirectional communication actually works, without depending on any particular startup attempt being delivered. A successful run reports `1 passed`. [Your First Test](../../FIRST_TEST.md#do-not-test-startup-serial-traffic-as-if-it-were-immediately-reliable) explains the timeout design in detail.
+
 Example:
 
 ```bash
-uv run pytest examples/01_basic --port=/dev/ttyUSB0
+uv run pytest examples/01_basic --profile=esp32 --port=/dev/ttyUSB0
 ```
 
 You can also target the sketch directory directly.
 
 ```bash
-uv run pytest examples/01_basic/basic --port=/dev/ttyUSB0
+uv run pytest examples/01_basic/basic --profile=esp32 --port=/dev/ttyUSB0
 ```
 
 Example with another profile:

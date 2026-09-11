@@ -49,6 +49,32 @@ filterwarnings =
 
 ## Build and upload
 
+### `sketch.yaml not found` or `multiple .ino files found`
+
+The directory containing the test file is the sketch directory. Use the same layout as an Arduino IDE project: one primary `.ino`, supporting `.h` / `.cpp` files, and a `sketch.yaml` in that directory or an ancestor.
+
+→ [Testing Basics](TESTING_BASICS.md), *Directory layout*
+
+### pytest asks for a profile, or skips the profile I selected
+
+The primary profile comes from `--profile`, `default_profile`, or automatic selection when there is exactly one profile. Multiple unselected profiles are an error. A selected profile absent from that sketch's `sketch.yaml` is an unsupported combination and is skipped before build.
+
+Peers do not automatically select their only profile. Set `default_profile` in `peer_<name>/sketch.yaml` or pass `--peer-profile <name>:<profile>`.
+
+→ [README](README.md), *Peer DUT*
+
+### Every test is skipped with `--run-mode=build`
+
+This is expected. Build mode compiles the sketches but does not execute pytest test functions, so each item reports `skipped test execution in build-only mode`. If compilation succeeded, the build goal succeeded.
+
+→ [README](README.md), *Usage*
+
+### `--run-mode=test` cannot find the build output directory
+
+Test mode skips compilation and reuses a build for the same sketch and profile. Run `--run-mode=all` or `--run-mode=build` first. Switching profiles also switches the build directory.
+
+→ [README](README.md), *Usage*
+
 ### A test that needs no hardware still triggers a build
 
 The trigger is **an `.ino` in the same directory**, not whether the test asked for `dut`. Move hardware-free tests into a directory with no sketch and the plugin does nothing for them.
@@ -57,9 +83,29 @@ The trigger is **an `.ino` in the same directory**, not whether the test asked f
 
 ### It built yesterday and fails today, after bumping the core or a library
 
-Reuse of the previous build is what makes an ordinary run fast, and a version bump is exactly when that reuse turns against you. Re-run with `--clean`. **This is the usual reason to reach for it**, and a full test with `--clean` before a release is worth the wait.
+First separate two failures. If Arduino CLI cannot find the declared version, its local package or library index may be stale; run `arduino-cli core update-index` and `arduino-cli lib update-index`. If the version resolves but compile fails, reuse of the previous build may be working against the upgrade, so rerun with `--clean`. Before a release, refresh the indexes and run the full suite with `--clean`.
 
 → [Advanced Testing](TESTING_ADVANCED.md), *The layers of a plan*
+
+### A newer core version resolves locally but not in GitHub Actions or Docker
+
+When CI reuses Arduino CLI's data directory or an old Docker image, it also reuses the package index stored there. After `sketch.yaml` moves to a newer core, that stale index does not know the release exists and platform resolution fails.
+
+Refresh the indexes **after** restoring caches and **before** starting pytest or any build. Refresh the library index too in jobs that may update library versions.
+
+```yaml
+- name: Update Arduino indexes
+  run: |
+    arduino-cli core update-index
+    arduino-cli lib update-index
+
+- name: Run build tests
+  run: uv run pytest examples/01_basic --profile=uno --run-mode=build
+```
+
+Running `core update-index` only while building a Docker image is not enough if CI keeps using that old image. Refresh it after the job or container starts, or regularly rebuild the base image. Reusing downloaded cores is fine, but **having a core cache and having a current index are separate conditions.**
+
+→ [Advanced Testing](TESTING_ADVANCED.md), *Build tests grow with the product, not the sum*
 
 ### The upload fails, or the port cannot be opened
 
@@ -67,13 +113,43 @@ Three shapes, and which one you get says where to look. No port configured gives
 
 → [Advanced Testing](TESTING_ADVANCED.md), *The plugin takes care of peer boards*
 
+### The run waits for a long time after compile and before upload
+
+Another pytest process may hold the device lock for that physical device. The default wait is up to 300 seconds. Check parallel pytest runs and adjust `--device-lock-timeout` if needed. A leftover lock file alone does not keep the device locked; the OS releases the file lock when its process exits.
+
+→ [README](README.md), *Main options*
+
 ## Talking to the device
+
+### Serial output is garbled
+
+The baud rate in the sketch's `Serial.begin(...)` differs from pytest's baud rate. The default is 115200. Match the sketch or pass `--baud`.
+
+→ [Testing Basics](TESTING_BASICS.md), *How it works*
 
 ### `expect` times out for a line the sketch definitely printed
 
 `expect` reads forward to its match and **throws away everything before it.** A line that went by before an earlier match can never be expected afterwards. Have the sketch emit its start-up output after the reply, not before.
 
 → [Advanced Testing](TESTING_ADVANCED.md), *Traps in expect*
+
+### The sketch prints `READY`, but the first `expect` times out
+
+The startup-only `READY` may have passed before pytest opened the serial port. This is especially likely while another peer is still uploading. Prefer a handshake that lets pytest query readiness and resend until the device answers.
+
+→ [Testing Basics](TESTING_BASICS.md), *The device does not answer at the start of a test*
+
+### The end of `dut.log` is missing or cut mid-line
+
+If the test ends at its last match, the connection may close before later received bytes reach the log. Have the device emit an end marker and `expect` it, or wait for `pexpect.TIMEOUT` at the end to drain the remaining output.
+
+→ [Advanced Testing](TESTING_ADVANCED.md), *Where logs and artifacts live*
+
+### A value captured by a regular expression is truncated
+
+A variable-length pattern at the end can match before the rest of the line arrives. Include an end such as `\r?\n` after the capture so the match waits for the complete line.
+
+→ [Advanced Testing](TESTING_ADVANCED.md), *End variable-length fields at the line boundary*
 
 ### The second test in a module cannot connect, on a host core
 

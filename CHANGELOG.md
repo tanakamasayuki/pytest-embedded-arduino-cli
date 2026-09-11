@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Add a concise README Quick Start and a detailed physical-board first-test guide, add a no-hardware host-core path, connect the guides to purpose-based local examples, and expand the symptom-first FAQ.
+- (JA) READMEの簡潔なQuick Startと、実機で詳しく学ぶ最初のtestガイドを追加。実機なしのhost core経路、ガイドと目的別exampleの相互リンク、症状から引くFAQも整備。
 
 ## 1.6.0
 - (EN) Add testing guides: Testing Basics, Advanced Testing, and Example Projects, all linked from the README.

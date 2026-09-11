@@ -393,6 +393,8 @@ TEST_WIFI_PASSWORD=my-password
 
 An unset variable passes an empty string rather than failing. If a value is required, put a check for the empty string in the sketch or the test.
 
+See [`examples/02_env_define`](examples/02_env_define/README.md) for values and [`examples/10_build_flags`](examples/10_build_flags/README.md) for valueless flags.
+
 ### Choosing between them
 
 - **`.env`**: the standing settings for that machine. Not committed.
@@ -819,9 +821,9 @@ A plan is not one run. It is several layers, cheap and frequent at the bottom, e
 
 **What you give up is the wrapping.** A host core hides the OS-dependent parts for you; a bare compiler call does not. The compiler's name, the flags, the path the binary lands at, even the signedness of `char` — which differs between your machine and the target — are all yours to get right, and nothing checks them for you. **The result may not run on another OS, or on a CI runner that is not yours.** Take this route when the code under test really is OS-independent, and go in knowing the harness around it is not.
 
-**About `--clean` on the full run.** It passes through to the compile, so nothing from a previous build is reused, and this plugin also clears the ArduTest artifacts before the run. **Most of the time you can leave it off** — an incremental build is much faster and nothing goes wrong. **Put it on when you have bumped a library or the core version.** Reuse is what makes the ordinary build fast, and a version bump is exactly when you no longer want it. **Before a release, run the full test with `--clean`.**
+**About `--clean` on the full run.** It passes through to the compile, so nothing from a previous build is reused, and this plugin also clears the ArduTest artifacts before the run. **Most of the time you can leave it off** — an incremental build is much faster and nothing goes wrong. After bumping a library or core version, first refresh the indexes so Arduino CLI can resolve the new release. If compile then fails, use `--clean` to avoid reusing the previous build. **Before a release, refresh the indexes and run the full test with `--clean`.**
 
-**The build layer is the one this plugin does not cover.** Everything else here runs through it, manual tests included — those are the same machinery, merely excluded from the default selection. A build test has no device, no serial port and no fixture to ask for: it is `arduino-cli compile` over a matrix. Wire it up separately rather than waiting for the plugin to grow into it.
+**This plugin handles compiling a selected sketch and profile through `--run-mode=build`.** What it does not own is enumerating the full example-by-profile set and distributing that work into CI jobs. Define that separately as a matrix, then invoke the plugin's build mode or call `arduino-cli compile` directly in each job. Manual tests still use the normal plugin machinery and are merely excluded from the default selection.
 
 **Nothing below the build layer asks its question**, because each of those runs builds one sketch for one profile. A change can pass every device test you own and still break a profile you never flash.
 
@@ -836,6 +838,7 @@ Examples times profiles. One more example adds a row, one more profile adds a co
 
 - **One failure must not cancel the other jobs.** A build matrix is a coverage report and you want every cell, so turn off fail-fast.
 - **Cache the installed platform**, keyed on whatever pins its version, so a job that is not bumping the core does not download it again.
+- **Refresh the package index after restoring the cache.** A stale index in a GitHub Actions cache or Docker image cannot resolve a newer core declared in `sketch.yaml`. Reuse the downloaded core, but run `arduino-cli core update-index` before the build. Also run `arduino-cli lib update-index` in jobs that manage library versions.
 - **A coverage matrix should record pass, fail or not-applicable per cell and still exit successfully.** A red cell is information. A gate that has to block a merge is a separate job with a separate rule.
 - **Watch the disk.** A platform install can be large, and several in one job may not fit. Decomposing into one core version per job is the way out.
 - **Skip cleanly.** An example that does not declare a given profile should be reported as not applicable, not as a failure.

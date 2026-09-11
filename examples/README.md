@@ -2,258 +2,93 @@
 
 [日本語版 (Japanese)](README.ja.md)
 
-`examples/` contains runnable samples for this plugin.
+`examples/` contains runnable reference implementations organized by purpose. If you are adding the plugin to your own project for the first time, start with [Your First Test](../FIRST_TEST.md).
 
-`uv run pytest` only runs the library's own test suite because `pyproject.toml` sets `testpaths = ["tests"]`.
-To run sample applications, target `examples/` explicitly.
+The numbers are not a strict difficulty scale. Select the example for the feature you need instead of treating this as a course that must be run from `01` onward.
 
-## Common Assumptions
+## Where to start
 
-These examples assume you have a real device available.
+### You have a physical board
 
-- The baseline verified target is `esp32:esp32:esp32`
-- Use `--profile` explicitly when selecting a target
-- If you do not want to pass `--profile`, the sample should define `default_profile` in `sketch.yaml`
-- Relying on single-profile auto-selection is supported, but not recommended for regular examples
-
-Common example command:
+Run `01_basic` first to check compile, upload, and a serial round trip.
 
 ```bash
-uv run pytest examples/01_basic --port=/dev/ttyUSB0
+uv run pytest examples/01_basic --profile=uno --port=/dev/ttyACM0
+uv run pytest examples/01_basic --profile=esp32 --port=/dev/ttyUSB0
 ```
 
-Select another profile explicitly when needed:
+Then try `03_dut_input` for the usual request-and-response test shape.
+
+### You do not have a board
+
+Start with `09_host_arduino_core`. It needs a host core and C++ toolchain, but no serial device.
 
 ```bash
-uv run pytest examples/01_basic --profile uno --port=/dev/ttyACM0
+uv run pytest examples/09_host_arduino_core --profile=host
 ```
 
-Sample-specific requirements are documented in each sample's own `README.md`.
+A host core checks logic and serial protocols. Use hardware for peripherals, interrupts, real-time timing, Flash/NVS, and board-specific APIs.
 
-These examples expect Arduino CLI's package and library indexes to be reasonably up to date.
-The indexes do not need to be refreshed on every test run, but updating them periodically or before CI/release verification is recommended.
-If a build fails because a platform or library version declared in `sketch.yaml` cannot be found, try refreshing the indexes:
+### You want a realistic project layout
+
+`07_arduino_library_project` and `08_arduino_ide_project` are independent workspaces. Change into their respective `tests/` directories before running them.
+
+## Examples by purpose
+
+| Example | Requirements | Subject | Related guide |
+| --- | --- | --- | --- |
+| [`01_basic`](01_basic/README.md) | One board | Minimal compile, upload, and serial round trip | [Your First Test](../FIRST_TEST.md) |
+| [`02_env_define`](02_env_define/README.md) | ESP32, Wi-Fi settings | Environment values as compile-time defines | [Advanced: configuration precedence](../TESTING_ADVANCED.md#configuration-precedence-and-env) |
+| [`03_dut_input`](03_dut_input/README.md) | One board | Runtime input with `dut.write()` | [Basics: how it works](../TESTING_BASICS.md#how-it-works) |
+| [`04_unity_basic`](04_unity_basic/README.md) | ESP32 | Device-side assertions | [Basics: pass/fail location](../TESTING_BASICS.md#there-are-two-places-to-decide-pass-or-fail) |
+| [`05_nvs_persistent`](05_nvs_persistent/README.md) | ESP32 | NVS surviving upload | [Basics: session, module, test](../TESTING_BASICS.md#session-module-test) |
+| [`06_erase_flash`](06_erase_flash/README.md) | ESP32 | Full Flash erase before upload | [Basics: session, module, test](../TESTING_BASICS.md#session-module-test) |
+| [`07_arduino_library_project`](07_arduino_library_project/README.md) | One board | Arduino library workspace | [Basics: directory layout](../TESTING_BASICS.md#directory-layout) |
+| [`08_arduino_ide_project`](08_arduino_ide_project/README.md) | One board | Arduino IDE project workspace | [Basics: directory layout](../TESTING_BASICS.md#directory-layout) |
+| [`09_host_arduino_core`](09_host_arduino_core/README.md) | Host core, C++ toolchain | Running a sketch without a board | [Basics: zero boards](../TESTING_BASICS.md#zero-boards-run-on-a-host-core) |
+| [`10_build_flags`](10_build_flags/README.md) | Host core, C++ toolchain | Valueless compile-time flags | [Advanced: compile-time defines](../TESTING_ADVANCED.md#compile-time-defines) |
+| [`11_ardutest`](11_ardutest/README.md) | Host core or board | ArduTest fixture | [README: ArduTest](../README.md#ardutest-fixture) |
+| [`12_peer_host_core`](12_peer_host_core/README.md) | Host core, C++ toolchain | Primary and peer layout | [Basics: two boards](../TESTING_BASICS.md#two-boards-tests-that-need-a-partner) |
+
+`05`/`06` and `02`/`03` form pairs: persistent versus erased state, and compile-time versus runtime values.
+
+## Common prerequisites
+
+- `arduino-cli` is on `PATH`
+- The selected profile declares and pins its platform version in `sketch.yaml`, and Arduino CLI can resolve it from its indexes; examples never depend on a preinstalled unversioned core
+- Hardware examples have a serial port accessible from the host
+
+Refresh the indexes when a version cannot be found:
 
 ```bash
 arduino-cli core update-index
 arduino-cli lib update-index
 ```
 
-## Profile Selection
+Set `platform_index_url` in a profile when its core needs an additional Board Manager URL. Projects distributing binaries should pin the production build version; projects distributing source should generally track newer core releases and test each update.
 
-The plugin resolves profiles in this order:
+Bare `uv run pytest` at the repository root runs only the plugin's own tests. Always pass an example path explicitly.
 
-1. `--profile`
-2. `default_profile` in `sketch.yaml`
-3. Automatic selection when there is exactly one profile
-4. Error when multiple profiles exist and no default is defined
+## Profiles and ports
 
-The examples in this repository are written with the following convention:
+The primary profile is resolved from `--profile`, `default_profile`, then automatic selection of a single profile. Multiple remaining profiles are an error. Name the profile in example commands to make the selected board explicit.
 
-- Prefer `--profile` when running commands explicitly
-- If a sample is intended to work without `--profile`, define `default_profile`
-- Avoid examples that depend only on single-profile auto-selection
+The port is resolved from `--flash-port`, `--port`, `TEST_SERIAL_PORT_<PROFILE>`, `TEST_SERIAL_PORT`, then a `socket://...` value in `sketch.yaml`. Write physical ports with `=`, such as `--port=/dev/ttyUSB0`, to avoid ambiguity with pytest path parsing. Repeated values can go in `.env`.
 
-## Execution
+## Running examples
 
-Run samples one by one as the default workflow.
+Run examples one at a time. Add `-s` for device logs, `-v` for assembled commands, and `-vv` for resolved paths, profiles, and ports.
 
-Add `-s` when you want to observe the device logs directly during the run.
-This is especially useful for examples where the meaning comes from comparing printed values across runs.
+- `--run-mode=all`: compile, upload, and test; the default
+- `--run-mode=build`: compile only; test items are reported as skipped
+- `--run-mode=test`: upload and test an existing build for the same profile
 
-Run the whole examples tree only when you want to verify all samples.
+Examples require different hardware and environment values, so running the entire tree is not the normal onboarding path. Name compatible examples explicitly when compiling a group.
 
-```bash
-uv run pytest examples/ --port=/dev/ttyUSB0
-```
+## Maintaining examples
 
-## Basic Features
-
-`--run-mode` controls which stages are executed:
-
-- `--run-mode=all`
-  - compile, upload, and test
-- `--run-mode=build`
-  - compile only
-- `--run-mode=test`
-  - skip compile, reuse the existing build output, upload, and test
-
-Port resolution uses this priority:
-
-1. `--flash-port`
-2. `--port`
-3. `TEST_SERIAL_PORT_<PROFILE>`
-4. `TEST_SERIAL_PORT`
-5. `profiles.<PROFILE>.port` in `sketch.yaml`, only when it is a `socket://...` URL
-
-Because of how `pytest` parses arguments, options that take path-like values such as `--port` and `--flash-port` are safer when written with `=`, for example `--port=/dev/ttyUSB0`.
-Depending on the environment, `uv run pytest --port /dev/ttyUSB0` may cause that path to be interpreted as another base path.
-If needed, `uv run pytest --rootdir . --port /dev/ttyUSB0` is also a valid workaround.
-
-For board cores that run the Arduino sketch on the host machine, use a pyserial socket URL instead of a serial device path.
-If the selected profile defines `port: socket://localhost`, `--port=socket://localhost` can be omitted.
-
-```bash
-uv run pytest examples/09_host_arduino_core --profile host
-```
-
-When the port number is omitted, such as `socket://localhost`, the plugin is expected to read `port` from `*.host-arduino.json` generated under the build output directory and complete the actual connection URL.
-When the port number is specified, such as `socket://localhost:56789`, that value is used directly.
-
-```json
-{
-  "pid": 21228,
-  "port": 56789
-}
-```
-
-Host execution is a lightweight test path for pure logic and serial protocol checks without physical hardware.
-Results may vary with the host OS, gcc or other toolchain versions, and platform implementations such as the host Arduino core's `Serial` class.
-It is not a replacement for real hardware testing.
-Use real hardware for peripherals, timing, interrupts, Flash/NVS, and board-specific APIs.
-Builds should also be checked separately with the production board profile.
-
-Use verbosity when you need to inspect what the plugin is doing:
-
-- `-v`
-  - shows the `arduino-cli compile` and `arduino-cli upload` commands
-- `-vv`
-  - also shows resolved details such as `sketch_dir`, `build_path`, `profile`, and `port`
-
-The directories are numbered in the recommended reading and verification order.
-
-- `01_basic`
-  - Minimal hello-world example
-  - Verified with `esp32` as the default profile
-  - Also documents port resolution from `TEST_SERIAL_PORT` and `TEST_SERIAL_PORT_<PROFILE>`
-- `02_env_define`
-  - Compile-time defines from environment variables
-  - Uses Wi-Fi to explain `build_config.toml` on ESP32-class targets
-- `03_dut_input`
-  - Runtime input sent over serial through `dut.write(...)`
-  - Works on both `esp32` and `uno`
-- `04_unity_basic`
-  - Minimal Unity-based test sketch for ESP32
-  - Useful when you want device-side assertions instead of ad-hoc serial output checks
-- `05_nvs_persistent`
-  - ESP32 `Preferences` / NVS data remains across runs by default
-  - Unsupported profiles are skipped before build because this example is specifically about ESP32 persistence
-- `06_erase_flash`
-  - `EraseFlash=all` resets ESP32 persistent data before upload
-  - Pairs with `05_nvs_persistent` to show the difference
-- `07_arduino_library_project`
-  - Practical Arduino library project layout with `tests/` as the `uv` root
-  - Includes shell and batch helper scripts for a practical test workspace
-- `08_arduino_ide_project`
-  - Arduino IDE style sketch project with `tests/` as the `uv` root
-  - Demonstrates thin wrapper `#include` files for code that cannot be separated as a library
-- `09_host_arduino_core`
-  - Builds the sketch with host tools such as gcc and launches it as a host executable
-  - Uses `port: socket://localhost` in `sketch.yaml` to connect to the TCP/IP endpoint opened by the host executable
-  - Useful for simple pure-logic and serial-protocol checks, not a replacement for hardware tests or build tests with the real board profile
-- `10_build_flags`
-  - Demonstrates value-less compile-time defines with `[flags]` in `build_config.toml`
-  - Shows how a project can explicitly enable test flags such as `PYTEST_BUILD`
-- `11_ardutest`
-  - Demonstrates the experimental `arduino_test` fixture with the ArduTest Arduino library
-  - Splits the basic runner and metadata/config runner so each sketch stays focused
-- `12_peer_host_core`
-  - Minimal `peers` fixture example using the host Arduino core
-  - Starts a primary DUT and one peer DUT without making them communicate with each other
-  - Shows the `peer_<name>` directory convention and `peers["<name>"]` access
-
-## Layout
-
-Each sample directory is one test app.
-
-```text
-examples/
-  01_basic/
-    README.md
-    basic/
-      sketch.yaml
-      basic.ino
-      test_basic.py
-  02_env_define/
-    README.md
-    wifi_env_define/
-      sketch.yaml
-      wifi_env_define.ino
-      build_config.toml
-      test_env_define.py
-  03_dut_input/
-    README.md
-    serial_dut_input/
-      sketch.yaml
-      serial_dut_input.ino
-      test_dut_input.py
-  04_unity_basic/
-    README.md
-    unity_basic/
-      sketch.yaml
-      unity_basic.ino
-      test_unity_basic.py
-  05_nvs_persistent/
-    README.md
-    nvs_persistent/
-      sketch.yaml
-      nvs_persistent.ino
-      test_nvs_persistent.py
-  06_erase_flash/
-    README.md
-    nvs_erase_flash/
-      sketch.yaml
-      nvs_erase_flash.ino
-      test_nvs_erase_flash.py
-  07_arduino_library_project/
-    README.md
-    demo_add_library/
-      library.properties
-      src/
-      tests/
-  08_arduino_ide_project/
-    README.md
-    demo_add_sketch/
-      basic_add/
-      tests/
-  09_host_arduino_core/
-    README.md
-    host_smoke/
-      sketch.yaml
-      host_smoke.ino
-      test_host_smoke.py
-  10_build_flags/
-    README.md
-    build_flag_switch/
-      sketch.yaml
-      build_config.toml
-      build_flag_switch.ino
-      test_build_flag_switch.py
-  11_ardutest/
-    README.md
-    ardutest_basic/
-      sketch.yaml
-      ardutest_basic.ino
-      test_ardutest_basic.py
-    ardutest_metadata/
-      sketch.yaml
-      ardutest_metadata.ino
-      test_ardutest_metadata.py
-  12_peer_host_core/
-    README.md
-    peer_host_smoke/
-      sketch.yaml
-      peer_host_smoke.ino
-      test_peer_host_smoke.py
-      peer_echo/
-        sketch.yaml
-        peer_echo.ino
-```
-
-This plugin treats the directory containing the selected test file as the sketch directory.
-
-## Notes
-
-- `examples/pytest.ini` is a local config to suppress a warning emitted by `pytest-embedded`
-- `02_env_define` requires `TEST_WIFI_SSID` and `TEST_WIFI_PASSWORD`
-- `-s` is useful when you want to see serial output such as `BOOT_COUNT` while the test is running
+- Keep each example focused on one subject.
+- Prefer a handshake pytest can query over one startup-only message.
+- State the command, required board/core, and expected result in each README.
+- Link new features from this table and the relevant guide section in both directions.
+- Keep one `.ino` per test directory and move supporting code to `.h` / `.cpp`.

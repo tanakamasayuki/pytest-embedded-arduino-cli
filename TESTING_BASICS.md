@@ -4,6 +4,8 @@
 
 A guide for writing your first tests with this plugin. It starts from what a test is, so you can read it without knowing pytest.
 
+If you are creating your first test, follow [Your First Test](FIRST_TEST.md). This document is not a setup recipe; it explains the design choices that keep a growing test suite reliable.
+
 ## What a test is
 
 A test is a way to let a machine check, the same way every time, what you used to check by hand.
@@ -44,7 +46,7 @@ When you run `pytest`, this happens in order.
 6. If the expected text arrives, the test moves on. If it does not, the test fails on a timeout.
 7. The serial port is closed.
 
-The smallest possible pairing is this. A sketch file and a test file go together.
+This is the central pairing. A sketch and test go together, and running them also requires a `sketch.yaml` in the same directory or an ancestor. [Your First Test](FIRST_TEST.md) shows the complete layout and command.
 
 ```cpp
 // hello.ino
@@ -152,6 +154,8 @@ So from pytest's point of view it is one test, and inside it any number of devic
 
 With Unity each check is also recorded in the junit report, so `--junitxml` keeps per-check results.
 
+See [`examples/04_unity_basic`](examples/04_unity_basic/README.md) and [`examples/11_ardutest`](examples/11_ardutest/README.md) for runnable versions.
+
 Either is fine, and you can mix them.
 
 ## What only real hardware can tell you
@@ -194,6 +198,8 @@ Unit tests are not only for a host core, either. Checking individual functions i
 
 In an Arduino project the library and the sketches live at the root. Mixing Python tooling in there makes a mess, so the recommended arrangement is to **keep everything test-related under `tests/` and leave the root clean.**
 
+Use the same layout as an Arduino IDE project inside each sketch directory: one primary `.ino`, supporting `.h` / `.cpp` files, plus the test file and `sketch.yaml`.
+
 ```text
 MyLibrary/                 <- the Arduino library root
   library.properties
@@ -211,6 +217,8 @@ MyLibrary/                 <- the Arduino library root
 ```
 
 Dependencies go in `tests/pyproject.toml`, so the Python virtual environment is created at `tests/.venv` and never mixes with the Arduino files.
+
+See [`examples/07_arduino_library_project`](examples/07_arduino_library_project/README.md) for a complete library layout and [`examples/08_arduino_ide_project`](examples/08_arduino_ide_project/README.md) for a sketch project opened with the Arduino IDE.
 
 **Commands are run from inside `tests/`.** The rest of this guide assumes that.
 
@@ -281,6 +289,8 @@ default_profile: host
 
 This suits checking logic, and no board has to be shared.
 
+See [`examples/09_host_arduino_core`](examples/09_host_arduino_core/README.md) for a runnable layout.
+
 **But a host core means one test per module.** Closing the connection ends the executable, so **a second test in the same module cannot connect**; measured, it is refused. `parametrize` fails for the same reason. To split, split the module. With no flashing to wait for and no board to share, adding a module costs comparatively little here.
 
 **Being able to run in CI is a major benefit.** A CI service such as GitHub Actions cannot have a board attached, but a host core needs none, so it just runs. Even without a bench of your own, the logic unit tests get checked automatically on every change. For a public open-source repository the free tier covers it, so it costs nothing.
@@ -296,6 +306,8 @@ pytest my_app --port=/dev/ttyUSB0
 ```
 
 A way to avoid typing `--port` every time is covered after the peer sections.
+
+See [`examples/01_basic`](examples/01_basic/README.md) for the smallest runnable example and [`examples/03_dut_input`](examples/03_dut_input/README.md) for runtime input.
 
 Even with one board you can wire an output back to an input as a loopback and exercise both directions. Peripherals, timing and persistence, the things a host core cannot tell you, start here.
 
@@ -326,6 +338,8 @@ def test_round_trip(dut, peers):
 You write two sketches. The primary sends to the peer over whatever transport you are testing when it receives `send`, and the peer prints `RECEIVED` when it gets something. Whether the transport is BLE, Wi-Fi or I2C, the test side looks the same.
 
 BLE and Wi-Fi obviously need a partner, but many other tests are simply easier with two boards. You can read the other side's log directly, which tells you which side is at fault.
+
+See [`examples/12_peer_host_core`](examples/12_peer_host_core/README.md) for a no-hardware demonstration of this layout.
 
 ### Three or more boards: cluster-style tests
 
@@ -416,6 +430,8 @@ This is what happens at each level.
 - **Module end**: the device lock is released.
 
 **One caveat, though: whether an upload erases non-volatile storage depends on the board.** Settings, logs, pairing information. **In many cases it is not erased by default.** Where that holds, data a test wrote persists across modules and across runs, and that becomes **a place where "a module boundary is always clean" does not hold.**
+
+[`examples/05_nvs_persistent`](examples/05_nvs_persistent/README.md) and [`examples/06_erase_flash`](examples/06_erase_flash/README.md) are a paired demonstration of the difference.
 
 There are two ways to deal with it, and which one fits depends on the situation.
 

@@ -37,7 +37,7 @@ Arduino API に触れない純粋な C++ なら、host core すら要りませ�
 
 ## CI でのビルドテスト
 
-ガイドではビルドテストをこのプラグインの外に置いています。device も serial も無く、matrix で `arduino-cli compile` を回すだけのものです。[応用編](TESTING_ADVANCED.ja.md)で説明した形の、実物のワークフローです。
+全example × 全profileのmatrixを組む責務はpluginの外に置きます。各jobのcompileには `--run-mode=build` を使うことも、`arduino-cli compile` を直接使うこともできます。[応用編](TESTING_ADVANCED.ja.md)で説明した形の、実物のワークフローです。
 
 - **[EspUsbHost / build-check.yml](https://github.com/tanakamasayuki/EspUsbHost/blob/main/.github/workflows/build-check.yml)** — 毎 push 側の形です。matrix で profile ごとに 1 ジョブを立て、各ジョブが全 example をビルドします。fail-fast は切ってあり、platform のキャッシュは `sketch.yaml` の内容をキーにしています。ある profile を宣言していない example は、失敗ではなくその対象で飛ばされます。
 - **[EspUsbHost / version-matrix.yml](https://github.com/tanakamasayuki/EspUsbHost/blob/main/.github/workflows/version-matrix.yml)** — 必要なときだけ回す掃き出しです。手動起動のみで、複数の core を 1 つのランナーに入れられないため **core version ごとにジョブを分解**し、最後に Markdown の matrix にまとめてリポジトリへコミットします。セルごとに成功・失敗・対象外を記録した上で正常終了するので、赤いセルがあってもジョブは落ちません。
