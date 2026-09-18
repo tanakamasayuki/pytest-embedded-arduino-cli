@@ -146,6 +146,7 @@ uv run pytest
 `--clean` passes `--clean` to `arduino-cli compile`.
 It is useful when Arduino CLI's incremental build cache should be ignored.
 It also removes the ArduTest artifact directory before running.
+It does not touch Arduino CLI's shared caches; see [Build Output and Cache Cleanup (Linux)](#build-output-and-cache-cleanup-linux).
 
 `--save-state` enables local test verification state caching to `state.json` for development convenience.
 By default, this is disabled.
@@ -182,6 +183,83 @@ For peer tests (multi-DUT), only the primary DUT state is recorded.
 
 `--save-state-dir` specifies the directory for state.json storage.
 The default is `.pytest-results` (relative to pytest rootdir unless absolute).
+
+## Build Output and Cache Cleanup (Linux)
+
+`--clean` only covers the build path of the run it is given to. Arduino CLI's shared caches under
+`~/.cache/arduino` and `~/.arduino15` are never touched by this plugin, by pytest, or by `--clean`.
+Cleaning those is outside the scope of a pytest plugin, so the commands below are provided as a
+reference for writing your own `make clean` target or maintenance script.
+
+Paths below are the Linux defaults. Confirm the actual values with:
+
+```bash
+arduino-cli config get directories
+```
+
+### What lives where
+
+| Path | Contents | Safe to delete | Cost of deleting |
+| --- | --- | --- | --- |
+| `<sketch_dir>/build/<profile>` | This plugin's compile output (passed to `arduino-cli compile --build-path`) | Yes | Full recompile of that sketch |
+| `~/.cache/arduino/cores` | Shared `core.a` cache, keyed by board and build options | Yes | Core recompile |
+| `~/.cache/arduino/sketches` | Arduino CLI's own sketch build cache, used when `--build-path` is *not* given (plain `arduino-cli compile`, Arduino IDE) | Yes | Recompile of those sketches |
+| `~/.arduino15/staging` | Download cache of `.tar.bz2` / `.zip` archives staged during core and library installation | Yes | Re-download on the next install |
+| `~/.arduino15/internal` | Cores, tools and libraries installed per `sketch.yaml` profile, isolated by a dependency hash | Yes | Re-download on the next profile build (can be several GB) |
+| `~/.arduino15/packages` | Cores installed with `arduino-cli core install` | **No** | Requires manual reinstall |
+| `~/Arduino/libraries` | Libraries installed with `arduino-cli lib install`, and your own libraries | **No** | Requires manual reinstall |
+
+The plugin's own outputs are separate and all live under the pytest rootdir: the ArduTest artifact
+directory (`ardutest/` by default, already removed by `--clean`), `.pytest-results/` from
+`--save-state`, and the `pytest-embedded` log directory under `$TMPDIR`.
+
+### Case 1: a stale cache is suspected
+
+Work outwards from the narrowest scope; stop as soon as the problem goes away.
+
+```bash
+# 1. This run only. Rebuilds the build path, keeps the shared caches.
+uv run pytest tests/my_app --clean
+
+# 2. Every build directory in the repository.
+#    The build path is always <sketch_dir>/build/<profile>, so locating sketch.yaml
+#    finds them exactly, without catching Python's own build/ directory.
+find . -name sketch.yaml -not -path './.venv/*' -printf '%h/build\n' | xargs -r rm -rf
+
+# 3. The shared compile caches as well. Everything here is regenerated, nothing is re-downloaded.
+rm -rf ~/.cache/arduino/cores ~/.cache/arduino/sketches
+```
+
+To review the list before deleting, run the `find` without the `xargs` pipe first.
+
+### Case 2: reclaiming disk space
+
+Check the actual sizes first. The order of magnitude differs greatly between these directories:
+
+```bash
+du -sh ~/.arduino15/internal ~/.arduino15/staging ~/.arduino15/packages ~/.cache/arduino/*
+```
+
+```bash
+# Download cache. Pure cache, nothing needs reinstalling afterwards.
+arduino-cli cache clean          # equivalent to: rm -rf ~/.arduino15/staging
+
+# Build caches.
+rm -rf ~/.cache/arduino/cores ~/.cache/arduino/sketches
+
+# Profile-scoped installs. Usually by far the largest directory.
+rm -rf ~/.arduino15/internal
+```
+
+`~/.arduino15/internal` deserves particular attention in a profile-based workflow like this plugin's.
+Each distinct set of `sketch.yaml` profile dependencies is installed in isolation under its own
+hashed directory, so every core version, every toolchain version and every library version you have
+ever referenced from a profile is kept side by side. A single ESP32 toolchain is roughly 2 GB, and
+the directory reaching tens of GB is normal. Deleting it is safe, but the next build of each profile
+re-downloads what it needs, so do it when you can afford the download time.
+
+Note that `arduino-cli cache clean` only clears the download staging directory. It does not touch
+the build caches under `~/.cache/arduino`, which is why they are listed separately above.
 
 ## Log Directory Summary
 
