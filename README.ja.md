@@ -146,6 +146,7 @@ uv run pytest
 `--clean` は `arduino-cli compile` に `--clean` を渡します。
 Arduino CLI の incremental build cache を使わずに再 build したいときに使います。
 ArduTest の artifact 保存先 directory も、実行前に directory ごと削除します。
+Arduino CLI の共有 cache には触れません。[build 成果物と cache の掃除（Linux）](#build-成果物と-cache-の掃除linux) を参照してください。
 
 `--save-state` を指定すると、ローカル開発用にテストの検証状態を `state.json` に記録します。
 既定値は無効です。
@@ -182,6 +183,83 @@ peer test（複数 DUT）の場合、primary DUT の状態のみ記録されま�
 
 `--save-state-dir` は `state.json` の保存先 directory を指定します。
 既定値は `.pytest-results` です（pytest rootdir からの相対 path。絶対 path の場合はそのまま使用）。
+
+## build 成果物と cache の掃除（Linux）
+
+`--clean` が対象にするのは、その実行の build path だけです。`~/.cache/arduino` や `~/.arduino15`
+にある Arduino CLI の共有 cache は、`--clean` でも、この plugin でも、pytest でも触りません。
+これらの掃除は pytest plugin の責務の外なので、以下は自分で `make clean` 相当の target や
+保守用 script を書くときの参考コマンドとして記載します。
+
+以下の path は Linux の既定値です。実際の値は次のコマンドで確認できます。
+
+```bash
+arduino-cli config get directories
+```
+
+### どこに何があるか
+
+| path | 内容 | 消してよいか | 消した場合のコスト |
+| --- | --- | --- | --- |
+| `<sketch_dir>/build/<profile>` | この plugin の compile 出力（`arduino-cli compile --build-path` に渡す先） | はい | その sketch の full recompile |
+| `~/.cache/arduino/cores` | 共有の `core.a` cache。board と build option をキーに保持 | はい | core の recompile |
+| `~/.cache/arduino/sketches` | Arduino CLI 自身の sketch build cache。`--build-path` を**渡さない**実行（素の `arduino-cli compile`、Arduino IDE）で使われる | はい | 該当 sketch の recompile |
+| `~/.arduino15/staging` | core や library の install 時に展開前の `.tar.bz2` / `.zip` を置くダウンロード cache | はい | 次回 install 時に再ダウンロード |
+| `~/.arduino15/internal` | `sketch.yaml` の profile ごとに、依存の hash で隔離して install された core / tool / library | はい | 次回の profile build で再ダウンロード（数 GB になりうる） |
+| `~/.arduino15/packages` | `arduino-cli core install` で install した core | **いいえ** | 手動で再 install が必要 |
+| `~/Arduino/libraries` | `arduino-cli lib install` で install した library、および自作 library | **いいえ** | 手動で再 install が必要 |
+
+この plugin 自身の出力はこれらとは別で、すべて pytest rootdir 配下にあります。ArduTest の artifact
+directory（既定は `ardutest/`。`--clean` で削除済み）、`--save-state` による `.pytest-results/`、
+`$TMPDIR` 配下の `pytest-embedded` log directory です。
+
+### ケース 1: cache が悪さをしていそうなとき
+
+狭い範囲から順に広げて、問題が消えた時点で止めるのが安全です。
+
+```bash
+# 1. この実行のみ。build path を作り直し、共有 cache はそのまま。
+uv run pytest tests/my_app --clean
+
+# 2. リポジトリ内の全 build directory。
+#    build path は必ず <sketch_dir>/build/<profile> なので、sketch.yaml の位置から
+#    正確に列挙できます。Python 側の build/ を巻き込む心配もありません。
+find . -name sketch.yaml -not -path './.venv/*' -printf '%h/build\n' | xargs -r rm -rf
+
+# 3. 共有の compile cache も含めて削除。ここは再生成されるだけで、再ダウンロードは発生しません。
+rm -rf ~/.cache/arduino/cores ~/.cache/arduino/sketches
+```
+
+削除前に対象を確認したい場合は、`xargs` に繋がずに `find` だけを実行してください。
+
+### ケース 2: ディスク容量を空けたいとき
+
+まず実際のサイズを確認します。directory ごとに桁が大きく違います。
+
+```bash
+du -sh ~/.arduino15/internal ~/.arduino15/staging ~/.arduino15/packages ~/.cache/arduino/*
+```
+
+```bash
+# ダウンロード cache。純粋な cache なので、消しても再 install は不要です。
+arduino-cli cache clean          # rm -rf ~/.arduino15/staging と同等
+
+# build cache。
+rm -rf ~/.cache/arduino/cores ~/.cache/arduino/sketches
+
+# profile ごとの install。たいていここが圧倒的に大きくなります。
+rm -rf ~/.arduino15/internal
+```
+
+この plugin のような profile ベースの運用では、`~/.arduino15/internal` が特に重要です。
+`sketch.yaml` の profile 依存の組み合わせごとに隔離して install されるため、過去に profile から
+参照した core version・toolchain version・library version がすべて並んで残ります。ESP32 の
+toolchain は 1 つで約 2 GB あり、この directory が数十 GB に達するのは珍しくありません。
+削除しても問題ありませんが、次回それぞれの profile を build する際に必要な分を再ダウンロードするので、
+ダウンロード時間を許容できるタイミングで実行してください。
+
+なお `arduino-cli cache clean` が消すのはダウンロードの staging directory だけです。
+`~/.cache/arduino` 配下の build cache には効かないため、上記では別扱いにしています。
 
 ## log directory の結果 summary
 
