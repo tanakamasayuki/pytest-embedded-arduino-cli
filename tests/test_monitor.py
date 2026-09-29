@@ -11,6 +11,8 @@ from pytest_embedded_arduino_cli.monitor import (
     MonitorTarget,
     has_own_monitor,
     is_monitor_url,
+    own_monitor_protocols,
+    port_protocol,
     register_protocol_handler,
 )
 from pytest_embedded_arduino_cli.plugin import _runtime_port_for_app
@@ -81,12 +83,37 @@ def test_has_own_monitor_counts_pattern_and_non_builtin_tools() -> None:
     assert not has_own_monitor({"pluggable_monitor.pattern.wlink": "x"})
 
 
+def test_own_monitor_protocols_lists_every_protocol_with_a_platform_monitor() -> None:
+    assert own_monitor_protocols(
+        {
+            "pluggable_monitor.pattern.serial": "ch32rv monitor",
+            "pluggable_monitor.pattern.wchlink": "ch32rv monitor",
+            "pluggable_monitor.required.oep": "WCH:oep-monitor",
+            "pluggable_monitor.required.network": "builtin:network-monitor",
+            "upload.tool.serial": "ch32rv",
+        }
+    ) == {"serial", "wchlink", "oep"}
+
+
 @pytest.mark.parametrize(
     ("address", "profile"),
-    [("/dev/ttyACM0", "ch32"), ("COM3", None), ("/dev/serial/by-id/usb-WCH_Link?x&y", "a-b")],
+    [
+        ("/dev/ttyACM0", "ch32"),
+        ("COM3", None),
+        ("/dev/serial/by-id/usb-WCH_Link?x&y", "a-b"),
+        ("wchlink://FBC18F0680B0", "ch32v203"),
+        ("oep://30eda0e31108-hs/x035", "x035"),
+    ],
 )
 def test_monitor_url_round_trip(tmp_path: Path, address: str, profile: str | None) -> None:
-    target = MonitorTarget(address=address, sketch_dir=tmp_path / "my sketch", profile=profile, cli_path="/opt/a c/arduino-cli")
+    protocol = port_protocol(address)
+    target = MonitorTarget(
+        address=address,
+        sketch_dir=tmp_path / "my sketch",
+        profile=profile,
+        cli_path="/opt/a c/arduino-cli",
+        protocol=protocol,
+    )
     url = target.to_url()
 
     assert is_monitor_url(url)
@@ -101,6 +128,18 @@ def test_monitor_command_keeps_stdin_session_and_skips_discovery(tmp_path: Path)
         "arduino-cli", "monitor", "-p", "/dev/ttyACM0", "-l", "serial", "--quiet", "-m", "ch32",
     ]
     assert "-m" not in MonitorTarget(address="/dev/ttyACM0", sketch_dir=tmp_path).command()
+    assert MonitorTarget(
+        address="wchlink://FBC18F0680B0", sketch_dir=tmp_path, profile="ch32v203", protocol="wchlink"
+    ).command() == [
+        "arduino-cli", "monitor", "-p", "wchlink://FBC18F0680B0", "-l", "wchlink", "--quiet", "-m", "ch32v203",
+    ]
+
+
+def test_port_protocol_reads_the_scheme() -> None:
+    assert port_protocol("/dev/ttyACM0") == "serial"
+    assert port_protocol("COM3") == "serial"
+    assert port_protocol("WCHLINK://FBC18F0680B0") == "wchlink"
+    assert port_protocol("oep://30eda0e31108-hs/x035") == "oep"
 
 
 def test_monitor_serial_round_trips_bytes_and_runs_in_sketch_dir(
@@ -193,7 +232,11 @@ def test_runtime_port_is_routed_only_for_platforms_with_own_monitor(
         calls.append((str(sketch_dir), profile))
         fqbn = (Path(sketch_dir) / "sketch.yaml").read_text(encoding="utf-8").split("fqbn: ")[1].split("\n")[0]
         if own[fqbn]:
-            return {"pluggable_monitor.pattern.serial": "ch32rv monitor"}
+            return {
+                "pluggable_monitor.pattern.serial": "ch32rv monitor",
+                "pluggable_monitor.pattern.wchlink": "ch32rv monitor",
+                "pluggable_monitor.required.oep": "WCH:oep-monitor",
+            }
         return {"pluggable_monitor.required.serial": "builtin:serial-monitor"}
 
     monkeypatch.setattr(plugin_module, "run_show_properties", fake_show_properties)
@@ -210,7 +253,15 @@ def test_runtime_port_is_routed_only_for_platforms_with_own_monitor(
     assert _runtime_port_for_app(config, esp, "/dev/ttyUSB0") == "/dev/ttyUSB0"
     assert _runtime_port_for_app(config, first, "socket://localhost:1234") == "socket://localhost:1234"
     assert _runtime_port_for_app(config, first, None) is None
-    # Sketches that name the same board share one probe.
+    # A URL whose scheme is a protocol the platform has a monitor for is routed.
+    wchlink = MonitorTarget.from_url(_runtime_port_for_app(config, first, "wchlink://FBC18F0680B0"))
+    assert (wchlink.address, wchlink.protocol) == ("wchlink://FBC18F0680B0", "wchlink")
+    oep = MonitorTarget.from_url(_runtime_port_for_app(config, second, "oep://30eda0e31108-hs/x035"))
+    assert (oep.address, oep.protocol) == ("oep://30eda0e31108-hs/x035", "oep")
+    # Other URLs stay with pyserial, as do platforms without a monitor for the scheme.
+    assert _runtime_port_for_app(config, first, "rfc2217://host:2217") == "rfc2217://host:2217"
+    assert _runtime_port_for_app(config, esp, "wchlink://FBC18F0680B0") == "wchlink://FBC18F0680B0"
+    # Sketches that name the same board share one probe; socket:// is never probed.
     assert [Path(sketch).name for sketch, _ in calls] == ["first", "esp"]
 
 

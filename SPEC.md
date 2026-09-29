@@ -621,15 +621,16 @@ Some platforms deliver the runtime console through their own pluggable monitor, 
 Detection:
 
 - The plugin runs `arduino-cli compile --show-properties --profile <profile>` for the sketch under test. With a profile, arduino-cli reads the platform version the profile pins.
-- The platform has its own monitor when `pluggable_monitor.pattern.serial` is set, or when `pluggable_monitor.required.serial` names a tool that does not start with `builtin:`. `builtin:serial-monitor` is the default arduino-cli fills in for platforms without one, and it is not counted.
-- Only the `serial` protocol is considered. Ports written as URLs, such as `socket://...`, are always left to pyserial.
+- The port's protocol is `serial` for a plain path such as `/dev/ttyACM0` or `COM3`, and the scheme for a port written as `<scheme>://...`, such as `wchlink://FBC18F0680B0` or `oep://<probe>/<slot>` reported by the platform's pluggable discovery.
+- The platform has its own monitor for that protocol when `pluggable_monitor.pattern.<protocol>` is set, or when `pluggable_monitor.required.<protocol>` names a tool that does not start with `builtin:`. `builtin:serial-monitor` is the default arduino-cli fills in for platforms without one, and it is not counted.
+- A URL whose scheme the platform has no monitor for, such as `rfc2217://...`, is left to pyserial. `socket://...` (the host core) is always left to pyserial and not probed.
 - The result is cached per board for the session. Sketches whose profiles have the same `fqbn` and `platforms` share one probe. A sketch without a profile is probed on its own.
 - The choice is automatic and there is no option to override it. Tests keep using `dut` and `peers`; there is no separate fixture and no marker.
 
 Connection:
 
 - The runtime port becomes an `arduinomonitor://<address>?...` URL. The plugin registers a pyserial protocol handler for that scheme, so `dut`, `peers`, `dut.write`, `expect`, and the logs work unchanged.
-- The handler starts `arduino-cli monitor -p <address> -l serial --quiet -m <profile>` with the sketch directory as the working directory, and pipes stdin and stdout. Both directions pass bytes unchanged. stderr is kept apart from the data.
+- The handler starts `arduino-cli monitor -p <address> -l <protocol> --quiet -m <profile>` with the sketch directory as the working directory, and pipes stdin and stdout. Both directions pass bytes unchanged. stderr is kept apart from the data.
 - stdin stays open for the whole session. arduino-cli ends the session when stdin reaches EOF. Bytes written before the monitor has opened the port are delivered once it has.
 - Port settings are left to arduino-cli: board defaults from `monitor_port.serial.<id>` in `boards.txt`, overridden by the profile's `port_config` in `sketch.yaml`. The plugin adds no option for them, and `--baud` does not apply to this connection. With a profile, a top-level `default_port_config` in `sketch.yaml` is not applied by arduino-cli. A key the monitor does not declare makes arduino-cli stop before the session opens.
 - Closing closes stdin, which makes arduino-cli send `CLOSE` to the monitor tool and exit. If arduino-cli has not exited within a few seconds, it is terminated. The monitor tool runs in a process group of its own; it is expected to exit when its stdin reaches EOF.
@@ -723,7 +724,7 @@ If a socket URL such as `socket://localhost` is specified in `--port` or an envi
 A socket URL without a port number is completed by reading the `port` from the `*.host-arduino.json` in the build output directory after upload.
 A socket URL with a port number is used directly without completion.
 
-When the platform has its own pluggable monitor, a runtime port that is not a URL is read through `arduino-cli monitor` instead of being opened with pyserial (see 13.9).
+When the platform has its own pluggable monitor for the runtime port's protocol (`serial` for a plain path, the scheme for `wchlink://...` and the like), the runtime port is read through `arduino-cli monitor` instead of being opened with pyserial (see 13.9).
 
 ### 14.6 Device Lock Related
 

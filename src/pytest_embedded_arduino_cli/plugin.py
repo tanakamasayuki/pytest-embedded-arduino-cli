@@ -22,7 +22,7 @@ from .app import (
 from .device_lock import DeviceLockError, DeviceLockInfo, DeviceLockSet, default_lock_dir
 from .flasher import ArduinoCliUploadConfig
 from .log_summary import LogSummaryCollector
-from .monitor import MonitorTarget, has_own_monitor, register_protocol_handler
+from .monitor import MonitorTarget, is_monitor_url, own_monitor_protocols, port_protocol, register_protocol_handler
 from .serial import (
     complete_host_arduino_socket_url,
     ensure_default_embedded_services,
@@ -531,15 +531,15 @@ def _board_key(app: ArduinoCliBuildConfig) -> tuple[str, ...]:
     return ("board", repr(profile_data.get("fqbn")), repr(profile_data.get("platforms")))
 
 
-def _platform_has_own_monitor(config: pytest.Config, app: ArduinoCliBuildConfig) -> bool:
+def _platform_has_own_monitor(config: pytest.Config, app: ArduinoCliBuildConfig, protocol: str) -> bool:
     cache = getattr(config, "_arduino_cli_own_monitor", None)
     if cache is None:
         cache = {}
         config._arduino_cli_own_monitor = cache
     key = _board_key(app)
     if key not in cache:
-        cache[key] = has_own_monitor(_show_properties(config, app))
-    return cache[key]
+        cache[key] = own_monitor_protocols(_show_properties(config, app))
+    return protocol in cache[key]
 
 
 def _runtime_port_for_app(
@@ -547,18 +547,24 @@ def _runtime_port_for_app(
     app: ArduinoCliBuildConfig,
     port: str | None,
 ) -> str | None:
-    """Route a plain runtime port through ``arduino-cli monitor`` when the
-    platform brings its own pluggable monitor. URLs such as ``socket://`` are
-    left to pyserial."""
-    if not port or "://" in port:
+    """Route a runtime port through ``arduino-cli monitor`` when the platform
+    brings its own pluggable monitor for the port's protocol.
+
+    A plain path is the ``serial`` protocol. A URL such as ``wchlink://...``
+    is routed when the platform has a monitor for ``wchlink``; other URLs are
+    left to pyserial. ``socket://`` (the host core) is never probed.
+    """
+    if not port or is_monitor_url(port) or is_socket_url(port):
         return port
-    if not _platform_has_own_monitor(config, app):
+    protocol = port_protocol(port)
+    if not _platform_has_own_monitor(config, app, protocol):
         return port
     return MonitorTarget(
         address=port,
         sketch_dir=app.sketch_dir,
         profile=app.profile,
         cli_path=app.cli_path,
+        protocol=protocol,
     ).to_url()
 
 
