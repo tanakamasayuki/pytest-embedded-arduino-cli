@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Route runtime ports written as `<scheme>://...`, such as `wchlink://...` or `oep://...` from a platform's pluggable discovery, through `arduino-cli monitor -l <scheme>` when the platform has its own monitor for that protocol. They were handed to pyserial and failed with `invalid URL, protocol 'wchlink' not known`. `socket://` and other URLs without such a monitor stay with pyserial.
+- (JA) platform の pluggable discovery が出す `wchlink://...` や `oep://...` のような `<scheme>://...` の runtime port を、platform がその protocol の自前の monitor を持つとき `arduino-cli monitor -l <scheme>` 経由にするよう修正。これまでは pyserial に渡され、`invalid URL, protocol 'wchlink' not known` で失敗していた。`socket://` と、そうした monitor の無い URL は pyserial のまま。
 
 ## 1.7.0
 - (EN) Read the runtime port through `arduino-cli monitor` when the profile's platform brings its own pluggable monitor for `serial`, so `dut` and `peers` see what that monitor delivers. The switch is automatic; boards on the built-in serial monitor are unchanged. Add the `arduino_cli_build_properties` fixture, which returns the expanded `--show-properties` result.

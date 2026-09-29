@@ -363,7 +363,7 @@ host 上の実行は、実機なしで純粋なロジックや serial protocol �
 また、compile が通るかどうかも board core や platform ごとに差が出るため、本番で使う board profile での build test は別途実行することを推奨します。
 `socket://...` port では、host Arduino core で 1 byte ずつ redirect されて極端に遅くなる挙動を避けるため、この plugin が serial read を chunk 化します。
 
-platform によっては、runtime の console を素の serial port ではなく platform 自前の pluggable monitor で出します。その場合、この plugin は runtime の port を pyserial で開かず、`arduino-cli monitor -m <profile> -l serial --quiet` 経由で読みます。切り替えは自動です。`arduino-cli compile --show-properties` に platform 自前の `pluggable_monitor.pattern.serial` があるかで判定します（`builtin:serial-monitor` は数えません）。テストは `dut` と `peers` をそのまま使えます。monitor の設定は `--baud` ではなく、板の既定と `sketch.yaml` の profile の `port_config` から決まります。ESP32 や AVR のように builtin の serial monitor を使う板は、これまでどおり pyserial で開きます。詳しくは [SPEC.ja.md](SPEC.ja.md) の 13.9 を参照してください。
+platform によっては、runtime の console を素の serial port ではなく platform 自前の pluggable monitor で出します。その場合、この plugin は runtime の port を pyserial で開かず、`arduino-cli monitor -m <profile> -l <protocol> --quiet` 経由で読みます。切り替えは自動です。`arduino-cli compile --show-properties` に platform 自前の `pluggable_monitor.pattern.<protocol>` があるかで判定します（`builtin:serial-monitor` は数えません）。protocol は、素の path なら `serial`、platform の discovery が出す `wchlink://FBC18F0680B0` のような port なら scheme です。`socket://` は pyserial のままです。テストは `dut` と `peers` をそのまま使えます。monitor の設定は `--baud` ではなく、板の既定と `sketch.yaml` の profile の `port_config` から決まります。ESP32 や AVR のように builtin の serial monitor を使う板は、これまでどおり pyserial で開きます。詳しくは [SPEC.ja.md](SPEC.ja.md) の 13.9 を参照してください。
 
 `arduino_cli_build_properties` fixture は、同じ展開済みの build properties を `dict` で返します。`runtime.tools.<tool>.path` などの値が要る conftest や plugin で使えます。
 

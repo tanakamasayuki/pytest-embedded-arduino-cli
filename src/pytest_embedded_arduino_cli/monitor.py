@@ -18,7 +18,7 @@ from serial import PortNotOpenError, SerialBase, SerialException
 #: contain ``-``.
 MONITOR_URL_SCHEME = "arduinomonitor"
 
-#: The only port protocol the plugin routes through a pluggable monitor.
+#: Protocol of a runtime port written as a plain path, such as ``/dev/ttyACM0``.
 MONITOR_PROTOCOL = "serial"
 
 #: Seconds to wait for arduino-cli to exit after its stdin is closed.
@@ -39,6 +39,28 @@ def has_own_monitor(properties: Mapping[str, str], protocol: str = MONITOR_PROTO
     return bool(required) and not required.startswith("builtin:")
 
 
+def own_monitor_protocols(properties: Mapping[str, str]) -> frozenset[str]:
+    """Every port protocol the platform brings its own pluggable monitor for."""
+    protocols = set()
+    for key in properties:
+        for prefix in ("pluggable_monitor.pattern.", "pluggable_monitor.required."):
+            if key.startswith(prefix):
+                protocols.add(key[len(prefix):])
+    return frozenset(protocol for protocol in protocols if has_own_monitor(properties, protocol))
+
+
+def port_protocol(port: str) -> str:
+    """The arduino-cli port protocol a runtime port is written in.
+
+    A plain path is ``serial``; ``wchlink://...`` is ``wchlink``. Whether a
+    scheme names an arduino-cli protocol or a pyserial URL is decided by the
+    platform's monitor, see :func:`has_own_monitor`.
+    """
+    if "://" not in port:
+        return MONITOR_PROTOCOL
+    return port.split("://", 1)[0].lower()
+
+
 def is_monitor_url(port: str | None) -> bool:
     return bool(port and port.lower().startswith(f"{MONITOR_URL_SCHEME}://"))
 
@@ -49,9 +71,10 @@ class MonitorTarget:
     sketch_dir: Path
     profile: str | None = None
     cli_path: str = "arduino-cli"
+    protocol: str = MONITOR_PROTOCOL
 
     def to_url(self) -> str:
-        query = {"sketch": str(self.sketch_dir), "cli": self.cli_path}
+        query = {"sketch": str(self.sketch_dir), "cli": self.cli_path, "protocol": self.protocol}
         if self.profile:
             query["profile"] = self.profile
         return f"{MONITOR_URL_SCHEME}://{quote(self.address, safe='/:')}?{urlencode(query)}"
@@ -71,10 +94,11 @@ class MonitorTarget:
             sketch_dir=Path(sketch),
             profile=query.get("profile", [None])[0],
             cli_path=query.get("cli", ["arduino-cli"])[0],
+            protocol=query.get("protocol", [MONITOR_PROTOCOL])[0],
         )
 
     def command(self) -> list[str]:
-        command = [self.cli_path, "monitor", "-p", self.address, "-l", MONITOR_PROTOCOL, "--quiet"]
+        command = [self.cli_path, "monitor", "-p", self.address, "-l", self.protocol, "--quiet"]
         if self.profile:
             command.extend(["-m", self.profile])
         return command

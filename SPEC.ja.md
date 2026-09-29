@@ -625,15 +625,16 @@ platform によっては、runtime の console を素の serial port ではな�
 判定:
 
 - 対象の sketch について `arduino-cli compile --show-properties --profile <profile>` を実行する。profile を使うので、profile が固定した版の platform を見る。
-- `pluggable_monitor.pattern.serial` があるか、`pluggable_monitor.required.serial` が `builtin:` で始まらない tool を指すとき、自前の monitor があるとみなす。`builtin:serial-monitor` は自前の monitor を持たない platform に arduino-cli が補う既定なので、数えない。
-- 対象は `serial` protocol だけとする。`socket://...` のような URL で書いた port は、常に pyserial に任せる。
+- port の protocol は、`/dev/ttyACM0` や `COM3` のような素の path なら `serial`、`<scheme>://...` の形で書いた port なら scheme とする。例えば platform の pluggable discovery が出す `wchlink://FBC18F0680B0` や `oep://<probe>/<slot>` である。
+- `pluggable_monitor.pattern.<protocol>` があるか、`pluggable_monitor.required.<protocol>` が `builtin:` で始まらない tool を指すとき、その protocol について自前の monitor があるとみなす。`builtin:serial-monitor` は自前の monitor を持たない platform に arduino-cli が補う既定なので、数えない。
+- platform がその scheme の monitor を持たない URL（`rfc2217://...` など）は pyserial に任せる。`socket://...`（host core）は判定せず、常に pyserial に任せる。
 - 結果は session の間、板ごとに保持する。profile の `fqbn` と `platforms` が同じ sketch は 1 回の判定を共有する。profile のない sketch は sketch ごとに判定する。
 - 切り替えは自動で、上書きする option は無い。テストは `dut` と `peers` をそのまま使う。別名の fixture も marker も無い。
 
 接続:
 
 - runtime の port を `arduinomonitor://<address>?...` の URL にする。plugin はこの scheme の pyserial protocol handler を登録するので、`dut`、`peers`、`dut.write`、`expect`、ログは変わらず動く。
-- handler は sketch directory を cwd にして `arduino-cli monitor -p <address> -l serial --quiet -m <profile>` を起動し、stdin と stdout をパイプにする。どちらの向きもバイトは変わらず通る。stderr は data に混ぜない。
+- handler は sketch directory を cwd にして `arduino-cli monitor -p <address> -l <protocol> --quiet -m <profile>` を起動し、stdin と stdout をパイプにする。どちらの向きもバイトは変わらず通る。stderr は data に混ぜない。
 - stdin は session の間ずっと開いておく。stdin が EOF になると arduino-cli は session を終える。monitor が port を開く前に書いたバイトは、開いた後に届く。
 - port の設定は arduino-cli に任せる。`boards.txt` の `monitor_port.serial.<id>` が板の既定で、`sketch.yaml` の profile の `port_config` がそれを上書きする。plugin はそのための option を持たず、`--baud` もこの接続には効かない。profile を使うとき、`sketch.yaml` の top-level の `default_port_config` は arduino-cli が適用しない。monitor が宣言しないキーを書くと、arduino-cli は session を開く前に止まる。
 - close では stdin を閉じる。arduino-cli は monitor tool に `CLOSE` を送って終わる。数秒で終わらなければ terminate する。monitor tool は別の process group で動くので、stdin の EOF で終わる作りであることを前提とする。
@@ -727,7 +728,7 @@ profile ごとの環境変数名は、例えば `TEST_SERIAL_PORT_ESP32S3` の�
 port 番号なしの socket URL は、upload 後に build 出力ディレクトリの `*.host-arduino.json` から `port` を読み取って補完する。
 port 番号ありの socket URL は補完せず、そのまま使う。
 
-platform が自前の pluggable monitor を持つときは、URL でない runtime の port を pyserial で開かず、`arduino-cli monitor` 経由で読む（13.9 を参照）。
+platform が runtime の port の protocol（素の path なら `serial`、`wchlink://...` などなら scheme）について自前の pluggable monitor を持つときは、runtime の port を pyserial で開かず、`arduino-cli monitor` 経由で読む（13.9 を参照）。
 
 ### 14.6 Device Lock 関連
 
