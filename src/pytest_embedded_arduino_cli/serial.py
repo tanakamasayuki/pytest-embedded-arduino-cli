@@ -13,13 +13,19 @@ from urllib.parse import urlparse
 
 from _pytest.config import Config
 
+from .monitor import is_monitor_url
+
 
 class HostArduinoPortError(RuntimeError):
     """Raised when a host Arduino socket URL cannot be completed."""
 
 
 class FastSocketSerialRedirectThread(threading.Thread):
-    """Batch socket:// reads so host Arduino tests do not run at one byte per tick."""
+    """Batch socket:// reads so host Arduino tests do not run at one byte per tick.
+
+    arduinomonitor:// ports use the same loop: a blocking read with a short
+    timeout, and no reconnect when the stream ends.
+    """
 
     def __init__(self, msg_queue: Any, serial_proc: Any) -> None:
         self._q = msg_queue
@@ -30,7 +36,7 @@ class FastSocketSerialRedirectThread(threading.Thread):
 
     @property
     def _is_socket(self) -> bool:
-        return is_socket_url(getattr(self._s, "port", None))
+        return is_stream_url(getattr(self._s, "port", None))
 
     def _read_available(self) -> bytes:
         if self._is_socket:
@@ -147,7 +153,7 @@ def install_fast_socket_redirect_thread() -> None:
 
     class PatchedSerialRedirectThread(FastSocketSerialRedirectThread, original_thread):  # type: ignore[misc, valid-type]
         def __init__(self, msg_queue: Any, serial_proc: Any) -> None:
-            self._arduino_cli_fast_socket = is_socket_url(getattr(serial_proc, "port", None))
+            self._arduino_cli_fast_socket = is_stream_url(getattr(serial_proc, "port", None))
             if self._arduino_cli_fast_socket:
                 FastSocketSerialRedirectThread.__init__(self, msg_queue, serial_proc)
             else:
@@ -258,6 +264,11 @@ def resolve_peer_upload_port(runtime_port: str | None) -> str | None:
 
 def is_socket_url(port: str | None) -> bool:
     return bool(port and port.startswith("socket://"))
+
+
+def is_stream_url(port: str | None) -> bool:
+    """Ports read by the batching redirect loop instead of pytest-embedded's."""
+    return is_socket_url(port) or is_monitor_url(port)
 
 
 def socket_url_has_port(port: str | None) -> bool:

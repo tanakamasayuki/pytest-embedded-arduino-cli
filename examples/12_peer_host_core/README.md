@@ -33,7 +33,7 @@ Both sketches use `port: socket://localhost`, so the plugin reads each generated
 ## Startup Order
 
 The plugin uploads the primary DUT first.
-When the test requests `peers`, it then uploads and connects peer DUTs in peer name order, and finally the normal `dut` fixture connects to the primary DUT.
+The test lists `dut` before `peers`, so the normal `dut` fixture connects to the primary DUT next, and then `peers` uploads and connects peer DUTs in peer name order. Fixtures are set up in the order the test function lists them.
 
 This sample avoids one-shot boot messages.
 The test sends `ready?` to each DUT after pytest has connected, then expects each READY response.

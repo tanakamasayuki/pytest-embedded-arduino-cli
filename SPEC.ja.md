@@ -599,15 +599,16 @@ peer directory が存在する場合、build が有効な実行では primary up
 - `--run-mode=build`: peer DUT を build し、test 実行は skip する。この場合 peer port は不要
 - `--run-mode=test`: 既存 build artifact を使って peer DUT を upload してから test を実行する
 
-upload / connect の順序は次の通りとする。
+build / upload の順序は次の通りとする。
 
 1. primary DUT を build する
 2. 検出された peer DUT を名前順で build する
 3. primary DUT を upload する
-4. `peers` fixture が要求された場合、検出された peer DUT を名前順で upload する
-5. peer DUT の runtime port 補完を行う
-6. peer DUT に接続し、`peers["<name>"]` として提供する
-7. pytest-embedded の通常処理により primary DUT に接続し、`dut` として提供する
+
+その後、function scope の `dut` と `peers` fixture は、テスト関数の引数に並べた順に用意される。plugin は両者の順を固定しない。
+
+- `dut`: pytest-embedded の通常処理により primary DUT に接続する
+- `peers`: 検出された peer DUT を名前順で upload し、runtime port を補完して接続し、`peers["<name>"]` として提供する
 
 この順序では、実機 DUT が upload 直後に短時間だけ出力する起動メッセージを Python 側が取りこぼす可能性がある。
 host Arduino core のように出力が socket 接続まで保持される環境では問題になりにくいが、一般の実機 serial では sketch 側で十分な待機、再送、または Python 側からの入力を待つ handshake を用意することを推奨する。
@@ -616,6 +617,30 @@ host Arduino core のように出力が socket 接続まで保持される環境
 peer DUT の構造不備は設定エラーとして扱う。
 例えば `.ino` がない、`.ino` が複数ある、`sketch.yaml` が壊れている場合は error とする。
 一方で、profile 非対応、profile 未決定、port 未解決のように実行条件が揃わない場合は skip とする。
+
+### 13.9 platform の pluggable monitor を通した runtime 接続
+
+platform によっては、runtime の console を素の serial port ではなく platform 自前の pluggable monitor で出す（例: monitor の設定で source を選ぶ debug probe）。そうした port を pyserial で開くと monitor を通らないため、その platform では runtime の port を `arduino-cli monitor` 経由で読む。
+
+判定:
+
+- 対象の sketch について `arduino-cli compile --show-properties --profile <profile>` を実行する。profile を使うので、profile が固定した版の platform を見る。
+- `pluggable_monitor.pattern.serial` があるか、`pluggable_monitor.required.serial` が `builtin:` で始まらない tool を指すとき、自前の monitor があるとみなす。`builtin:serial-monitor` は自前の monitor を持たない platform に arduino-cli が補う既定なので、数えない。
+- 対象は `serial` protocol だけとする。`socket://...` のような URL で書いた port は、常に pyserial に任せる。
+- 結果は session の間、板ごとに保持する。profile の `fqbn` と `platforms` が同じ sketch は 1 回の判定を共有する。profile のない sketch は sketch ごとに判定する。
+- 切り替えは自動で、上書きする option は無い。テストは `dut` と `peers` をそのまま使う。別名の fixture も marker も無い。
+
+接続:
+
+- runtime の port を `arduinomonitor://<address>?...` の URL にする。plugin はこの scheme の pyserial protocol handler を登録するので、`dut`、`peers`、`dut.write`、`expect`、ログは変わらず動く。
+- handler は sketch directory を cwd にして `arduino-cli monitor -p <address> -l serial --quiet -m <profile>` を起動し、stdin と stdout をパイプにする。どちらの向きもバイトは変わらず通る。stderr は data に混ぜない。
+- stdin は session の間ずっと開いておく。stdin が EOF になると arduino-cli は session を終える。monitor が port を開く前に書いたバイトは、開いた後に届く。
+- port の設定は arduino-cli に任せる。`boards.txt` の `monitor_port.serial.<id>` が板の既定で、`sketch.yaml` の profile の `port_config` がそれを上書きする。plugin はそのための option を持たず、`--baud` もこの接続には効かない。profile を使うとき、`sketch.yaml` の top-level の `default_port_config` は arduino-cli が適用しない。monitor が宣言しないキーを書くと、arduino-cli は session を開く前に止まる。
+- close では stdin を閉じる。arduino-cli は monitor tool に `CLOSE` を送って終わる。数秒で終わらなければ terminate する。monitor tool は別の process group で動くので、stdin の EOF で終わる作りであることを前提とする。
+- plugin が閉じていないのに stream が終わった場合、read は arduino-cli の exit code と stderr を添えた serial error を出し、ログに残す。再接続や monitor の起動し直しはしない。monitor が port を開けなかった場合は、arduino-cli の stderr に monitor のメッセージが出る。
+- 開くのに約 1 秒かかり、arduino-cli は monitor tool を 2 回起動する（設定の列挙に 1 回、session に 1 回）。session が開く前に板が出した出力は受け取れない。これは upload の後に開くどの接続でも同じである。
+
+`arduino_cli_build_properties` fixture（module scope）は、同じ `--show-properties` の結果を `dict[str, str]` で返す。sketch と profile ごとに 1 回だけ実行する。汎用の fixture で、他の plugin が対象の platform の `runtime.tools.<tool>.path` などを読むのに使える。`build_config.toml` から注入する値は含まない。
 
 ## 14. pytest option 要件
 
@@ -701,6 +726,8 @@ profile ごとの環境変数名は、例えば `TEST_SERIAL_PORT_ESP32S3` の�
 `--port` または環境変数に `socket://localhost` のような socket URL が指定された場合は、runtime 接続先として扱う。
 port 番号なしの socket URL は、upload 後に build 出力ディレクトリの `*.host-arduino.json` から `port` を読み取って補完する。
 port 番号ありの socket URL は補完せず、そのまま使う。
+
+platform が自前の pluggable monitor を持つときは、URL でない runtime の port を pyserial で開かず、`arduino-cli monitor` 経由で読む（13.9 を参照）。
 
 ### 14.6 Device Lock 関連
 

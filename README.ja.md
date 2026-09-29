@@ -363,6 +363,10 @@ host 上の実行は、実機なしで純粋なロジックや serial protocol �
 また、compile が通るかどうかも board core や platform ごとに差が出るため、本番で使う board profile での build test は別途実行することを推奨します。
 `socket://...` port では、host Arduino core で 1 byte ずつ redirect されて極端に遅くなる挙動を避けるため、この plugin が serial read を chunk 化します。
 
+platform によっては、runtime の console を素の serial port ではなく platform 自前の pluggable monitor で出します。その場合、この plugin は runtime の port を pyserial で開かず、`arduino-cli monitor -m <profile> -l serial --quiet` 経由で読みます。切り替えは自動です。`arduino-cli compile --show-properties` に platform 自前の `pluggable_monitor.pattern.serial` があるかで判定します（`builtin:serial-monitor` は数えません）。テストは `dut` と `peers` をそのまま使えます。monitor の設定は `--baud` ではなく、板の既定と `sketch.yaml` の profile の `port_config` から決まります。ESP32 や AVR のように builtin の serial monitor を使う板は、これまでどおり pyserial で開きます。詳しくは [SPEC.ja.md](SPEC.ja.md) の 13.9 を参照してください。
+
+`arduino_cli_build_properties` fixture は、同じ展開済みの build properties を `dict` で返します。`runtime.tools.<tool>.path` などの値が要る conftest や plugin で使えます。
+
 例:
 
 ```bash
@@ -410,14 +414,18 @@ peer DUT は `peers` fixture を要求したテストでだけ upload / connect 
 `peers` を要求すると、検出されたすべての peer DUT の upload / connect が有効化されます。
 `peers["<name>"]` は、接続済み peer を参照するための mapping API です。
 
-起動順は固定です。
+build と upload の順は固定です。
 
 1. primary DUT を先に build する
 2. peer DUT を peer 名順で build する
 3. primary DUT を upload する
-4. `peers` が要求された場合、peer DUT を peer 名順で upload する
-5. peer DUT に接続し、`peers` から参照できるようにする
-6. primary DUT に接続し、`dut` として参照できるようにする
+
+その後、`dut` と `peers` はテスト関数の引数に並べた順に用意されます。
+
+- `dut` は primary DUT に接続する
+- `peers` は peer DUT を peer 名順で upload し、接続する
+
+`def test_x(dut, peers)` なら、primary に接続してから peer を upload します。`def test_x(peers, dut)` なら、peer の upload と接続が先です。
 
 実機 serial では、reset や upload 直後に sketch が短時間だけ出力する起動メッセージを Python 側が取りこぼす可能性があります。
 host Arduino core の socket 実行では問題になりにくいですが、実機テストでは sketch 側で十分な待機、READY の再送、または Python 側からの入力を待つ handshake を用意することを推奨します。

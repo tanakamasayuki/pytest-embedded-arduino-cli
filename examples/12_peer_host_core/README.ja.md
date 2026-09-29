@@ -33,7 +33,7 @@ uv run pytest examples/12_peer_host_core --profile host --peer-profile echo:host
 ## 起動順
 
 plugin は primary DUT を先に upload します。
-テストが `peers` fixture を要求した場合、その後に peer DUT を peer 名順で upload / connect し、最後に通常の `dut` fixture が primary DUT へ接続します。
+このテストは引数に `dut` を `peers` より先に並べているので、次に通常の `dut` fixture が primary DUT へ接続し、その後 `peers` が peer DUT を peer 名順で upload / connect します。fixture はテスト関数の引数に並べた順に用意されます。
 
 このサンプルでは、起動直後に一度だけ READY を出す方式は使いません。
 pytest が接続した後に各 DUT へ `ready?` を送り、それぞれの READY 応答を確認します。
