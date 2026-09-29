@@ -595,15 +595,16 @@ When the `peers` fixture is requested, the plugin performs upload / runtime port
 - `--run-mode=build`: Build the peer DUT and skip test execution. In this case, the peer port is not needed
 - `--run-mode=test`: Use the existing build artifact to upload the peer DUT and then run the test
 
-The order of upload / connect is as follows.
+The order of build / upload is as follows.
 
 1. Build the primary DUT
 2. Build detected peer DUTs in name order
 3. Upload the primary DUT
-4. When the `peers` fixture is requested, upload the detected peer DUTs in name order
-5. Perform runtime port completion of the peer DUTs
-6. Connect to the peer DUTs and provide them as `peers["<name>"]`
-7. Connect to the primary DUT through the normal processing of pytest-embedded and provide it as `dut`
+
+After that, the function-scoped `dut` and `peers` fixtures are set up in the order the test function lists them. The plugin does not fix an order between them.
+
+- `dut`: connect to the primary DUT through the normal processing of pytest-embedded
+- `peers`: upload the detected peer DUTs in name order, perform runtime port completion, connect to them, and provide them as `peers["<name>"]`
 
 In this order, the Python side may miss the startup message that the real-board DUT outputs only briefly immediately after upload.
 In environments where the output is retained until the socket connection, such as the host Arduino core, this is unlikely to be a problem, but for general real-board serial, it is recommended to prepare sufficient waiting, retransmission, or a handshake on the sketch side that waits for input from the Python side.
@@ -612,6 +613,30 @@ Especially for peer DUTs, since all detected peers are started when the `peers` 
 Structural defects of peer DUTs are treated as configuration errors.
 For example, if there is no `.ino`, there are multiple `.ino` files, or the `sketch.yaml` is broken, it is treated as an error.
 On the other hand, if the execution conditions are not met, such as unsupported profile, undetermined profile, or unresolved port, it is treated as skip.
+
+### 13.9 Runtime Connection Through a Platform's Pluggable Monitor
+
+Some platforms deliver the runtime console through their own pluggable monitor, not a plain serial port (for example, a debug probe that selects the source with a monitor setting). Opening such a port with pyserial bypasses that monitor, so the plugin reads the runtime port through `arduino-cli monitor` for those platforms.
+
+Detection:
+
+- The plugin runs `arduino-cli compile --show-properties --profile <profile>` for the sketch under test. With a profile, arduino-cli reads the platform version the profile pins.
+- The platform has its own monitor when `pluggable_monitor.pattern.serial` is set, or when `pluggable_monitor.required.serial` names a tool that does not start with `builtin:`. `builtin:serial-monitor` is the default arduino-cli fills in for platforms without one, and it is not counted.
+- Only the `serial` protocol is considered. Ports written as URLs, such as `socket://...`, are always left to pyserial.
+- The result is cached per board for the session. Sketches whose profiles have the same `fqbn` and `platforms` share one probe. A sketch without a profile is probed on its own.
+- The choice is automatic and there is no option to override it. Tests keep using `dut` and `peers`; there is no separate fixture and no marker.
+
+Connection:
+
+- The runtime port becomes an `arduinomonitor://<address>?...` URL. The plugin registers a pyserial protocol handler for that scheme, so `dut`, `peers`, `dut.write`, `expect`, and the logs work unchanged.
+- The handler starts `arduino-cli monitor -p <address> -l serial --quiet -m <profile>` with the sketch directory as the working directory, and pipes stdin and stdout. Both directions pass bytes unchanged. stderr is kept apart from the data.
+- stdin stays open for the whole session. arduino-cli ends the session when stdin reaches EOF. Bytes written before the monitor has opened the port are delivered once it has.
+- Port settings are left to arduino-cli: board defaults from `monitor_port.serial.<id>` in `boards.txt`, overridden by the profile's `port_config` in `sketch.yaml`. The plugin adds no option for them, and `--baud` does not apply to this connection. With a profile, a top-level `default_port_config` in `sketch.yaml` is not applied by arduino-cli. A key the monitor does not declare makes arduino-cli stop before the session opens.
+- Closing closes stdin, which makes arduino-cli send `CLOSE` to the monitor tool and exit. If arduino-cli has not exited within a few seconds, it is terminated. The monitor tool runs in a process group of its own; it is expected to exit when its stdin reaches EOF.
+- If the stream ends while the plugin has not closed it, reading raises a serial error with arduino-cli's exit code and stderr, and the error is logged. The plugin does not reconnect or restart the monitor. When the monitor fails to open the port, arduino-cli's stderr carries the monitor's message.
+- Opening takes about one second, and arduino-cli starts the monitor tool twice (once to list its settings, once for the session). Output the board prints before the session opens is not received, as with any connection opened after upload.
+
+The `arduino_cli_build_properties` fixture (module scope) returns the same `--show-properties` result as a `dict[str, str]`, run once per sketch and profile. It is generic: other plugins can use it to read, for example, `runtime.tools.<tool>.path` of the platform under test. Values injected from `build_config.toml` are not included.
 
 ## 14. pytest option Requirements
 
@@ -697,6 +722,8 @@ The common environment variable is `TEST_SERIAL_PORT`.
 If a socket URL such as `socket://localhost` is specified in `--port` or an environment variable, it is treated as the runtime connection target.
 A socket URL without a port number is completed by reading the `port` from the `*.host-arduino.json` in the build output directory after upload.
 A socket URL with a port number is used directly without completion.
+
+When the platform has its own pluggable monitor, a runtime port that is not a URL is read through `arduino-cli monitor` instead of being opened with pyserial (see 13.9).
 
 ### 14.6 Device Lock Related
 

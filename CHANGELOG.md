@@ -1,6 +1,10 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Read the runtime port through `arduino-cli monitor` when the profile's platform brings its own pluggable monitor for `serial`, so `dut` and `peers` see what that monitor delivers. The switch is automatic; boards on the built-in serial monitor are unchanged. Add the `arduino_cli_build_properties` fixture, which returns the expanded `--show-properties` result.
+- (JA) profile の platform が `serial` 用の自前の pluggable monitor を持つとき、runtime の port を `arduino-cli monitor` 経由で読むように変更。`dut` と `peers` は、その monitor が出すものを受ける。切り替えは自動で、builtin の serial monitor を使う板は変わらない。展開済みの `--show-properties` の結果を返す `arduino_cli_build_properties` fixture を追加。
+- (EN) Correct the documented startup order of peer DUTs: after the primary upload, `dut` and `peers` are set up in the order the test function lists them, not peers first.
+- (JA) peer DUT の起動順の記述を訂正。primary の upload の後、`dut` と `peers` はテスト関数の引数に並べた順に用意される（peers が先とは限らない）。
 - (EN) Add a concise README Quick Start and a detailed physical-board first-test guide, add a no-hardware host-core path, connect the guides to purpose-based local examples, and expand the symptom-first FAQ.
 - (JA) READMEの簡潔なQuick Startと、実機で詳しく学ぶ最初のtestガイドを追加。実機なしのhost core経路、ガイドと目的別exampleの相互リンク、症状から引くFAQも整備。
 

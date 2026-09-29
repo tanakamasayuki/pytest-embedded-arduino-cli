@@ -14,6 +14,7 @@ from .app import (
     SketchConfigError,
     UnsupportedProfileError,
     detect_build_properties,
+    load_sketch_yaml,
     resolve_sketch_dir,
     resolve_test_path,
     run_show_properties,
@@ -21,6 +22,7 @@ from .app import (
 from .device_lock import DeviceLockError, DeviceLockInfo, DeviceLockSet, default_lock_dir
 from .flasher import ArduinoCliUploadConfig
 from .log_summary import LogSummaryCollector
+from .monitor import MonitorTarget, has_own_monitor, register_protocol_handler
 from .serial import (
     complete_host_arduino_socket_url,
     ensure_default_embedded_services,
@@ -164,6 +166,7 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
 
 def pytest_configure(config: pytest.Config) -> None:
     install_fast_socket_redirect_thread()
+    register_protocol_handler()
     _remember_initial_ports(config)
     _clean_ardutest_artifacts(config)
     ensure_default_embedded_services(config)
@@ -501,7 +504,65 @@ def _build_config_from_request(
         return None
 
 
-def _resolve_build_property(app: ArduinoCliBuildConfig) -> ArduinoCliBuildConfig:
+def _show_properties(config: pytest.Config, app: ArduinoCliBuildConfig) -> dict[str, str]:
+    """``arduino-cli compile --show-properties``, run once per sketch and profile."""
+    cache = getattr(config, "_arduino_cli_show_properties", None)
+    if cache is None:
+        cache = {}
+        config._arduino_cli_show_properties = cache
+    key = (str(app.sketch_dir), app.profile)
+    if key not in cache:
+        cache[key] = run_show_properties(app.cli_path, app.sketch_dir, app.profile)
+    return cache[key]
+
+
+def _board_key(app: ArduinoCliBuildConfig) -> tuple[str, ...]:
+    """What decides the platform's monitor: the profile's fqbn and platforms.
+
+    Sketches whose profiles name the same board share one probe. Without a
+    profile, each sketch is probed on its own.
+    """
+    if app.profile is None:
+        return ("sketch", str(app.sketch_dir))
+    profiles = load_sketch_yaml(app.sketch_yaml).get("profiles") or {}
+    profile_data = profiles.get(app.profile)
+    if not isinstance(profile_data, dict):
+        return ("sketch", str(app.sketch_dir), app.profile)
+    return ("board", repr(profile_data.get("fqbn")), repr(profile_data.get("platforms")))
+
+
+def _platform_has_own_monitor(config: pytest.Config, app: ArduinoCliBuildConfig) -> bool:
+    cache = getattr(config, "_arduino_cli_own_monitor", None)
+    if cache is None:
+        cache = {}
+        config._arduino_cli_own_monitor = cache
+    key = _board_key(app)
+    if key not in cache:
+        cache[key] = has_own_monitor(_show_properties(config, app))
+    return cache[key]
+
+
+def _runtime_port_for_app(
+    config: pytest.Config,
+    app: ArduinoCliBuildConfig,
+    port: str | None,
+) -> str | None:
+    """Route a plain runtime port through ``arduino-cli monitor`` when the
+    platform brings its own pluggable monitor. URLs such as ``socket://`` are
+    left to pyserial."""
+    if not port or "://" in port:
+        return port
+    if not _platform_has_own_monitor(config, app):
+        return port
+    return MonitorTarget(
+        address=port,
+        sketch_dir=app.sketch_dir,
+        profile=app.profile,
+        cli_path=app.cli_path,
+    ).to_url()
+
+
+def _resolve_build_property(config: pytest.Config, app: ArduinoCliBuildConfig) -> ArduinoCliBuildConfig:
     """Auto-select the injection property for build_config.toml defines/flags.
 
     Probes ``arduino-cli compile --show-properties`` only when there are flags
@@ -509,7 +570,7 @@ def _resolve_build_property(app: ArduinoCliBuildConfig) -> ArduinoCliBuildConfig
     """
     if not app.needs_build_property_detection():
         return app
-    properties = run_show_properties(app.cli_path, app.sketch_dir, app.profile)
+    properties = _show_properties(config, app)
     return app.with_build_properties(detect_build_properties(properties))
 
 
@@ -520,6 +581,15 @@ def arduino_cli_app(request: pytest.FixtureRequest) -> ArduinoCliBuildConfig:
     except UnsupportedProfileError as e:
         _log_skip(request.config, str(e))
         pytest.skip(str(e))
+
+
+@pytest.fixture(scope="module")
+def arduino_cli_build_properties(
+    request: pytest.FixtureRequest,
+    arduino_cli_app: ArduinoCliBuildConfig,
+) -> dict[str, str]:
+    """The expanded build properties of the sketch and profile under test."""
+    return dict(_show_properties(request.config, arduino_cli_app))
 
 
 @pytest.fixture(scope="module")
@@ -586,7 +656,7 @@ def arduino_cli_build(
     if arduino_cli_app.profile:
         _set_current_profile(request.config, arduino_cli_app.profile)
 
-    arduino_cli_app = _resolve_build_property(arduino_cli_app)
+    arduino_cli_app = _resolve_build_property(request.config, arduino_cli_app)
 
     _log_command(
         request.config,
@@ -689,7 +759,27 @@ def arduino_cli_upload(
             arduino_cli_app.build_path,
         )
         wait_for_socket_url(request.config.option.port)
+    _route_runtime_port_through_monitor(request.config, arduino_cli_app)
     yield
+
+
+def _route_runtime_port_through_monitor(config: pytest.Config, app: ArduinoCliBuildConfig) -> None:
+    port = getattr(config.option, "port", None)
+    monitor_port = _runtime_port_for_app(config, app, port)
+    if monitor_port == port:
+        return
+    config.option.port = monitor_port
+    target = MonitorTarget.from_url(monitor_port)
+    _log_command(
+        config,
+        action="monitor",
+        command=target.command(),
+        details={
+            "cwd": str(target.sketch_dir),
+            "profile": target.profile,
+            "port": target.address,
+        },
+    )
 
 
 def _log_peer_command(
@@ -718,7 +808,7 @@ def _compile_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
     targets = _peer_targets_from_request(request, require_ports=False, strict=False)
     compiled_names: set[str] = set()
     for target in targets:
-        app = _resolve_build_property(target.app)
+        app = _resolve_build_property(request.config, target.app)
         _log_peer_command(
             request.config,
             peer=target.name,
@@ -756,7 +846,7 @@ def _prepare_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
     for target in targets:
         app = target.app
         if _should_build(run_mode) and target.name not in compiled_names:
-            app = _resolve_build_property(app)
+            app = _resolve_build_property(request.config, app)
             _log_peer_command(
                 request.config,
                 peer=target.name,
@@ -867,7 +957,8 @@ def _make_peer_dut(request: pytest.FixtureRequest, target: PeerTarget) -> tuple[
     pexpect_fr = _pexpect_fr_gn(logfile, listener)
     pexpect_proc = pexpect_proc_fn(pexpect_fr)
     app = App(app_path=str(target.app.sketch_dir), build_dir=str(target.app.build_path))
-    serial = Serial(msg_queue=msg_queue, port=target.runtime_port, baud=baud, meta=meta)
+    runtime_port = _runtime_port_for_app(request.config, target.app, target.runtime_port)
+    serial = Serial(msg_queue=msg_queue, port=runtime_port, baud=baud, meta=meta)
     dut = SerialDut(
         pexpect_proc=pexpect_proc,
         msg_queue=msg_queue,

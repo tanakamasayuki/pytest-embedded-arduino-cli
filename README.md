@@ -363,6 +363,10 @@ Use real hardware for peripherals, timing, interrupts, memory layout, Flash/NVS,
 Build success can also differ by board core and platform, so running build tests with the production board profile is still recommended.
 For `socket://...` ports, this plugin batches serial reads to avoid the very slow one-byte-at-a-time redirect behavior that can otherwise appear with host Arduino cores.
 
+Some platforms deliver the runtime console through their own pluggable monitor instead of a plain serial port. For those, the plugin reads the runtime port through `arduino-cli monitor -m <profile> -l serial --quiet` instead of opening it with pyserial. The choice is automatic: the plugin checks `arduino-cli compile --show-properties` for a `pluggable_monitor.pattern.serial` of the platform's own (`builtin:serial-monitor` does not count). Tests keep using `dut` and `peers` unchanged. Monitor settings come from the board defaults and the profile's `port_config` in `sketch.yaml`, not from `--baud`. Boards that use the built-in serial monitor, such as ESP32 and AVR, are opened with pyserial as before. See [SPEC.md](SPEC.md) 13.9 for details.
+
+The `arduino_cli_build_properties` fixture returns the same expanded build properties as a `dict`, for conftests and plugins that need values such as `runtime.tools.<tool>.path`.
+
 Example:
 
 ```bash
@@ -409,14 +413,18 @@ Peer DUTs are uploaded and connected only for tests that request the `peers` fix
 If a `peer_*` directory exists, its sketch is compiled before primary upload so all compile work finishes before any upload begins.
 Requesting `peers` enables upload / connect for all detected peer DUTs; `peers["<name>"]` is the mapping API for accessing the connected peer.
 
-Startup order is fixed:
+Build and upload order is fixed:
 
 1. the primary DUT is built first
 2. peer DUTs are built in peer name order
 3. the primary DUT is uploaded
-4. when `peers` is requested, peer DUTs are uploaded in peer name order
-5. peer DUTs are connected and exposed through `peers`
-6. the primary DUT is connected and exposed as `dut`
+
+After that, `dut` and `peers` are set up in the order the test function lists them:
+
+- `dut` connects to the primary DUT
+- `peers` uploads peer DUTs in peer name order, then connects them
+
+With `def test_x(dut, peers)`, the primary is connected before the peers are uploaded. With `def test_x(peers, dut)`, the peers are uploaded and connected first.
 
 On real serial hardware, short boot-time messages can be missed if a sketch prints them immediately after reset or upload.
 Host Arduino core socket runs often keep enough output for this not to matter, but hardware tests should use a startup delay, repeated READY message, or an explicit handshake from Python before relying on early output.
