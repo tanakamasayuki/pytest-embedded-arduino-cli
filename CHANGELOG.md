@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.7.0
 - (EN) Read the runtime port through `arduino-cli monitor` when the profile's platform brings its own pluggable monitor for `serial`, so `dut` and `peers` see what that monitor delivers. The switch is automatic; boards on the built-in serial monitor are unchanged. Add the `arduino_cli_build_properties` fixture, which returns the expanded `--show-properties` result.
 - (JA) profile の platform が `serial` 用の自前の pluggable monitor を持つとき、runtime の port を `arduino-cli monitor` 経由で読むように変更。`dut` と `peers` は、その monitor が出すものを受ける。切り替えは自動で、builtin の serial monitor を使う板は変わらない。展開済みの `--show-properties` の結果を返す `arduino_cli_build_properties` fixture を追加。
 - (EN) Correct the documented startup order of peer DUTs: after the primary upload, `dut` and `peers` are set up in the order the test function lists them, not peers first.
