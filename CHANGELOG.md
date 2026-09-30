@@ -1,6 +1,18 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Use `profiles.<profile>.port` from `sketch.yaml` as the last fallback for the runtime and upload port of the primary and peer DUTs, not only `socket://` URLs. A peer whose `sketch.yaml` names a port is now uploaded instead of skipped.
+- (JA) `sketch.yaml` の `profiles.<profile>.port` を、`socket://` の URL に限らず、primary と peer の runtime / upload の port の最後の候補として使うように変更。`sketch.yaml` に port を書いた peer は、skip ではなく upload されるようになる。
+- (EN) Reject ambiguous port variables as configuration errors: profiles whose names normalize to the same variable (`esp32-s3` and `esp32_s3`), profile names that normalize to `PEER_...`, and peers of one test that would read the same `TEST_SERIAL_PORT_PEER_...` variable.
+- (JA) port 変数が曖昧になる構成を設定エラーにする。正規化すると同じ変数になる profile 名（`esp32-s3` と `esp32_s3`）、`PEER_...` になる profile 名、1 つのテストで同じ `TEST_SERIAL_PORT_PEER_...` を読む peer。
+- (EN) `--flash-port` is no longer used as the runtime port. With `--flash-port` alone, the runtime port is resolved from the environment variables and `sketch.yaml`.
+- (JA) `--flash-port` を runtime の port として使わないように変更。`--flash-port` だけを指定したとき、runtime の port は環境変数と `sketch.yaml` から解決する。
+- (EN) Export `MonitorTarget` and `is_monitor_url` from `pytest_embedded_arduino_cli` as public API; parse `arduinomonitor://` ports with `MonitorTarget.from_url` instead of slicing the string.
+- (JA) `MonitorTarget` と `is_monitor_url` を `pytest_embedded_arduino_cli` の公開 API にする。`arduinomonitor://` の port は、文字列を切り出さず `MonitorTarget.from_url` で解く。
+- (EN) Require `pytest-embedded` and `pytest-embedded-serial` 2.8 or later.
+- (JA) `pytest-embedded` と `pytest-embedded-serial` の 2.8 以降を必須にする。
+- (EN) SPEC: document what the plugin promises about `sketch.yaml`, the public API, the device lock key for URL ports, the `--clean` roles, and the `*.host-arduino.json` contract.
+- (JA) SPEC: `sketch.yaml` について約束すること、公開 API、URL の port の device lock key、`--clean` の役割、`*.host-arduino.json` の契約を明文化。
 
 ## 1.7.1
 - (EN) Route runtime ports written as `<scheme>://...`, such as `wchlink://...` or `oep://...` from a platform's pluggable discovery, through `arduino-cli monitor -l <scheme>` when the platform has its own monitor for that protocol. They were handed to pyserial and failed with `invalid URL, protocol 'wchlink' not known`. `socket://` and other URLs without such a monitor stay with pyserial.

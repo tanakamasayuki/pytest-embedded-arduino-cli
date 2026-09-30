@@ -184,10 +184,10 @@ def ensure_default_embedded_services(config: Config) -> None:
 
 
 def resolve_port(config: Config, profile: str | None = None) -> str | None:
-    flash_port = getattr(config.option, "flash_port", None)
-    if flash_port:
-        return flash_port
+    """The runtime port: ``--port``, then the profile and common env vars.
 
+    ``--flash-port`` is an upload port only; see :func:`resolve_upload_port`.
+    """
     port = getattr(config.option, "port", None)
     if port:
         return port
@@ -250,10 +250,28 @@ def resolve_peer_port(
     if env_port:
         return env_port
 
-    if is_socket_url(profile_port):
-        return profile_port
+    return profile_port or None
 
+
+def reserved_profile_name_error(profile: str) -> str | None:
+    """Why a profile name cannot be used, or None.
+
+    ``TEST_SERIAL_PORT_PEER_...`` belongs to peer DUTs, so a profile whose
+    env name starts with ``PEER_`` would read a peer's port.
+    """
+    if normalize_profile_name(profile).startswith("PEER_"):
+        return (
+            f"profile '{profile}' is reserved: its port variable "
+            f"TEST_SERIAL_PORT_{normalize_profile_name(profile)} is in the peer DUT namespace"
+        )
     return None
+
+
+def peer_port_env_names(peer: str, profile: str | None) -> list[str]:
+    names = [f"TEST_SERIAL_PORT_PEER_{normalize_peer_name(peer)}"]
+    if profile:
+        names.insert(0, f"{names[0]}_{normalize_profile_name(profile)}")
+    return names
 
 
 def resolve_peer_upload_port(runtime_port: str | None) -> str | None:

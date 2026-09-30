@@ -6,8 +6,10 @@ import types
 import pytest
 import pytest_embedded_arduino_cli.plugin as plugin_module
 
+from pytest_embedded_arduino_cli.app import SketchConfigError
 from pytest_embedded_arduino_cli.plugin import (
     _ardutest_artifact_dir,
+    _check_peer_env_names,
     _log_command,
     _lock_peer_targets_for_request,
     _peer_device_lock_infos,
@@ -505,7 +507,7 @@ def test_port_was_completed_from_sketch_yaml(request):
     result.assert_outcomes(passed=1)
 
 
-def test_plugin_ignores_non_socket_profile_port(pytester: pytest.Pytester) -> None:
+def test_plugin_uses_non_socket_profile_port(pytester: pytest.Pytester) -> None:
     test_dir = pytester.path / "host_app"
     test_dir.mkdir()
     build_dir = test_dir / "build" / "host"
@@ -517,6 +519,7 @@ def test_plugin_ignores_non_socket_profile_port(pytester: pytest.Pytester) -> No
     )
     pytester.makeconftest(
         """
+import pytest_embedded_arduino_cli.plugin as plugin_module
 from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
 from pytest_embedded_arduino_cli.flasher import ArduinoCliUploadConfig
 
@@ -527,18 +530,19 @@ def _fake_compile(self, *, check=True):
 
 
 def _fake_upload(self, *, check=True):
-    assert self.port is None
+    assert self.port == "/dev/ttyUSB0"
     return None
 
 
 ArduinoCliBuildConfig.compile = _fake_compile
 ArduinoCliUploadConfig.upload = _fake_upload
+plugin_module.run_show_properties = lambda *args, **kwargs: {}
 """
     )
     (test_dir / "test_sample.py").write_text(
         """
-def test_port_was_not_read_from_sketch_yaml(request):
-    assert request.config.option.port is None
+def test_port_was_read_from_sketch_yaml(request):
+    assert request.config.option.port == "/dev/ttyUSB0"
 """,
         encoding="utf-8",
     )
@@ -1457,3 +1461,100 @@ def test_fast_socket_redirect_drain_survives_read_error() -> None:
     thread = FastSocketSerialRedirectThread(FakeQueue(), BrokenSerial())
     # must not raise
     thread._drain_remaining()
+
+
+def test_resolve_port_does_not_return_flash_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.option.port = None
+    config.option.flash_port = "/dev/ttyACM0"
+    config.option.profile = None
+    monkeypatch.setenv("TEST_SERIAL_PORT", "/dev/ttyACM1")
+
+    assert resolve_port(config) == "/dev/ttyACM1"
+    assert resolve_upload_port(config) == "/dev/ttyACM0"
+
+
+def test_resolve_peer_port_uses_any_profile_port() -> None:
+    assert resolve_peer_port(peer="echo", profile="uno", profile_port="/dev/ttyACM0") == "/dev/ttyACM0"
+
+
+@pytest.mark.parametrize(
+    ("profiles", "message"),
+    [
+        ("  esp32-s3: {}\n  esp32_s3: {}\n", "share the port variable TEST_SERIAL_PORT_ESP32_S3"),
+        ("  peer-echo: {}\n", "reserved"),
+        ("  PEER_x: {}\n", "reserved"),
+    ],
+)
+def test_sketch_yaml_rejects_ambiguous_profile_names(tmp_path: Path, profiles: str, message: str) -> None:
+    from pytest_embedded_arduino_cli.app import SketchConfigError, load_sketch_yaml
+
+    path = tmp_path / "sketch.yaml"
+    path.write_text("profiles:\n" + profiles, encoding="utf-8")
+
+    with pytest.raises(SketchConfigError, match=message):
+        load_sketch_yaml(path)
+
+
+def test_peer_port_variables_must_not_collide(tmp_path: Path) -> None:
+    def target(name: str, profile: str) -> PeerTarget:
+        app = ArduinoCliBuildConfig(
+            sketch_dir=tmp_path / f"peer_{name}",
+            sketch_yaml=tmp_path / f"peer_{name}" / "sketch.yaml",
+            build_path=tmp_path / f"peer_{name}" / "build",
+            profile=profile,
+        )
+        return PeerTarget(name, app, None)
+
+    peer_dirs = {"a_b": tmp_path / "peer_a_b", "a": tmp_path / "peer_a"}
+    with pytest.raises(SketchConfigError, match="TEST_SERIAL_PORT_PEER_A_B_C"):
+        _check_peer_env_names(peer_dirs, [target("a_b", "c"), target("a", "b_c")])
+    with pytest.raises(SketchConfigError, match="TEST_SERIAL_PORT_PEER_A_B"):
+        _check_peer_env_names({"a-b": tmp_path / "x", "a_b": tmp_path / "y"}, [])
+    _check_peer_env_names(peer_dirs, [target("a_b", "c"), target("a", "d")])
+
+
+def test_plugin_resolves_runtime_port_when_only_flash_port_is_given(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_dir = pytester.path / "app"
+    test_dir.mkdir()
+    (test_dir / "build" / "uno").mkdir(parents=True)
+    (test_dir / "app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
+    (test_dir / "sketch.yaml").write_text("default_profile: uno\nprofiles:\n  uno: {}\n", encoding="utf-8")
+    monkeypatch.setenv("TEST_SERIAL_PORT_UNO", "/dev/ttyACM1")
+    pytester.makeconftest(
+        """
+import pytest_embedded_arduino_cli.plugin as plugin_module
+from pytest_embedded_arduino_cli.app import ArduinoCliBuildConfig
+from pytest_embedded_arduino_cli.flasher import ArduinoCliUploadConfig
+
+
+def _fake_upload(self, *, check=True):
+    assert self.port == "/dev/ttyACM0"
+
+
+ArduinoCliBuildConfig.compile = lambda self, *, check=True: None
+ArduinoCliUploadConfig.upload = _fake_upload
+plugin_module.run_show_properties = lambda *args, **kwargs: {}
+"""
+    )
+    (test_dir / "test_sample.py").write_text(
+        """
+def test_runtime_port(request):
+    assert request.config.option.port == "/dev/ttyACM1"
+""",
+        encoding="utf-8",
+    )
+
+    result = pytester.runpytest(
+        str(test_dir / "test_sample.py"),
+        "--run-mode=test",
+        "--flash-port=/dev/ttyACM0",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+    result.assert_outcomes(passed=1)

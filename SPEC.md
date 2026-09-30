@@ -187,9 +187,11 @@ Prioritizing the policy of not increasing configuration files, the initial speci
 At least the following are included as regular dependencies.
 
 - `pytest`
-- `pytest-embedded`
+- `pytest-embedded` and `pytest-embedded-serial`, 2.8 or later
 
 `pytest-embedded` is a runtime dependency, not a dev dependency.
+
+The plugin uses private parts of `pytest-embedded`: `_listener_gn`, `_pexpect_fr_gn` and `pexpect_proc_fn` to build peer DUTs, and a replacement of `_SerialRedirectThread` for `socket://` and `arduinomonitor://` ports. The lower bound is the version these were tested with; a new `pytest-embedded` release can require a plugin update.
 
 ### 7.2 External Command Dependency
 
@@ -357,6 +359,27 @@ Automatic loading of `.env` files is not included in this specification.
 - Actual command execution is separated into another method or another function
 - In tests, focus on verifying the command array rather than subprocess execution
 
+### 10.7 What the Plugin Promises About `sketch.yaml`
+
+The plugin reads only a few keys of `sketch.yaml` itself. Everything else reaches arduino-cli through `--profile` / `-m`, and its behavior is arduino-cli's, not a contract of this plugin.
+
+Read and interpreted by the plugin:
+
+- `profiles` names and `default_profile`, for profile selection (10.4, and the single-profile fallback)
+- `profiles.<profile>.port`, as the last fallback of the runtime and upload port (14.5, 13.7)
+- `profiles.<profile>.fqbn` and `profiles.<profile>.platforms`, only compared as a whole to share one pluggable-monitor probe between sketches (13.9). Their meaning is not interpreted.
+
+Profile names must give distinct port variables. The plugin treats these as configuration errors:
+
+- Two profiles in one `sketch.yaml` whose names become the same after upper-casing and replacing `-` with `_`, such as `esp32-s3` and `esp32_s3`
+- A profile whose name becomes `PEER_...`, because `TEST_SERIAL_PORT_PEER_...` belongs to peer DUTs
+
+Passed through to arduino-cli and not promised by the plugin:
+
+- `port_config`, board options, programmers, and platform resolution, including a `platforms` entry without a version
+- `default_port_config` at the top level, which arduino-cli does not apply when a profile is selected
+- `--baud` does not apply to a runtime port read through `arduino-cli monitor`; its settings come from arduino-cli
+
 ## 11. Flasher Requirements
 
 ### 11.1 Purpose
@@ -401,6 +424,7 @@ The default lock key is the resolved physical serial port.
 - For peer DUTs, use each peer's resolved runtime / upload serial port.
 - Profile name is not the default lock key because two projects can use the same profile name for different devices, and two different profiles can still address the same physical device.
 - `socket://...` targets are not locked by default because they normally represent host-process or TCP/IP DUTs rather than a shared physical serial device.
+- The key is the port string. Filesystem paths are resolved through symlinks (`/dev/serial/by-id/...` locks the same device as `/dev/ttyUSB0`); other forms, such as `wchlink://...` or `oep://...`, are used as written. The plugin cannot know that `wchlink://S` and `/dev/ttyACM3` are the same probe, or whether two `oep://` slots share hardware. Projects that address one device in several ways set the same `--device-lock-key` on each run.
 
 If multiple peer DUTs are used in one test, all physical serial lock keys required by those peer DUTs are collected when the `peers` fixture is requested. Duplicate physical serial keys in the same peer set are treated as a configuration error. A peer lock key that duplicates the already-held primary DUT lock key is also treated as a configuration error.
 
@@ -518,6 +542,8 @@ Expected schema of the host-arduino information file:
 `port` must be an integer between 1 and 65535 inclusive.
 `pid` is not mandatorily used in the initial implementation, but it can be used for future cleanup or diagnostic purposes.
 
+This file is a contract between repositories: host Arduino cores write it, and this plugin reads it. The file name pattern and the `port` key are kept stable; new keys may be added and are ignored by the plugin.
+
 If a port number is specified down to `socket://localhost:56789`, completion via JSON search is not performed, and that URL is used directly as the runtime connection target.
 
 If `--flash-port` is specified, it follows the existing port priority order and is prioritized as the upload port.
@@ -570,11 +596,12 @@ The runtime port resolution order of a peer DUT is as follows.
 1. `--peer-port <name>:<port>`
 2. `TEST_SERIAL_PORT_PEER_<NAME>_<PROFILE>`
 3. `TEST_SERIAL_PORT_PEER_<NAME>`
-4. When `profiles.<profile>.port` of `peer_<name>/sketch.yaml` is a `socket://...` URL
+4. `profiles.<profile>.port` of `peer_<name>/sketch.yaml`
 5. If it cannot be resolved, skip the test that requires that peer DUT
 
 `<NAME>` and `<PROFILE>` are in a form that is uppercased and has `-` replaced with `_`.
 For example, the `host` profile of `peer_echo` refers to `TEST_SERIAL_PORT_PEER_ECHO_HOST`.
+When two peers of one test would read the same variable, such as `peer_a_b` with profile `c` and `peer_a` with profile `b_c` (both `TEST_SERIAL_PORT_PEER_A_B_C`), or `peer_a-b` and `peer_a_b`, it is a configuration error.
 
 In the upload port resolution of a peer DUT, if the runtime port is a `socket://...` URL, it is not passed to `arduino-cli upload --port`.
 This is to treat the socket URL as the runtime connection target, just like the primary DUT.
@@ -629,7 +656,7 @@ Detection:
 
 Connection:
 
-- The runtime port becomes an `arduinomonitor://<address>?...` URL. The plugin registers a pyserial protocol handler for that scheme, so `dut`, `peers`, `dut.write`, `expect`, and the logs work unchanged.
+- The runtime port becomes an `arduinomonitor://<address>?...` URL. Its text is not part of the API; code that needs the address, protocol or profile parses it with `pytest_embedded_arduino_cli.MonitorTarget.from_url` (21). The plugin registers a pyserial protocol handler for that scheme, so `dut`, `peers`, `dut.write`, `expect`, and the logs work unchanged.
 - The handler starts `arduino-cli monitor -p <address> -l <protocol> --quiet -m <profile>` with the sketch directory as the working directory, and pipes stdin and stdout. Both directions pass bytes unchanged. stderr is kept apart from the data.
 - stdin stays open for the whole session. arduino-cli ends the session when stdin reaches EOF. Bytes written before the monitor has opened the port are delivered once it has.
 - Port settings are left to arduino-cli: board defaults from `monitor_port.serial.<id>` in `boards.txt`, overridden by the profile's `port_config` in `sketch.yaml`. The plugin adds no option for them, and `--baud` does not apply to this connection. With a profile, a top-level `default_port_config` in `sketch.yaml` is not applied by arduino-cli. A key the monitor does not declare makes arduino-cli stop before the session opens.
@@ -663,7 +690,9 @@ The meanings are as follows.
 
 - profile
 
-The compile-related option specific to this plugin is only `--profile`.
+The compile-related options specific to this plugin are `--profile` and `--clean`.
+
+`--clean` has two roles: it passes `--clean` to `arduino-cli compile`, and it removes the ArduTest artifact directory before the run. Both are kept in one option.
 The build path is fixed to `<sketch_dir>/build/<profile or default>`, and the MVP does not have an override.
 
 Before build execution, determine whether the profile is supported, and do not compile sketches with unsupported profiles.
@@ -710,12 +739,15 @@ The behavior of the primary DUT's `--profile`, `--port`, and `--flash-port` is m
 - Bridge on the plugin side as needed
 - Assume at least `--port`, `--flash-port`, `--baud`, and `--embedded-services`
 
-The serial port should be resolvable in the following priority order.
+The runtime port is resolved in the following priority order.
 
-1. `--flash-port`
-2. `--port`
-3. Environment variable per profile
-4. Common environment variable
+1. `--port`
+2. Environment variable per profile
+3. Common environment variable
+4. `profiles.<profile>.port` in `sketch.yaml`
+
+The upload port is `--flash-port` when given, and otherwise the runtime port. A `socket://...` runtime port is not passed to `arduino-cli upload --port`.
+`--flash-port` is never used as the runtime port.
 
 The environment variable name per profile is in a form that normalizes the profile name, such as `TEST_SERIAL_PORT_ESP32S3`.
 The common environment variable is `TEST_SERIAL_PORT`.
@@ -755,6 +787,8 @@ For peer DUT build / upload as well, include information in the `-v` / `-vv` log
 - Use names that are unlikely to conflict with existing pytest-embedded options
 - Make the responsibility boundaries of build / upload / runtime visible from the option names
 - Keep plugin-specific options small and scoped to execution mode, profile selection, peer DUTs, device locking, ArduTest, local state cache, and the log directory summary
+- `--port`, `--flash-port`, and `--baud` belong to `pytest-embedded`. The plugin reads them and may write the resolved runtime port back into `--port` for the current module
+- Existing option names are kept even where their prefixes differ, such as `--arduino-cli-no-log-summary`
 
 ### 14.9 Log Directory Result Summary
 
@@ -1105,26 +1139,25 @@ On the other hand, the policy of not fixing them as-is is as follows.
 - Option design premised on constraints derived from `pytest-embedded-arduino`
 - A structure that consolidates everything into conftest
 
-## 21. API / Implementation Image
+## 21. Public API
 
-The implementation details may be adjusted in subsequent design, but a thin structure like the following is assumed.
+These names are the plugin's public API and follow semantic versioning.
 
-- `app.py`
-  - `ArduinoCliApp`
-  - `ArduinoCliBuildConfig`
-  - `build_command()`
-  - `compile()`
-- `flasher.py`
-  - `ArduinoCliFlasher`
-  - `ArduinoCliUploadConfig`
-  - `upload_command()`
-  - `upload()`
-- `plugin.py`
-  - `pytest_addoption()`
-  - build/upload execution fixtures
-  - `pytest-embedded` integration fixtures
+- Fixtures
+  - `arduino_cli_app` (module): the resolved `ArduinoCliBuildConfig`
+  - `arduino_cli_flasher` (module): the resolved `ArduinoCliUploadConfig`
+  - `arduino_cli_build_properties` (module): `dict[str, str]` of `arduino-cli compile --show-properties` for the sketch and profile under test (13.9)
+  - `arduino_test` (function): the ArduTest session ([`ARDUTEST_PYTEST_SPEC.md`](ARDUTEST_PYTEST_SPEC.md))
+  - `peers` (function): a mapping of peer name to DUT (13.8)
+- Python
+  - `pytest_embedded_arduino_cli.MonitorTarget`: parses an `arduinomonitor://` runtime port with `MonitorTarget.from_url(port)` and builds one with `to_url()`. Fields: `address`, `protocol`, `profile`, `sketch_dir`, `cli_path`
+  - `pytest_embedded_arduino_cli.is_monitor_url(port)`
+- Options (section 14) and environment variables (14.5, 13.7)
+- The `*.host-arduino.json` file (13.4)
 
-At this stage, the API names are provisional, and may be adjusted into a form that is natural as a Python package at implementation time.
+The text of an `arduinomonitor://` URL is not part of the API. Code that needs the address or the profile behind a runtime port parses it with `MonitorTarget.from_url` instead of slicing the string.
+
+Other modules and functions, including `app.py`, `flasher.py`, `serial.py`, and the helpers in `plugin.py`, are internal and may change in any release.
 
 ## 22. Acceptance Criteria
 

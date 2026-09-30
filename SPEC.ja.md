@@ -187,9 +187,11 @@ peer DUT の upload / connect は、原則として `peers` fixture を要求し
 少なくとも次を通常依存として含める。
 
 - `pytest`
-- `pytest-embedded`
+- `pytest-embedded` と `pytest-embedded-serial` の 2.8 以降
 
 `pytest-embedded` は dev dependency ではなく runtime dependency とする。
+
+plugin は `pytest-embedded` の private な部分を使う。peer DUT を作るための `_listener_gn`、`_pexpect_fr_gn`、`pexpect_proc_fn` と、`socket://` / `arduinomonitor://` の port のための `_SerialRedirectThread` の差し替えである。下限はこれらを試験した版とする。`pytest-embedded` の新しいリリースで plugin の更新が要ることがある。
 
 ### 7.2 外部コマンド依存
 
@@ -357,6 +359,27 @@ build_property = "build.defines"        # profile 別の override（解決後 pr
 - 実コマンド実行は別メソッドまたは別関数に分ける
 - テストでは subprocess 実行よりコマンド配列の検証を中心に行う
 
+### 10.7 `sketch.yaml` について plugin が約束すること
+
+plugin 自身が読む `sketch.yaml` のキーは少ない。それ以外は `--profile` / `-m` を通して arduino-cli に届き、その振る舞いは arduino-cli のものであって、この plugin の契約ではない。
+
+plugin が読んで解釈するもの:
+
+- `profiles` の名前と `default_profile`。profile の選択に使う（10.4、および profile が 1 つのときの自動選択）
+- `profiles.<profile>.port`。runtime と upload の port の最後の候補として使う（14.5、13.7）
+- `profiles.<profile>.fqbn` と `profiles.<profile>.platforms`。sketch 間で pluggable monitor の判定を共有するために、まるごと比べるだけに使う（13.9）。中身の意味は解釈しない
+
+profile 名は、別々の port 変数にならなければならない。次を設定エラーとする。
+
+- 1 つの `sketch.yaml` の中で、大文字化して `-` を `_` に置換すると同じ名前になる 2 つの profile。例えば `esp32-s3` と `esp32_s3`
+- 名前が `PEER_...` になる profile。`TEST_SERIAL_PORT_PEER_...` は peer DUT のものであるため
+
+arduino-cli に渡すだけで、plugin は約束しないもの:
+
+- `port_config`、board option、programmer、platform の解決。版を書かない `platforms` の項目も含む
+- top-level の `default_port_config`。profile を選んだとき arduino-cli は適用しない
+- `arduino-cli monitor` 経由で読む runtime の port には `--baud` は効かない。設定は arduino-cli から来る
+
 ## 11. Flasher 要件
 
 ### 11.1 目的
@@ -402,6 +425,7 @@ build は device lock 待機より前に実行できる状態を維持する。
 - peer DUT では、各 peer の解決済み runtime / upload 用 serial port を使う
 - profile 名は既定の lock key にしない。同じ profile 名でも project によって別 device を指すことがあり、逆に異なる profile でも同じ物理 device を指すことがあるため
 - `socket://...` は通常 host process または TCP/IP DUT を表し、共有物理 serial device ではないため、既定では lock しない
+- key は port の文字列とする。filesystem の path は symlink を解決する（`/dev/serial/by-id/...` は `/dev/ttyUSB0` と同じ device を lock する）。`wchlink://...` や `oep://...` のようなその他の形は書かれたまま使う。plugin には `wchlink://S` と `/dev/ttyACM3` が同じ probe であることも、2 つの `oep://` の slot が同じ hardware を共有するかも分からない。1 つの device を複数の書き方で指す project は、どの実行でも同じ `--device-lock-key` を指定する
 
 1 つのテストで複数 peer DUT を使う場合は、`peers` fixture が要求された時点で、その peer DUT 群が必要とする全ての物理 serial lock key を収集する。
 同じ peer 群の中で物理 serial key が重複した場合は設定エラーとして扱う。peer の lock key が既に保持している primary DUT の lock key と重複した場合も設定エラーとして扱う。
@@ -522,6 +546,8 @@ host-arduino 情報ファイルの想定 schema:
 `port` は 1 以上 65535 以下の整数であること。
 `pid` は初期実装では必須利用しないが、将来の cleanup や診断用途で利用できる。
 
+このファイルはリポジトリ間の契約である。host Arduino core が書き、この plugin が読む。ファイル名の形と `port` キーは変えない。キーは増えることがあり、plugin は知らないキーを無視する。
+
 `socket://localhost:56789` のように port 番号まで指定された場合は、JSON 探索による補完を行わず、その URL をそのまま runtime 接続先として使う。
 
 `--flash-port` が指定された場合は既存の port 優先順位に従い、upload 用 port として優先する。
@@ -574,11 +600,12 @@ peer DUT の runtime port 解決順は次の通り。
 1. `--peer-port <name>:<port>`
 2. `TEST_SERIAL_PORT_PEER_<NAME>_<PROFILE>`
 3. `TEST_SERIAL_PORT_PEER_<NAME>`
-4. `peer_<name>/sketch.yaml` の `profiles.<profile>.port` が `socket://...` URL の場合
+4. `peer_<name>/sketch.yaml` の `profiles.<profile>.port`
 5. 解決できなければ、その peer DUT を必要とするテストを skip する
 
 `<NAME>` と `<PROFILE>` は大文字化し、`-` を `_` に置換した形式とする。
 例えば `peer_echo` の `host` profile では `TEST_SERIAL_PORT_PEER_ECHO_HOST` を参照する。
+1 つのテストの 2 つの peer が同じ変数を読むことになる場合は設定エラーとする。例えば profile `c` の `peer_a_b` と profile `b_c` の `peer_a`（どちらも `TEST_SERIAL_PORT_PEER_A_B_C`）や、`peer_a-b` と `peer_a_b` である。
 
 peer DUT の upload port 解決では、runtime port が `socket://...` URL の場合は `arduino-cli upload --port` へ渡さない。
 これは primary DUT と同じく、socket URL を runtime 接続先として扱うためである。
@@ -633,7 +660,7 @@ platform によっては、runtime の console を素の serial port ではな�
 
 接続:
 
-- runtime の port を `arduinomonitor://<address>?...` の URL にする。plugin はこの scheme の pyserial protocol handler を登録するので、`dut`、`peers`、`dut.write`、`expect`、ログは変わらず動く。
+- runtime の port を `arduinomonitor://<address>?...` の URL にする。この文字列は API ではない。address、protocol、profile が要るコードは `pytest_embedded_arduino_cli.MonitorTarget.from_url` で解く（21）。plugin はこの scheme の pyserial protocol handler を登録するので、`dut`、`peers`、`dut.write`、`expect`、ログは変わらず動く。
 - handler は sketch directory を cwd にして `arduino-cli monitor -p <address> -l <protocol> --quiet -m <profile>` を起動し、stdin と stdout をパイプにする。どちらの向きもバイトは変わらず通る。stderr は data に混ぜない。
 - stdin は session の間ずっと開いておく。stdin が EOF になると arduino-cli は session を終える。monitor が port を開く前に書いたバイトは、開いた後に届く。
 - port の設定は arduino-cli に任せる。`boards.txt` の `monitor_port.serial.<id>` が板の既定で、`sketch.yaml` の profile の `port_config` がそれを上書きする。plugin はそのための option を持たず、`--baud` もこの接続には効かない。profile を使うとき、`sketch.yaml` の top-level の `default_port_config` は arduino-cli が適用しない。monitor が宣言しないキーを書くと、arduino-cli は session を開く前に止まる。
@@ -667,7 +694,9 @@ platform によっては、runtime の console を素の serial port ではな�
 
 - profile
 
-本プラグイン固有の compile 関連 option は `--profile` のみとする。
+本プラグイン固有の compile 関連 option は `--profile` と `--clean` とする。
+
+`--clean` は 2 つの役を持つ。`arduino-cli compile` に `--clean` を渡すことと、実行前に ArduTest の artifact directory を消すことである。どちらも 1 つの option のまま保つ。
 build path は `<sketch_dir>/build/<profile or default>` に固定し、MVP では override を持たない。
 
 build 実行前に profile 対応可否を判定し、非対応 profile の sketch では compile を行わない。
@@ -714,12 +743,15 @@ primary DUT の `--profile`、`--port`、`--flash-port` の挙動は既存通り
 - 必要に応じて plugin 側で橋渡しする
 - 少なくとも `--port`、`--flash-port`、`--baud`、`--embedded-services` を前提とする
 
-serial port は次の優先順で解決できるようにする。
+runtime の port は次の優先順で解決する。
 
-1. `--flash-port`
-2. `--port`
-3. profile ごとの環境変数
-4. 共通環境変数
+1. `--port`
+2. profile ごとの環境変数
+3. 共通環境変数
+4. `sketch.yaml` の `profiles.<profile>.port`
+
+upload の port は、`--flash-port` があればそれ、なければ runtime の port とする。`socket://...` の runtime port は `arduino-cli upload --port` に渡さない。
+`--flash-port` を runtime の port として使うことはない。
 
 profile ごとの環境変数名は、例えば `TEST_SERIAL_PORT_ESP32S3` のように profile 名を正規化した形式とする。
 共通環境変数は `TEST_SERIAL_PORT` とする。
@@ -759,6 +791,8 @@ peer DUT の build / upload でも、`-v` / `-vv` のログには peer 名が分
 - pytest-embedded 既存 option と競合しにくい名前にする
 - build / upload / runtime の責務境界が option 名から見えるようにする
 - plugin 固有 option は、実行 mode、profile 選択、peer DUT、device lock、ArduTest、local state cache、log directory summary の範囲に絞る
+- `--port`、`--flash-port`、`--baud` は `pytest-embedded` の option である。plugin はこれらを読み、解決した runtime の port を現在の module の間だけ `--port` に書き戻すことがある
+- `--arduino-cli-no-log-summary` のように接頭辞が揃っていない名前も、既存の option 名は変えない
 
 ### 14.9 log directory 結果 summary
 
@@ -1109,26 +1143,25 @@ README には少なくとも次を含める。
 - `pytest-embedded-arduino` 由来の制約を前提とした option 設計
 - conftest にすべて集約する構成
 
-## 21. API / 実装イメージ
+## 21. 公開 API
 
-実装詳細は後続設計で調整しうるが、次のような薄い構造を想定する。
+次の名前を plugin の公開 API とし、semantic versioning に従う。
 
-- `app.py`
-  - `ArduinoCliApp`
-  - `ArduinoCliBuildConfig`
-  - `build_command()`
-  - `compile()`
-- `flasher.py`
-  - `ArduinoCliFlasher`
-  - `ArduinoCliUploadConfig`
-  - `upload_command()`
-  - `upload()`
-- `plugin.py`
-  - `pytest_addoption()`
-  - build/upload 実行 fixture
-  - `pytest-embedded` 連携 fixture
+- fixture
+  - `arduino_cli_app`（module）: 解決済みの `ArduinoCliBuildConfig`
+  - `arduino_cli_flasher`（module）: 解決済みの `ArduinoCliUploadConfig`
+  - `arduino_cli_build_properties`（module）: 対象の sketch と profile の `arduino-cli compile --show-properties` の `dict[str, str]`（13.9）
+  - `arduino_test`（function）: ArduTest の session（[`ARDUTEST_PYTEST_SPEC.ja.md`](ARDUTEST_PYTEST_SPEC.ja.md)）
+  - `peers`（function）: peer 名から DUT への mapping（13.8）
+- Python
+  - `pytest_embedded_arduino_cli.MonitorTarget`: `MonitorTarget.from_url(port)` で `arduinomonitor://` の runtime port を解き、`to_url()` で作る。フィールドは `address`、`protocol`、`profile`、`sketch_dir`、`cli_path`
+  - `pytest_embedded_arduino_cli.is_monitor_url(port)`
+- option（14 章）と環境変数（14.5、13.7）
+- `*.host-arduino.json`（13.4）
 
-この段階では API 名は仮であり、実装時に Python パッケージとして自然な形へ調整してよい。
+`arduinomonitor://` の URL の文字列そのものは API に含めない。runtime の port の裏の address や profile が要るコードは、文字列を切り出さず `MonitorTarget.from_url` で解く。
+
+`app.py`、`flasher.py`、`serial.py`、`plugin.py` の補助関数を含むその他のモジュールと関数は内部のもので、どのリリースでも変わりうる。
 
 ## 22. 受け入れ条件
 
