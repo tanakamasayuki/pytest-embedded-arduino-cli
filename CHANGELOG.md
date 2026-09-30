@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.8.0
 - (EN) Use `profiles.<profile>.port` from `sketch.yaml` as the last fallback for the runtime and upload port of the primary and peer DUTs, not only `socket://` URLs. A peer whose `sketch.yaml` names a port is now uploaded instead of skipped.
 - (JA) `sketch.yaml` の `profiles.<profile>.port` を、`socket://` の URL に限らず、primary と peer の runtime / upload の port の最後の候補として使うように変更。`sketch.yaml` に port を書いた peer は、skip ではなく upload されるようになる。
 - (EN) Reject ambiguous port variables as configuration errors: profiles whose names normalize to the same variable (`esp32-s3` and `esp32_s3`), profile names that normalize to `PEER_...`, and peers of one test that would read the same `TEST_SERIAL_PORT_PEER_...` variable.
