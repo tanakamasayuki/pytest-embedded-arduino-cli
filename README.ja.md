@@ -331,9 +331,11 @@ uploadと実行時serial通信で同じportを使う場合は、`--port`だけ�
 2. `--port`
 3. `TEST_SERIAL_PORT_<PROFILE>`
 4. `TEST_SERIAL_PORT`
-5. `sketch.yaml` の `profiles.<PROFILE>.port`。ただし `socket://...` URL の場合のみ
+5. `sketch.yaml` の `profiles.<PROFILE>.port`
 
-`--flash-port`と`--port`を両方指定した場合、上の優先順位によりuploadには`--flash-port`を使い、pytest-embeddedのserial接続には`--port`を残します。
+実行時の接続先は、この並びから `--flash-port` を除いたものです。`--flash-port` は upload にしか使いません。`socket://...` の port は実行時の接続先で、`arduino-cli upload` には渡しません。
+
+`<PROFILE>` は profile 名を大文字にし、`-` を `_` に置き換えたものです。`esp32-s3` と `esp32_s3` のように同じ変数になる profile 名や、`PEER_...` になる名前は設定エラーです。
 
 `pytest` の引数解釈の都合で、`--port` や `--flash-port` のように path を受け取る option は、`--port=/dev/ttyUSB0` のように `=` 付きで書く方が安全です。
 環境によっては `uv run pytest --port /dev/ttyUSB0` の形だと、その path を別の基準パスとして解釈してしまうことがあります。
@@ -448,8 +450,10 @@ peer port は次の順で解決します。
 1. `--peer-port <name>:<port>`
 2. `TEST_SERIAL_PORT_PEER_<NAME>_<PROFILE>`
 3. `TEST_SERIAL_PORT_PEER_<NAME>`
-4. peer 側 `sketch.yaml` の `profiles.<PROFILE>.port`。ただし `socket://...` URL の場合のみ
+4. peer 側 `sketch.yaml` の `profiles.<PROFILE>.port`
 5. 解決できなければ peer テストを skip
+
+1 つのテストの 2 つの peer が同じ変数を読むこと（例えば profile `c` の `peer_a_b` と profile `b_c` の `peer_a`）は設定エラーです。
 
 `--peer-profile` と `--peer-port` は複数回指定できます。
 カンマ区切りではなく、peer ごとに option を 1 回ずつ指定します。

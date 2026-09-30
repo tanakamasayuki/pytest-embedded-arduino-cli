@@ -353,13 +353,14 @@ How ports and defines are substituted per environment. This lays out the whole p
 
 Higher wins.
 
-1. `--flash-port`
-2. `--port`
-3. `TEST_SERIAL_PORT_<PROFILE>`
-4. `TEST_SERIAL_PORT`
-5. `profiles.<profile>.port` in `sketch.yaml`, but only when it is a `socket://...` URL
+1. `--port`
+2. `TEST_SERIAL_PORT_<PROFILE>`
+3. `TEST_SERIAL_PORT`
+4. `profiles.<profile>.port` in `sketch.yaml`
 
-`<PROFILE>` is the profile name upper-cased with `-` replaced by `_`.
+`--flash-port` is not in this list: it only changes where the sketch is uploaded.
+
+`<PROFILE>` is the profile name upper-cased with `-` replaced by `_`. Names that would share a variable, such as `esp32-s3` and `esp32_s3`, and names that become `PEER_...` are rejected as configuration errors.
 
 If none of them resolves, the run **fails rather than skipping**. That is the difference from a peer.
 
@@ -370,7 +371,7 @@ A peer does not inherit the primary's setting. Each is resolved by name.
 1. `--peer-port <name>:<port>`
 2. `TEST_SERIAL_PORT_PEER_<NAME>_<PROFILE>`
 3. `TEST_SERIAL_PORT_PEER_<NAME>`
-4. A `socket://...` URL in `sketch.yaml`
+4. `profiles.<profile>.port` in the peer's `sketch.yaml`
 5. If nothing resolves, the tests using that peer are skipped
 
 `<NAME>` is the directory name without `peer_`, upper-cased. For `peer_echo` it is `ECHO`.

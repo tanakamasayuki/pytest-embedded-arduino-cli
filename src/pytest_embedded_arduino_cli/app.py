@@ -9,6 +9,8 @@ from typing import Any, Callable
 
 import yaml
 
+from .serial import normalize_profile_name, reserved_profile_name_error
+
 
 #: Default property used to inject build_config.toml defines/flags when no
 #: explicit override is given and auto-detection has not run.
@@ -75,7 +77,29 @@ def load_sketch_yaml(path: str | Path) -> dict[str, Any]:
     if profiles is not None and not isinstance(profiles, dict):
         raise SketchConfigError(f"'profiles' must be a mapping in {config_path}")
 
+    check_profile_names(profiles or {}, config_path)
     return data
+
+
+def check_profile_names(profiles: dict[Any, Any], config_path: str | Path) -> None:
+    """Reject profile names whose port env variables would be ambiguous.
+
+    ``TEST_SERIAL_PORT_<PROFILE>`` upper-cases the name and turns ``-`` into
+    ``_``, so ``esp32-s3`` and ``esp32_s3`` would read the same variable.
+    """
+    seen: dict[str, str] = {}
+    for raw_name in profiles:
+        name = str(raw_name)
+        error = reserved_profile_name_error(name)
+        if error:
+            raise SketchConfigError(f"{error} ({config_path})")
+        env_name = normalize_profile_name(name)
+        if env_name in seen:
+            raise SketchConfigError(
+                f"profiles '{seen[env_name]}' and '{name}' share the port variable "
+                f"TEST_SERIAL_PORT_{env_name}; rename one of them ({config_path})"
+            )
+        seen[env_name] = name
 
 
 def resolve_profile_name(

@@ -14,8 +14,8 @@ authors = [
 ]
 dependencies = [
   "pytest>=8",
-  "pytest-embedded>=2.0",
-  "pytest-embedded-serial>=2.0",
+  "pytest-embedded>=2.8",
+  "pytest-embedded-serial>=2.8",
   "PyYAML>=6.0",
   "portalocker>=2.8",
 ]

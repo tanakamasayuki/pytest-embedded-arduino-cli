@@ -28,6 +28,7 @@ from .serial import (
     ensure_default_embedded_services,
     install_fast_socket_redirect_thread,
     is_socket_url,
+    peer_port_env_names,
     resolve_peer_port,
     resolve_peer_upload_port,
     resolve_port,
@@ -322,7 +323,22 @@ def _peer_targets_from_request(
 
         targets.append(PeerTarget(name=name, app=app, runtime_port=runtime_port))
 
+    _check_peer_env_names(peer_dirs, targets)
     return targets
+
+
+def _check_peer_env_names(peer_dirs: dict[str, Path], targets: list[PeerTarget]) -> None:
+    """Reject peers whose port variables collide, such as ``peer_a_b`` with
+    profile ``c`` and ``peer_a`` with profile ``b_c``."""
+    profiles = {target.name: target.app.profile for target in targets}
+    owners: dict[str, str] = {}
+    for name in peer_dirs:
+        for env_name in peer_port_env_names(name, profiles.get(name)):
+            owner = owners.setdefault(env_name, name)
+            if owner != name:
+                raise SketchConfigError(
+                    f"peers '{owner}' and '{name}' share the port variable {env_name}; rename one of them"
+                )
 
 
 def _terminal_reporter(config: pytest.Config) -> Any | None:
@@ -631,13 +647,11 @@ def arduino_cli_resolved_port(request: pytest.FixtureRequest) -> None:
 
     _reset_runtime_ports(request.config)
 
-    if getattr(request.config, "_arduino_cli_initial_flash_port", None):
-        return
     if getattr(request.config, "_arduino_cli_initial_port", None):
         return
 
     resolved_port = resolve_port(request.config, profile=arduino_cli_app.profile)
-    if not resolved_port and is_socket_url(arduino_cli_app.profile_port):
+    if not resolved_port:
         resolved_port = arduino_cli_app.profile_port
     if resolved_port:
         request.config.option.port = resolved_port

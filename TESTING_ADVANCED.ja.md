@@ -353,13 +353,14 @@ port と define を環境ごとに差し替える仕組みです。[基本](TEST
 
 上にあるものが勝ちます。
 
-1. `--flash-port`
-2. `--port`
-3. `TEST_SERIAL_PORT_<PROFILE>`
-4. `TEST_SERIAL_PORT`
-5. `sketch.yaml` の `profiles.<profile>.port`。ただし `socket://...` の場合だけ
+1. `--port`
+2. `TEST_SERIAL_PORT_<PROFILE>`
+3. `TEST_SERIAL_PORT`
+4. `sketch.yaml` の `profiles.<profile>.port`
 
-`<PROFILE>` は profile 名を大文字にし、`-` を `_` に置き換えたものです。
+`--flash-port` はこの並びに入りません。upload 先を変えるだけです。
+
+`<PROFILE>` は profile 名を大文字にし、`-` を `_` に置き換えたものです。`esp32-s3` と `esp32_s3` のように同じ変数になる名前や、`PEER_...` になる名前は設定エラーになります。
 
 どれも解決できなければ **skip ではなく失敗** します。peer との違いはここです。
 
@@ -370,7 +371,7 @@ peer は primary の指定を引き継ぎません。名前ごとに解決しま
 1. `--peer-port <name>:<port>`
 2. `TEST_SERIAL_PORT_PEER_<NAME>_<PROFILE>`
 3. `TEST_SERIAL_PORT_PEER_<NAME>`
-4. `sketch.yaml` の `socket://...`
+4. peer の `sketch.yaml` の `profiles.<profile>.port`
 5. 解決できなければ、その peer を使うテストは skip
 
 `<NAME>` は `peer_` を除いたディレクトリ名を大文字にしたものです。`peer_echo` なら `ECHO` です。
