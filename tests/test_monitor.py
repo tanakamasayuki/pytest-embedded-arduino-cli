@@ -88,7 +88,7 @@ def test_own_monitor_protocols_lists_every_protocol_with_a_platform_monitor() ->
         {
             "pluggable_monitor.pattern.serial": "ch32rv monitor",
             "pluggable_monitor.pattern.wchlink": "ch32rv monitor",
-            "pluggable_monitor.required.oep": "WCH:oep-monitor",
+            "pluggable_monitor.required.oep": "ch32-riscv-ug:oep-monitor",
             "pluggable_monitor.required.network": "builtin:network-monitor",
             "upload.tool.serial": "ch32rv",
         }
@@ -203,11 +203,11 @@ def test_monitor_serial_reports_unexpected_end_without_reconnecting(
     assert len(log.read_text(encoding="utf-8").splitlines()) == 1
 
 
-def _app(tmp_path: Path, name: str, fqbn: str = "WCH:ch32v:CH32V003") -> ArduinoCliBuildConfig:
+def _app(tmp_path: Path, name: str, fqbn: str = "ch32-riscv-ug:ch32rv:CH32V003") -> ArduinoCliBuildConfig:
     sketch_dir = tmp_path / name
     sketch_dir.mkdir()
     (sketch_dir / "sketch.yaml").write_text(
-        f"profiles:\n  ch32:\n    fqbn: {fqbn}\n    platforms:\n      - platform: WCH:ch32v (1.0.0)\n",
+        f"profiles:\n  ch32:\n    fqbn: {fqbn}\n    platforms:\n      - platform: ch32-riscv-ug:ch32rv (1.0.0)\n",
         encoding="utf-8",
     )
     return ArduinoCliBuildConfig(
@@ -226,7 +226,7 @@ def test_runtime_port_is_routed_only_for_platforms_with_own_monitor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[tuple[str, str | None]] = []
-    own = {"WCH:ch32v:CH32V003": True, "esp32:esp32:esp32": False}
+    own = {"ch32-riscv-ug:ch32rv:CH32V003": True, "esp32:esp32:esp32": False}
 
     def fake_show_properties(cli_path, sketch_dir, profile, **_kwargs):
         calls.append((str(sketch_dir), profile))
@@ -235,7 +235,7 @@ def test_runtime_port_is_routed_only_for_platforms_with_own_monitor(
             return {
                 "pluggable_monitor.pattern.serial": "ch32rv monitor",
                 "pluggable_monitor.pattern.wchlink": "ch32rv monitor",
-                "pluggable_monitor.required.oep": "WCH:oep-monitor",
+                "pluggable_monitor.required.oep": "ch32-riscv-ug:oep-monitor",
             }
         return {"pluggable_monitor.required.serial": "builtin:serial-monitor"}
 
@@ -271,7 +271,7 @@ def test_plugin_dut_reads_through_arduino_cli_monitor(pytester: pytest.Pytester,
     (test_dir / "build" / "ch32").mkdir(parents=True)
     (test_dir / "ch32_app.ino").write_text("void setup() {}\nvoid loop() {}\n", encoding="utf-8")
     (test_dir / "sketch.yaml").write_text(
-        "default_profile: ch32\nprofiles:\n  ch32:\n    fqbn: WCH:ch32v:CH32V003\n",
+        "default_profile: ch32\nprofiles:\n  ch32:\n    fqbn: ch32-riscv-ug:ch32rv:CH32V003\n",
         encoding="utf-8",
     )
     pytester.makeconftest(
