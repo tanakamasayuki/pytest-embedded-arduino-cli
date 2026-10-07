@@ -146,6 +146,19 @@ Dockerfileのimage build時に一度だけ `core update-index` を実行して�
 
 → [テストの応用](TESTING_ADVANCED.ja.md) の *ビルドテストは和ではなく積で増える*
 
+### core や library の新しい版が出たか、上げても壊れないかを知りたい
+
+`sketch.yaml` に固定した版は、新しい版が出ても自動では変わりません。[Arduino Sketch Tool](https://github.com/tanakamasayuki/ArduinoSketchToolJs) の `check` で更新候補を一覧にし、`update` で書き換えます。
+
+```sh
+npx arduino-sketch-tool check examples --recursive
+npx arduino-sketch-tool update examples --recursive --platform esp32:esp32 --dry-run
+```
+
+上げても壊れないかは、CI の checkout の中だけで最新版に書き換えてビルドする定期ジョブで確かめます。コミットはせず、落ちたときだけ通知します。毎 push の CI は固定版のまま回し、`validate` で版の書き忘れだけを検査します。
+
+→ [テストの応用](TESTING_ADVANCED.ja.md) の *sketch.yaml の版を保守する*
+
 ### 転送に失敗する、または port を開けない
 
 出方は 3 つあり、どれが出たかで見る場所が決まります。port を指定していなければ、接続の準備で `ValueError` になります。port は解決できるのに実体が無ければ、`arduino-cli upload` の中で失敗します。パスが存在しなければ、接続時に `FileNotFoundError` になります。`.env` に symlink を書いていると真ん中が起きやすくなります。**device が無くても文字列としては解決してしまう**からです。なお、これで primary が skip されることはありません。skip されるのは peer だけです。

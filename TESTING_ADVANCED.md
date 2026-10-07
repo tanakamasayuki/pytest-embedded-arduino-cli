@@ -846,6 +846,113 @@ Examples times profiles. One more example adds a row, one more profile adds a co
 
 Real workflows in the shapes above are linked from [Example Projects](TESTING_EXAMPLES.md).
 
+### Maintaining the versions in sketch.yaml
+
+Writing core and library versions into `sketch.yaml` pins the build conditions to the project. In exchange, nobody tells you when a newer release comes out. **Passing on the pinned versions and passing on the latest versions are separate questions.** Answer the first on every push, and the second in a scheduled job that never commits.
+
+[Arduino Sketch Tool](https://github.com/tanakamasayuki/ArduinoSketchToolJs) (`arduino-sketch-tool` on npm) inspects and rewrites those versions. It only reads and writes `sketch.yaml`, and leaves building to Arduino CLI and pytest. Run it through `npx` with Node.js 18 or later. In CI, pin its version, as in `arduino-sketch-tool@1.1.0`.
+
+**See the current versions and the available updates.**
+
+```sh
+npx arduino-sketch-tool list examples --recursive
+npx arduino-sketch-tool check examples --recursive
+```
+
+`list` prints the versions written in the YAML, without touching the network. `check` compares them with the published releases and reports `outdated` (an update exists), `current`, `local` (a `dir:` reference), and so on. It exits 0 even when updates exist.
+
+**Add `validate` to the per-push CI.**
+
+```sh
+npx --yes arduino-sketch-tool@1.1.0 validate examples --recursive --fail-on-warning
+```
+
+Without network access, it detects a library with no version or with `latest` (error, exit code 1), and a core with no version or an additional core with no `platform_index_url` (warning, exit code 2 with `--fail-on-warning`). It does not check whether versions are the latest. A new release alone should not turn the pinned CI red.
+
+**Bump versions locally, one target at a time.**
+
+```sh
+npx arduino-sketch-tool update examples --recursive --platform esp32:esp32 --dry-run
+npx arduino-sketch-tool update examples --recursive --platform esp32:esp32
+git diff -- examples
+uv run pytest examples --profile=esp32 --run-mode=build --clean
+```
+
+Narrow the target with `--platform` or `--library`, check the plan with `--dry-run`, then write. Use `set --version` to align on, or roll back to, a specific version. Local `dir:` references and cores written without a version are left alone. A `--platform`-only run does not refresh Arduino CLI's index, so if the new version cannot be found, run `arduino-cli core update-index` first. When the build and tests pass, commit the YAML diff.
+
+**Check for breakage on the latest versions in a scheduled job that never commits.** Rewrite `sketch.yaml` to the latest versions inside CI's throwaway checkout only, build, and report a failure. The pinned versions in the repository stay as they are.
+
+```yaml
+name: Latest dependency build
+
+on:
+  schedule:
+    - cron: "0 18 * * 0"  # every Sunday 18:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [host, uno, esp32]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: astral-sh/setup-uv@v6
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Update sketch.yaml to the latest versions (not committed)
+        run: |
+          mkdir -p latest-report
+          npx --yes arduino-sketch-tool@1.1.0 update examples --recursive > latest-report/update.txt
+          git diff -- examples > latest-report/yaml.patch
+          { echo '```'; cat latest-report/update.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build with the latest versions
+        run: uv run pytest examples --profile=${{ matrix.profile }} --run-mode=build
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: latest-report-${{ matrix.profile }}
+          path: latest-report/
+
+  notify:
+    needs: build
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open an issue unless one is already open
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Latest dependency build failed"
+          open=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq length)
+          if [ "$open" = "0" ]; then
+            gh issue create --title "$title" --body "$RUN_URL"
+          fi
+```
+
+Change `examples` and the matrix profiles to fit your project.
+
+- **This job is meant to fail.** The coverage matrix above exits successfully with red cells, but this job exists to notify, so it does the opposite. A build failure becomes a pytest ERROR, exit code 1, and a red job.
+- **No index refresh is needed.** An unfiltered `update` also handles libraries, so the tool runs `arduino-cli update` internally. That is why Arduino CLI is installed first.
+- **The Job Summary shows what moved.** A line such as `3.3.11 -> 3.3.12` in `update.txt` is the update. In a week with no updates the build runs on the pinned versions, with the same result as the regular CI.
+- **When it fails, compare it with the pinned CI from the same day.** If the pinned build passes, the cause is on the side of the bumped dependency. Run `git apply` on the `yaml.patch` artifact to reproduce the same state locally. Once it is fixed, bump and commit with the steps above.
+- **Mind who gets notified.** GitHub notifies a scheduled workflow's failure only to the user who last modified the cron line. For a team, open an issue as `notify` does above; it skips creating one while another is still open. In a public repository, schedules are disabled automatically after 60 days without activity.
+- **Each run takes a while.** Across every profile, fetching platforms and building takes several minutes. Once a week is often enough for this matrix.
+
 ### Three shapes that do not work
 
 These three turned up in practice. All of them depend on what an earlier test did, and all of them are design errors. Remove the dependency rather than working around it by fixing the order.

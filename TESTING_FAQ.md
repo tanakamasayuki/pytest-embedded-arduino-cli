@@ -146,6 +146,19 @@ Running `core update-index` only while building a Docker image is not enough if 
 
 → [Advanced Testing](TESTING_ADVANCED.md), *Build tests grow with the product, not the sum*
 
+### Has a newer core or library come out, and will it break the build?
+
+Versions pinned in `sketch.yaml` do not change on their own when a release comes out. List the available updates with `check` from [Arduino Sketch Tool](https://github.com/tanakamasayuki/ArduinoSketchToolJs), and rewrite them with `update`.
+
+```sh
+npx arduino-sketch-tool check examples --recursive
+npx arduino-sketch-tool update examples --recursive --platform esp32:esp32 --dry-run
+```
+
+To learn whether an update breaks the build, run a scheduled job that rewrites to the latest versions inside CI's checkout only and builds. It never commits and only notifies on failure. Keep the per-push CI on the pinned versions, and use `validate` there to catch missing versions.
+
+→ [Advanced Testing](TESTING_ADVANCED.md), *Maintaining the versions in sketch.yaml*
+
 ### The upload fails, or the port cannot be opened
 
 Three shapes, and which one you get says where to look. No port configured gives a `ValueError` when the connection is set up. A port that resolves with nothing behind it fails inside `arduino-cli upload`. A path that does not exist gives a `FileNotFoundError` at connect. A symlink in `.env` makes the middle one easy to hit, because **the string resolves while the device is absent.** The primary is never skipped for this; only peers are.

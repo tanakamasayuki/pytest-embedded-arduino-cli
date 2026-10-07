@@ -27,6 +27,8 @@
 - (JA) peer DUT の起動順の記述を訂正。primary の upload の後、`dut` と `peers` はテスト関数の引数に並べた順に用意される（peers が先とは限らない）。
 - (EN) Add a concise README Quick Start and a detailed physical-board first-test guide, add a no-hardware host-core path, connect the guides to purpose-based local examples, and expand the symptom-first FAQ.
 - (JA) READMEの簡潔なQuick Startと、実機で詳しく学ぶ最初のtestガイドを追加。実機なしのhost core経路、ガイドと目的別exampleの相互リンク、症状から引くFAQも整備。
+- (EN) Docs: maintain the versions pinned in `sketch.yaml` with Arduino Sketch Tool, with `validate` in per-push CI and a scheduled, never-committing workflow that builds on the latest versions and opens an issue on failure.
+- (JA) ドキュメント: Arduino Sketch Tool で `sketch.yaml` の固定版を保守する手順を追加。毎 push の CI での `validate` と、コミットせずに最新版でビルドし、失敗時に issue を作る定期 workflow を説明。
 
 ## 1.6.0
 - (EN) Add testing guides: Testing Basics, Advanced Testing, and Example Projects, all linked from the README.

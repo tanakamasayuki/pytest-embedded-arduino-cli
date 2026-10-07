@@ -846,6 +846,113 @@ example 数 × profile 数です。example が 1 つ増えれば行が増え、p
 
 上記の形の実物のワークフローは、[実例プロジェクト](TESTING_EXAMPLES.ja.md)からリンクしています。
 
+### sketch.yaml の版を保守する
+
+`sketch.yaml` に core と library の版を書いておくと、ビルド条件はプロジェクトに固定されます。その代わり、新しい版が出ても誰も教えてくれません。**固定した版で通ることと、最新の版でも通ることは別の問いです。** 前者は毎 push の CI で、後者はコミットしない定期ジョブで確かめます。
+
+版の確認と書き換えには [Arduino Sketch Tool](https://github.com/tanakamasayuki/ArduinoSketchToolJs)（npm の `arduino-sketch-tool`）が使えます。`sketch.yaml` だけを読み書きし、ビルドは Arduino CLI と pytest に任せます。Node.js 18 以上で `npx` から実行します。CI では `arduino-sketch-tool@1.1.0` のように版を固定してください。
+
+**今の版と更新候補を見る。**
+
+```sh
+npx arduino-sketch-tool list examples --recursive
+npx arduino-sketch-tool check examples --recursive
+```
+
+`list` は YAML に書いてある版をそのまま一覧にし、ネットワークを使いません。`check` は公開版と比べて、`outdated`（更新候補あり）、`current`、`local`（`dir:` の参照）などを表示します。更新候補があっても終了コードは 0 です。
+
+**毎 push の CI には `validate` を足す。**
+
+```sh
+npx --yes arduino-sketch-tool@1.1.0 validate examples --recursive --fail-on-warning
+```
+
+ネットワークを使わずに、library の版の書き忘れや `latest`（error、終了コード 1）と、core の版省略や追加 core の `platform_index_url` 欠落（warning、`--fail-on-warning` で終了コード 2）を検出します。最新かどうかは見ません。新しい版が出ただけで固定版の CI を赤くしないためです。
+
+**版を上げるときは、対象を絞って手元で。**
+
+```sh
+npx arduino-sketch-tool update examples --recursive --platform esp32:esp32 --dry-run
+npx arduino-sketch-tool update examples --recursive --platform esp32:esp32
+git diff -- examples
+uv run pytest examples --profile=esp32 --run-mode=build --clean
+```
+
+`--platform` や `--library` で対象を絞り、`--dry-run` で確かめてから書き込みます。特定の版に揃える、あるいは戻すときは `set --version` を使います。`dir:` のローカル参照と版を書いていない core は書き換えません。`--platform` だけの操作では Arduino CLI の index は更新されないので、新しい版が見つからないときは先に `arduino-cli core update-index` を実行します。ビルドとテストが通ったら、YAML の差分をコミットします。
+
+**最新版での破壊確認は、コミットしない定期ジョブで。** CI の使い捨ての checkout の中だけで `sketch.yaml` を最新版に書き換え、ビルドし、落ちたら知らせます。リポジトリの固定版には触れません。
+
+```yaml
+name: Latest dependency build
+
+on:
+  schedule:
+    - cron: "0 18 * * 0"  # 毎週月曜 3:00 JST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [host, uno, esp32]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: astral-sh/setup-uv@v6
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Update sketch.yaml to the latest versions (not committed)
+        run: |
+          mkdir -p latest-report
+          npx --yes arduino-sketch-tool@1.1.0 update examples --recursive > latest-report/update.txt
+          git diff -- examples > latest-report/yaml.patch
+          { echo '```'; cat latest-report/update.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build with the latest versions
+        run: uv run pytest examples --profile=${{ matrix.profile }} --run-mode=build
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: latest-report-${{ matrix.profile }}
+          path: latest-report/
+
+  notify:
+    needs: build
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open an issue unless one is already open
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Latest dependency build failed"
+          open=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq length)
+          if [ "$open" = "0" ]; then
+            gh issue create --title "$title" --body "$RUN_URL"
+          fi
+```
+
+`examples` と matrix の profile は、自分のプロジェクトに合わせて変えてください。
+
+- **このジョブは落とします。** 上で述べたカバレッジ matrix は赤いセルがあっても正常終了させますが、このジョブの目的は通知なので逆です。build の失敗は pytest の ERROR になり、終了コード 1 でジョブが赤くなります。
+- **index の更新は不要です。** 絞り込みなしの `update` は library も扱うため、tool が内部で `arduino-cli update` を実行します。そのため Arduino CLI を先に導入しておきます。
+- **何が上がったかは Job Summary に出ます。** `update.txt` の `3.3.11 -> 3.3.12` が更新内容です。更新候補が無い週は固定版のままビルドするので、通常の CI と同じ結果になります。
+- **落ちたら、同じ日の固定版 CI と比べます。** 固定版が通っていれば、原因は上がった依存の側です。成果物の `yaml.patch` を `git apply` すれば、手元で同じ状態を再現できます。対応できたら、上の手順で版を上げてコミットします。
+- **通知の届き先に注意します。** GitHub は scheduled workflow の失敗を、cron の行を最後に変更したユーザーにだけ通知します。チームで見るなら上の `notify` のように issue を作ります。既に開いている issue があれば、重複して作りません。public repository では、60 日間活動がないと schedule が自動で止まります。
+- **毎回の build は時間がかかります。** 全 profile を回すと、platform の取得とビルドに数分かかります。この matrix は週に一度の頻度で十分です。
+
 ### うまくいかない 3 つの形
 
 実際に見つかったのはこの 3 つです。どれも「前のテストがしたこと」に依存していて、どれも設計の誤りです。順序を決め打ちにして回避するのではなく、依存そのものを消してください。
