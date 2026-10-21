@@ -403,6 +403,12 @@ To publish the branch's `docs/`, configure the target branch and `/docs` once un
 
 This example automatically checks that PNGs were produced, are non-empty, and cover every profile × scene in the gallery. It does not perform golden-image pixel comparison, so a person reviews visual quality through the [published gallery](https://tanakamasayuki.github.io/LGFXScreenBuilderScreenshotTest/). Add a separate golden-image comparison if required. Headless rendering also cannot validate physical LCD color, panel initialization, or transfer timing, so keep final hardware checks separate.
 
+### Can I run ESP32 tests in an emulator instead of on a board?
+
+Not as a supported feature. Espressif's esp-emu boots an Arduino-ESP32 build and works with this plugin's `socket://` path, but it was evaluated and not adopted: hardly any hardware test can move to it, and hardware-free tests are better served by a host core. For tests without a board, use a host core.
+
+→ [Evaluating the ESP32 Emulator](EMULATOR.md), which also has an unsupported recipe for trying it
+
 ### A test passes alone but fails in the full run, or the other way round
 
 **If it is consistent both ways**, it depends on something an earlier test did. Three shapes account for most of it: riding on state an earlier test accumulated, depending on being first, and assuming a pristine state that another test dirties. **Fix the dependency, not the order** — pinning the order hides a design error rather than removing it.

@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Docs: add EMULATOR.md, an evaluation of Espressif's esp-emu as a stand-in for hardware tests. It is not adopted, `pytest-embedded-espemu` does not work with Arduino builds, and an unsupported `conftest.py` recipe is included for trying it. Linked from the FAQ.
+- (JA) Docs: Espressif の esp-emu を実機テストの代わりに使えるか評価した EMULATOR.md を追加。採用は見送り、`pytest-embedded-espemu` は Arduino のビルドでは使えないこと、試すためのサポート対象外の `conftest.py` のレシピを記載。FAQ からリンク。
 
 ## 1.8.0
 - (EN) Use `profiles.<profile>.port` from `sketch.yaml` as the last fallback for the runtime and upload port of the primary and peer DUTs, not only `socket://` URLs. A peer whose `sketch.yaml` names a port is now uploaded instead of skipped.
