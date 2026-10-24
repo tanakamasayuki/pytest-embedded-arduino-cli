@@ -8,6 +8,8 @@ This document is a specification for organizing the requirements of the new Pyth
 
 The purpose of this plugin is to provide Arduino build / upload based on `arduino-cli`, while building on top of the core / serial / expect features of `pytest-embedded`.
 
+Explicit multiple-profile / peer combination execution and collection-time applicability checks are specified in [section 24](#24-explicit-multiple-profile--peer-combination-execution).
+
 It does not aim primarily at compatibility with the existing `pytest-embedded-arduino`. Instead, it distances itself from ESP-specific implementations and prioritizes a structure that can easily expand to Arduino-compatible boards other than ESP32 in the future.
 
 ## 2. Background
@@ -930,7 +932,7 @@ Cleanup of stale entries is not included in the initial specification.
 Even in tests that use peer DUTs, only the result of the primary DUT (the sketch in the parent directory) is saved to the state cache.
 
 - The build / upload state of peer DUTs is not recorded
-- The `nodeid` does not include the peer name
+- Single-execution `nodeid` does not include the peer name. Combination mode in section 24 includes peer profiles to distinguish configurations
 - Even if a test with the same `nodeid` is executed on multiple boards, only the result of the primary DUT is reflected in the state
 
 ### 15.8 Independence from ArduTest
@@ -980,7 +982,7 @@ If `--save-state-dir` is specified but `--save-state` is not, the state is not s
 The criteria for determining whether test execution was performed on the real board:
 
 - After the upload phase succeeds, the execution of the test phase is reached
-- This determination uses the report where `when == "call"` in `pytest_runtest_logreport`
+- Check the item's successful upload and entry into the call phase, then finalize the result on the teardown report. A teardown failure records error without advancing this run's success timestamp
 
 #### 15.10.4 Finalization of the profile Name
 
@@ -1194,4 +1196,220 @@ The acceptance criteria of this specification are as follows.
 - Adding `fqbn` override or sketch path override
 - Capability declaration per board core / fqbn
 
-The above is the specification of this project.
+The following section specifies execution across multiple profiles and peer combinations.
+
+## 24. Explicit Multiple-Profile / Peer Combination Execution
+
+### 24.1 Status and Purpose
+
+The features in this section are implemented for the next release.
+Preserve single-profile behavior from baseline `a50b0de8b47a` and expand execution configurations within one pytest session only when explicitly requested.
+This section defines combination-mode differences from the single-configuration rules in sections 6, 13, 14, and 15. Collection-time applicability checks also work for single execution and ordinary Python tests.
+
+- The plugin owns candidate expansion, the DUT lifecycle per configuration, skip decisions, and result identity.
+- The consuming project owns profile definitions, physical device assignments by role, and functional / wiring applicability.
+- CI job partitioning and artifact aggregation across jobs remain external responsibilities.
+- Do not add equipment discovery, automatic wiring changes, a device farm, or parallel hardware execution.
+- Do not add a custom matrix configuration file or custom fields to `sketch.yaml`.
+
+### 24.2 CLI and Candidate Selection
+
+Options:
+
+| Option | Meaning |
+|---|---|
+| `--profiles=all` | Select every profile defined for each primary sketch |
+| `--profiles=esp32,esp32s3` | Limit primary candidates to the specified names; one name is also valid |
+| `--peer-profiles=all` | Select every profile for each peer sketch used by the test |
+| `--peer-profiles=echo:esp32,esp32s3` | Limit a named peer to the specified profile candidates |
+| `--peer-profiles=echo:all` | Select every profile for that named peer only |
+
+Named `--peer-profiles` options may be repeated for different peers. Peers without a selection retain their existing resolution rules.
+Bare `--peer-profiles=all` is a special selection for all peers and cannot be combined with named selections or the existing `--peer-profile` option.
+Reject `--profiles` together with the existing `--profile`, and reject `--peer-profiles` together with the existing `--peer-profile` for the same peer.
+Named multiple selections and existing single selections may be combined for different peers.
+
+| Primary selection | Peer selection | Execution set |
+|---|---|---|
+| No new option | No new option | Existing single configuration |
+| `all` | Unspecified | All primary candidates × peer default / existing explicit selection |
+| Unspecified | `all` | Primary default / existing explicit selection × all peer candidates |
+| `all` | `all` | Cartesian product of all candidates on both sides |
+| Explicit candidates | Explicit candidates | Cartesian product of the specified candidates only |
+
+Without a new selection, preserve primary resolution through `--profile` → `default_profile` → single-profile fallback, and peer resolution through `--peer-profile` → `default_profile`.
+A missing default must not trigger expansion to all candidates. Do not add single-profile auto-selection for peers.
+Selecting `all` only for the primary does not expand peer candidates.
+With multiple peers, each peer's candidates form a separate axis of the Cartesian product.
+Reserve `all` in the new options; an actual profile named `all` remains selectable through the existing `--profile all` / `--peer-profile <name>:all` options.
+
+This section calls an invocation using either new option “combination execution mode.” Its preflight rules apply even when only one candidate is selected.
+
+### 24.3 Collection and Input Validation
+
+Identify a configuration by the primary profile and a mapping of used peer profiles sorted by peer name.
+Use existing sketch resolution to read the `sketch.yaml` resolved for each sketch. Do not silently remove collected items based on environment variables or equipment availability.
+
+- `all` enumerates definitions local to each resolved sketch configuration. Do not multiply every sketch by the union of profiles across all sketches.
+- If an explicit candidate is unsupported by an individual sketch, retain a skip item identifying the configuration and reason.
+- If an explicitly requested profile name exists in none of the targeted sketches, report an input error. Validate primary and named peer selections separately.
+- Reject empty lists, duplicate candidates, duplicate selections for one peer, unknown peer names, mixing `all` with names, and malformed configuration.
+- Report an error if an `all` target has no profiles or if no structurally valid configuration exists among the selected Arduino targets. Distinguish this from all configurations being skipped for missing ports.
+- Do not multiply ordinary Python tests without a neighboring `.ino` by the profile count.
+- Bare `--peer-profiles=all` adds no peer axis to modules without peers. Validate unknown names in named peer selections against the collected targets as a whole.
+- Do not multiply tests that do not require `peers` by peer combinations, or skip them for missing peer ports. Account for indirect fixture dependencies.
+- In modules mixing tests with and without peers, generate only the needed configurations and do not repeat a peer-free test for the same primary profile.
+- Candidate ordering and IDs must be deterministic and must not collide when combined with existing test parameters.
+
+IDs use `primary=<profile>,<peer>=<profile>,...`, with peers sorted by name. Delimiters inside names are percent-encoded; unresolved profiles use `<unresolved>`. Existing parameter IDs can be combined with these IDs. Example display:
+
+```text
+test_link[primary=esp32,echo=esp32]
+test_link[primary=esp32,echo=esp32s3]
+test_link[primary=esp32s3,echo=esp32]
+test_link[primary=esp32s3,echo=esp32s3]
+```
+
+`--collect-only` enumerates planned items and validates static configuration only. It must not connect to equipment, request plans from external equipment services, build, upload, start monitors, or acquire device locks.
+Collection must not delete existing artifacts even when `--clean` is also specified.
+
+### 24.4 Port Resolution and Preflight Skips
+
+In combination execution mode, check the connection assignments for all required primary / peer roles before the first DUT upload.
+Skip deficiencies detectable from configuration before compilation to avoid unnecessary builds.
+
+| Condition | Behavior in combination execution mode |
+|---|---|
+| Unresolved runtime port for a required primary / peer | Skip, identifying the configuration and missing role |
+| Different roles in one configuration use the same physical DUT | Skip, identifying the conflicting roles |
+| Connection failure on a configured port, compile failure, or upload failure | Error; do not convert into a missing-configuration skip |
+| Lock acquisition failure / timeout | Error; do not treat as an unconfigured port |
+| `--run-mode=build` | Compile without applying missing-port or duplicate-device skips |
+| Host core | Include when socket configuration resolves; do not require a physical serial port |
+
+Check whether a connection target resolves, not merely whether an environment variable exists. Profile-specific environment variables and `profiles.<profile>.port` remain usable.
+For a role with multiple candidates, do not automatically reuse a profile-independent common port across different chips.
+Reject common CLI port assignments for that role (primary `--port` / `--flash-port`, or peer `--peer-port`) and disables its common environment-variable fallback.
+A role with one candidate retains the existing port resolution order. Invocations without the new options retain existing port resolution and error / skip behavior.
+This restriction does not prohibit explicitly assigning the same port in profile-specific configuration: different execution configurations may use the same DUT sequentially.
+
+Duplicate detection must use physical identity consistent with device locking, including symlink resolution, rather than just port-string equality.
+Check peer-to-peer as well as primary-to-peer conflicts. Account for separate upload / runtime ports when their relationship is known.
+Discovering whether arbitrary different port representations refer to the same device is out of scope; the consuming project supplies correct assignments.
+Identical dynamic host placeholders such as `socket://localhost` alone must not cause a duplicate-physical-DUT skip.
+Preserve the distinction between upload and runtime targets and the existing rule that socket URLs are not passed as upload ports.
+
+A separate new skip-policy option is not required; these behaviors belong to combination execution mode.
+The consuming project checks external wiring / capabilities and, when needed, integrates that check before the first upload. Do not embed OEP-specific or other equipment-specific APIs in the plugin.
+
+### 24.5 Four-Device / Three-Device Examples
+
+Assume both the primary sketch and `peer_echo` define `esp32` and `esp32s3`.
+With two ESP32 devices and two S3 devices, assign role-specific environment variables as follows, using actual ports as values.
+
+| Environment variable | Assignment |
+|---|---|
+| `TEST_SERIAL_PORT_ESP32` | Primary ESP32 |
+| `TEST_SERIAL_PORT_ESP32S3` | Primary S3 |
+| `TEST_SERIAL_PORT_PEER_ECHO_ESP32` | Peer ESP32 |
+| `TEST_SERIAL_PORT_PEER_ECHO_ESP32S3` | Peer S3 |
+
+```bash
+# collect and execute four configurations per test
+pytest tests/link --profiles=all --peer-profiles=all
+
+# restrict the peer to ESP32 and collect two configurations per test
+pytest tests/link --profiles=esp32,esp32s3 --peer-profiles=echo:esp32
+```
+
+With two ESP32 devices and one S3 device, assign the S3 to the primary role and leave the peer S3 port unconfigured.
+Assuming the peer's S3 profile also has no port assignment, the first command collects four configurations, executes two, and skips the two requiring an S3 peer.
+The second command collects only two configurations from the outset.
+Distinguish excluding a profile from the candidate set from including it in the plan and recording an equipment-related skip.
+
+### 24.6 Fixture and Resource Lifecycle
+
+Do not implement this by repeatedly overwriting session-wide profile options or by looping inside test bodies.
+Introduce a module-scoped execution-configuration parameter and make app, build properties, build / upload, monitor, port, peer, and lock lifecycles depend on it.
+Group tests for the same module / configuration where possible, tearing down dependent fixtures before preparing the next configuration.
+
+- Move peer compiled / uploaded caches stored on module objects into configuration-specific state, or reliably clear them.
+- Do not reuse a resolved runtime port or monitor URL as input to the next configuration. Limit the pytest-embedded integration to the configuration's lifetime as well.
+- After preflight and compilation, acquire the required physical device locks in a deterministic order before the first upload.
+- Hold locks through DUT connection use and consuming-project cleanup; release acquired resources even on partial setup failure.
+- If one cleanup fails, attempt to release other resources and attribute the teardown error to that configuration. Do not proceed unconditionally if shared resources could not be safely released.
+- Keep duplicate-device feasibility checks separate from exclusion against other processes through device locks.
+- Assume sequential execution; xdist / parallel hardware execution support is separate work.
+
+Preserve the roles of `--run-mode=all` / `build` / `test`. As before, a successful build-only run consists of successful compilation and skipped test bodies, not successful hardware verification.
+Keep existing sketch / profile build-path separation as the baseline. Initially, do not add a plugin-level cache that omits compilation; use Arduino CLI's normal incremental builds.
+Any future compile-elision cache must validate actual inputs, including sources, core / libraries, build properties / defines, rather than profile names alone.
+
+### 24.7 Results, Artifacts, and State Cache
+
+Bind the configuration to the item before setup starts and to every phase report.
+Do not infer result ownership from the “last used profile” on the current config.
+
+- Include the configuration in nodeids and attribute setup errors, skips, call outcomes, and teardown errors to it.
+- Identify configurations in serial logs, ArduTest artifacts, JUnit, and summaries. Do not overwrite identically named artifacts from different modules / parameters / peer configurations.
+- Build on JUnit and existing summaries without adding a large custom reporting framework.
+- Distinguish the selected planned items from completed results. Do not fabricate passed / skipped outcomes for items not executed because of interruption or `--maxfail`. Collection alone is not execution.
+- Do not describe all-skipped equipment runs as fully verified. Preserve pytest's standard exit codes; CI requirements for mandatory configuration coverage remain with the consuming project.
+- Continue updating `--save-state` only for verification that reached the test body. Unexecuted items, skips, and build / upload failures must not update previous results.
+- Preserve the primary-profile grouping of state; in combination mode, nodeids including peer profiles distinguish results. This does not add standalone peer verification histories.
+- Do not change nodeids or state keys for single execution without the new options. Do not implicitly merge or equate records from single and combination execution.
+
+### 24.8 Change Scope and External Runner Alternative
+
+The main targets are options / collection / fixtures / reports in `plugin.py`, candidate resolution in `app.py`, target resolution and duplicate checks in `serial.py` / `device_lock.py`, and artifact destinations in `log_summary.py` and ArduTest.
+Also check state-cache eligibility and keys, and compatibility with pytest-embedded fixtures / log directories.
+
+Keep an external runner invoking existing single-profile pytest subprocesses as a migration alternative.
+Such a runner separates JUnit, artifacts, and caches per configuration and bundles results with a manifest recording planned launches, termination status, interruptions, and configurations not launched.
+The existing plugin does not skip a missing primary port; if a runner omits a launch, record that separately from a pytest skip.
+This change does not implement a runner. The chosen direction is expansion inside the plugin so routine listing, selection, and partial reruns work within one pytest session.
+
+### 24.9 Implementation Stages and Acceptance Criteria
+
+1. Design the internal configuration as a primary plus peer mapping. First implement peer-free list / `all` selection, item IDs, fixture switching, and result separation.
+2. Extend that same model with peer Cartesian products, preflight skips for unresolved ports / duplicate devices, and peer lifecycle management.
+3. Verify artifacts / summaries / state and compatibility with existing parameters, selection, and reruns; update the existing specification sections and guides in both languages.
+
+Verify at least the following. Keep compilation / upload / connections mockable, with hardware smoke tests performed separately.
+
+- No regressions for defaults, single profiles, peer defaults / explicit selections, or existing error / skip behavior without the new options.
+- Two profiles × two tests without peers can be collected; a build failure in one profile is correctly attributed and the other executes independently.
+- Both-side `all` produces four configurations in the four-device example; the three-device example gives two executions / two skips; an explicit ESP32-only peer gives two configurations.
+- Multiple-peer products, peer-to-peer physical conflicts, indirect `peers` dependencies, and mixed peer / peer-free tests are handled.
+- Missing ports, unsupported profiles, and consuming-project equipment checks take effect before the first upload and retain the necessary skip reasons.
+- Alternate symlinks for the same device are detected, without incorrectly skipping sequential reuse across configurations or dynamic host sockets.
+- Build-only works without ports; collect-only performs no equipment operations, compilation, or artifact deletion.
+- Setup / teardown failures, connection targets and firmware after switching, lock release, and peer-cache isolation are verified.
+- Configuration IDs remain stable with exact nodeid selection, `-k`, `--lf` under the same candidate selection, and existing `parametrize` usage.
+- Units without `.ino` are not duplicated; logs / ArduTest artifacts / JUnit / state distinguish results with different peer profiles.
+- Interruptions, `--maxfail`, and all-skipped runs are not confused with completed or fully successful execution.
+
+### 24.10 Collection-Time Applicability API
+
+Normally select execution scope through profile candidates; use applicability exclusions only for special restrictions that the candidate product cannot express.
+Expose these APIs so consuming projects can declare constraints such as unsupported cross-wired pairs. The plugin does not own equipment semantics or wiring tables.
+
+- `ArduinoCombination`: read-only `primary: str | None` and `peers: Mapping[str, str | None]`, importable from `pytest_embedded_arduino_cli`.
+- `pytest.mark.arduino_skip_if(predicate, reason="...")`: skip when `predicate(item, combination)` returns `True`. Require an actual `bool` and a nonempty reason. Supported at module / class / function / parameter scope.
+- `pytest_arduino_cli_skip_reason(item, combination)`: a hookspec implemented in `conftest.py` or a plugin. Return a nonempty reason `str` or `None`. Hook wrappers are unsupported.
+
+Apply both APIs to collected items remaining after selection such as `-k` / `-m` / `--lf`. `item` exposes test names, nodeid, path, markers, and pytest config.
+For items without an Arduino sketch, `combination` is `None`. Peer-free tests have an empty `peers` mapping; unresolved profile values are `None`.
+These APIs also apply without the new profile options and do not change single-execution nodeids.
+
+Invoke only hook implementations applicable to the item's directory; sibling `conftest.py` files must not interfere.
+Parent / child hooks and all markers accumulate. Any exclusion adds a standard skip marker; `False` / `None` cannot remove other restrictions.
+Reasons include the marker's declaring node and predicate source, or the hook implementation source.
+Evaluate every rule. Even after an earlier exclusion, exceptions, invalid return values, or `pytest.skip()` inside a rule stop execution as configuration errors before build.
+Rules must only read static configuration: no equipment communication, fixture requests, or config mutation. Evaluate them under `--collect-only` and display applicability skips with reasons. Runtime port preflight is not performed during collection.
+
+Decide skips before module fixture setup, avoiding compile / upload solely for an excluded item. A separate eligible item may still require building the same firmware.
+Guides distinguish candidate selection, inapplicability, equipment shortages, failures, and interruptions. A skip is not successful verification or proof of coverage; do not recommend hiding known defects through exclusions.
+See [Advanced Testing](TESTING_ADVANCED.md#profile-combinations-and-applicability) for examples.
+
+The above defines the project specification.

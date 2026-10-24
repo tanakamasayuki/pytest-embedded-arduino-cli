@@ -129,6 +129,8 @@ uv run pytest
 
 - `--run-mode=all|build|test`
 - `--profile`
+- `--profiles=all|PROFILE,...`（明示指定した場合だけ複数構成を実行）
+- `--peer-profiles=all|NAME:all|NAME:PROFILE,...`
 - `--peer-profile=NAME:PROFILE`
 - `--peer-port=NAME:PORT`
 - `--clean`
@@ -388,6 +390,9 @@ profile の解決順は次のとおりです。
 profile が 1 つだけのときの自動選択は fallback としてサポートしていますが、通常の設定ではそれに依存しない方が明確です。
 
 ## peer DUT
+
+primary / peer の複数 profile 実行と、build 前の適用条件判定は、[テストの応用: profile の組合せと適用条件](TESTING_ADVANCED.ja.md#profile-の組合せと適用条件)を参照してください。
+新 option のない実行は、以下の単一 profile の解決規則を維持します。
 
 追加 DUT が必要なテストでは、primary sketch と同じディレクトリ直下に `peer_<name>/` sketch ディレクトリを置きます。
 primary sketch は従来通り `dut` として扱われ、peer sketch は `peers` fixture から参照できます。

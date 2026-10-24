@@ -29,6 +29,7 @@ _MAX_FAILURE_CHARS = 32 * 1024
 # single status when several test ids share one directory name.
 _STATUS_ORDER = (
     "ERROR",
+    "INCOMPLETE",
     "FAILED",
     "XPASSED",
     "PASSED",
@@ -51,6 +52,8 @@ class _TestRecord:
     nodeid: str
     name: str
     profile: str | None = None
+    peers: dict[str, str | None] = field(default_factory=dict)
+    requires_completion: bool = False
     phases: dict[str, _Phase] = field(default_factory=dict)
 
     @property
@@ -63,6 +66,9 @@ class _TestRecord:
             phase = self.phases.get(when)
             if phase is not None and phase.outcome == "failed":
                 return "ERROR"
+
+        if self.requires_completion and "teardown" not in self.phases:
+            return "INCOMPLETE"
 
         call = self.phases.get("call")
         if call is not None:
@@ -99,10 +105,12 @@ class LogSummaryCollector:
     def record(self, report: pytest.TestReport, profile: str | None) -> None:
         record = self._records.get(report.nodeid)
         if record is None:
-            record = _TestRecord(nodeid=report.nodeid, name=_test_dir_name(report.nodeid))
+            record = _TestRecord(nodeid=report.nodeid, name=getattr(report, "arduino_log_dir", _test_dir_name(report.nodeid)))
             self._records[report.nodeid] = record
         if profile is not None:
             record.profile = profile
+        record.peers = getattr(report, "arduino_peers", {})
+        record.requires_completion = getattr(report, "arduino_combination_mode", False)
 
         record.phases[report.when or "call"] = _Phase(
             outcome=report.outcome,
@@ -110,6 +118,9 @@ class LogSummaryCollector:
             longrepr=_longrepr_text(report),
             wasxfail=hasattr(report, "wasxfail"),
         )
+
+    def completed_nodeids(self) -> set[str]:
+        return {nodeid for nodeid, record in self._records.items() if "teardown" in record.phases}
 
     def write(self, session_tempdir: Path, session: pytest.Session, exitstatus: int) -> None:
         if not self._records:
@@ -164,6 +175,8 @@ class LogSummaryCollector:
             lines.append(f"  duration: {_format_duration(record.duration)} ({_phase_durations(record)})")
             if record.profile:
                 lines.append(f"  profile: {record.profile}")
+            for name, profile in record.peers.items():
+                lines.append(f"  peer {name}: {profile}")
 
         logs = sorted(path.name for path in test_dir.glob("*.log"))
         if logs:
@@ -292,7 +305,7 @@ def _render_summary(
         f"exit status: {exitstatus}",
         f"result: {_root_marker_name(counts)}",
         f"total duration: {_format_duration(sum(record.duration for record in records))}",
-        f"profile: {_option(session, 'profile') or 'default'}",
+        f"profile: {_option(session, 'profiles') or _option(session, 'profile') or 'default'}",
         f"run-mode: {_option(session, 'run_mode')}",
         f"rootdir: {session.config.rootpath}",
         f"command: {_invocation_command(session)}",
@@ -301,6 +314,14 @@ def _render_summary(
     ]
     for record in sorted(records, key=lambda r: (_STATUS_RANK.get(r.status, 99), r.nodeid)):
         lines.append(f"{record.status:<8} {_format_duration(record.duration):>9}  {record.nodeid}")
+
+    from .combination import PLANNED, enabled
+
+    if enabled(session.config):
+        planned = session.config.stash.get(PLANNED, [])
+        completed = {record.nodeid for record in records if "teardown" in record.phases}
+        lines.extend(["", f"planned items: {len(planned)}", "unfinished items:"])
+        lines.extend(f"  {nodeid}" for nodeid in planned if nodeid not in completed)
 
     failing = [
         record
@@ -327,7 +348,9 @@ def _summary_payload(
     exitstatus: int,
     session_tempdir: Path,
 ) -> dict[str, Any]:
-    return {
+    from .combination import PLANNED, enabled
+
+    payload = {
         "generated": datetime.now(timezone.utc).isoformat(),
         "log_dir": str(session_tempdir),
         "exit_status": exitstatus,
@@ -344,6 +367,7 @@ def _summary_payload(
                 "dir": record.name,
                 "status": record.status,
                 "profile": record.profile,
+                "peers": record.peers,
                 "duration": round(record.duration, 3),
                 "phases": {
                     when: {"outcome": phase.outcome, "duration": round(phase.duration, 3)}
@@ -354,3 +378,12 @@ def _summary_payload(
             for record in sorted(records, key=lambda r: r.nodeid)
         ],
     }
+    if enabled(session.config):
+        planned = session.config.stash.get(PLANNED, [])
+        completed = {record.nodeid for record in records if "teardown" in record.phases}
+        payload["profiles"] = _option(session, "profiles")
+        payload["profile"] = None
+        payload["peer_profiles"] = _option(session, "peer_profiles")
+        payload["planned"] = planned
+        payload["unfinished"] = [nodeid for nodeid in planned if nodeid not in completed]
+    return payload

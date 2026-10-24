@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import ExitStack
 from pathlib import Path
 import shutil
 import shlex
 from typing import Any, Callable
+from types import SimpleNamespace
 
 import pytest
 
+from . import combination as combinations
 from .ardutest import ArduTestSession
 from .app import (
     ArduinoCliBuildConfig,
@@ -19,7 +22,7 @@ from .app import (
     resolve_test_path,
     run_show_properties,
 )
-from .device_lock import DeviceLockError, DeviceLockInfo, DeviceLockSet, default_lock_dir
+from .device_lock import DeviceLockError, DeviceLockInfo, DeviceLockSet, default_lock_dir, normalize_device_key
 from .flasher import ArduinoCliUploadConfig
 from .log_summary import LogSummaryCollector
 from .monitor import MonitorTarget, is_monitor_url, own_monitor_protocols, port_protocol, register_protocol_handler
@@ -60,6 +63,9 @@ def _should_upload(run_mode: str) -> bool:
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("arduino-cli")
+    group.addoption("--profiles", help="Primary profile list (comma-separated), or all. Opts into combination execution.")
+    group.addoption("--peer-profiles", action="append", default=[], metavar="all|NAME:PROFILES",
+                    help="All peers' profiles, or a named peer's list/all. Repeat for different peers.")
     group.addoption(
         "--run-mode",
         action="store",
@@ -161,11 +167,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_report_header(config: pytest.Config) -> list[str]:
     return [
         f"arduino-cli run-mode: {config.getoption('run_mode')}",
-        f"arduino-cli profile: {config.getoption('profile') or 'default'}",
+        f"arduino-cli profile: {config.getoption('profiles') or config.getoption('profile') or 'default'}",
+        *([f"arduino-cli peer profiles: {config.getoption('peer_profiles')}"] if config.getoption('peer_profiles') else []),
     ]
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    combinations.configure(config)
+    # Entry-point discovery order must not determine whether pytest-embedded
+    # or this plugin supplies the Arduino paths and per-configuration log name.
+    config.pluginmanager.register(_EmbeddedFixtures(), "arduino-cli-fixture-overrides")
+    _PENDING_STATE_UPDATES.clear()
+    globals()["_GLOBAL_STATE_CACHE"] = None
     install_fast_socket_redirect_thread()
     register_protocol_handler()
     _remember_initial_ports(config)
@@ -191,7 +204,10 @@ def _set_optional_metadata(config: pytest.Config) -> None:
     except ImportError:
         return
 
-    config.stash[metadata_key]["Profile"] = config.getoption("profile") or "default"
+    if metadata_key in config.stash:
+        config.stash[metadata_key]["Profile"] = getattr(config.option, "profiles", None) or config.getoption("profile") or "default"
+        if getattr(config.option, "peer_profiles", None):
+            config.stash[metadata_key]["Peer profiles"] = config.option.peer_profiles
 
 
 def _ardutest_artifact_dir(config: pytest.Config) -> Path:
@@ -202,7 +218,7 @@ def _ardutest_artifact_dir(config: pytest.Config) -> Path:
 
 
 def _clean_ardutest_artifacts(config: pytest.Config) -> None:
-    if not config.getoption("clean"):
+    if not config.getoption("clean") or getattr(config.option, "collectonly", False):
         return
 
     artifact_dir = _ardutest_artifact_dir(config)
@@ -211,6 +227,136 @@ def _clean_ardutest_artifacts(config: pytest.Config) -> None:
     if not artifact_dir.is_dir():
         raise NotADirectoryError(f"ArduTest artifact path is not a directory: {artifact_dir}")
     shutil.rmtree(artifact_dir)
+
+
+def pytest_addhooks(pluginmanager) -> None:
+    pluginmanager.add_hookspecs(combinations.Hooks)
+
+
+def pytest_generate_tests(metafunc) -> None:
+    if not combinations.enabled(metafunc.config):
+        return
+    path = Path(metafunc.definition.path)
+    if not any(path.parent.glob("*.ino")):
+        return
+    plans = combinations.plans(metafunc.config, path, "peers" in metafunc.fixturenames)
+    metafunc.parametrize(
+        "_arduino_cli_plan",
+        [pytest.param(plan, id=plan.combination.id,
+                      marks=[pytest.mark.skip(reason="; ".join(plan.skip_reasons))] if plan.skip_reasons else [])
+         for plan in plans],
+        indirect=True, scope="module",
+    )
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_collection_modifyitems(config, items):
+    combinations.validate_selection(config)
+    yield
+    # Evaluate applicability only on selected items, after -k/-m/--lf filtering.
+    for item in items:
+        plan = getattr(item, "callspec", None)
+        plan = plan.params.get("_arduino_cli_plan") if plan is not None else None
+        combination = plan.combination if plan else combinations.legacy_combination(item)
+        item.stash[combinations.COMBINATION] = combination
+        if plan:
+            conflicts = {"port", "flash_port", "app_path", "build_dir"} & item.callspec.params.keys()
+            if conflicts:
+                raise pytest.UsageError(
+                    f"{item.nodeid}: combination mode owns {', '.join(sorted(conflicts))}; "
+                    "use profile configuration instead of parametrizing these fixtures"
+                )
+            item.stash[combinations.PLAN] = plan
+        combinations.apply_skip_rules(item, combination)
+    config.stash[combinations.PLANNED] = [item.nodeid for item in items]
+
+
+def pytest_report_collectionfinish(config, items):
+    if not config.option.collectonly:
+        return
+    return [f"[arduino-cli] SKIP {item.nodeid}: {marker.kwargs.get('reason', 'skipped')}"
+            for item in items for marker in item.iter_markers("skip")
+            if item.stash.get(combinations.PLAN, None) or item.stash.get(combinations.RULE_REASONS, ())]
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    report.config = item.config
+    combination = item.stash.get(combinations.COMBINATION, None)
+    report.arduino_profile = combination.primary if combination else None
+    report.arduino_peers = dict(combination.peers) if combination else {}
+    plan = item.stash.get(combinations.PLAN, None)
+    report.arduino_log_dir = combinations.artifact_name(item.nodeid) if plan else item.name
+    report.arduino_combination_mode = plan is not None
+    if combination:
+        report.user_properties.extend([
+            ("arduino.primary", combination.primary or ""),
+            *[(f"arduino.peer.{name}", profile or "") for name, profile in combination.peers.items()],
+        ])
+    if report.when == "call":
+        item._arduino_cli_call_result = report.outcome
+    report.arduino_verification_result = None
+    if report.when == "teardown":
+        result = getattr(item, "_arduino_cli_call_result", None)
+        state = item.funcargs.get("_arduino_cli_context", item.module if hasattr(item, "module") else None)
+        if combination and getattr(state, "_arduino_cli_uploaded", False) and result in ("passed", "failed"):
+            report.arduino_verification_result = "error" if report.failed else result
+        if report.failed and plan:
+            item.session.shouldstop = "Arduino combination cleanup failed; refusing to reuse hardware"
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    if not combinations.enabled(config) or config.option.collectonly:
+        return
+    collector = getattr(config, "_arduino_cli_log_summary", None)
+    if collector is not None:
+        completed = collector.completed_nodeids()
+    else:
+        completed = getattr(config, "_arduino_cli_completed", set())
+    planned = config.stash.get(combinations.PLANNED, [])
+    pending = [nodeid for nodeid in planned if nodeid not in completed]
+    terminalreporter.write_line(
+        f"Arduino selection: {len(planned)} planned items, {len(set(planned) & completed)} finished (including skips), "
+        f"{len(pending)} unfinished"
+    )
+    for nodeid in pending:
+        terminalreporter.write_line(f"  unfinished: {nodeid}")
+
+
+@pytest.fixture(scope="module")
+def _arduino_cli_plan(request):
+    return getattr(request, "param", None)
+
+
+@pytest.fixture(scope="module")
+def _arduino_cli_context(request, _arduino_cli_plan):
+    # An explicit dependency ensures *all* module resources expire on a
+    # parameter change, including requests that resolve fixtures dynamically.
+    state = SimpleNamespace() if _arduino_cli_plan else request.module
+    yield state
+    if _arduino_cli_plan:
+        _reset_runtime_ports(request.config)
+
+
+def _plan_from_request(request):
+    if not combinations.enabled(request.config):
+        return None
+    return request.getfixturevalue("_arduino_cli_plan")
+
+
+def _runtime_state(request):
+    if not combinations.enabled(request.config):
+        return request.module
+    return request.getfixturevalue("_arduino_cli_context")
+
+
+@pytest.fixture
+def test_case_name(request):
+    if request.node.stash.get(combinations.PLAN, None):
+        return combinations.artifact_name(request.node.nodeid)
+    return request.node.name
 
 
 def _request_path(request: pytest.FixtureRequest) -> Path:
@@ -284,7 +430,11 @@ def _peer_targets_from_request(
 ) -> list[PeerTarget]:
     test_path = resolve_test_path(_request_path(request))
     peer_dirs = _peer_dirs(test_path)
-    _validate_peer_option_names(request.config, peer_dirs)
+    plan = _plan_from_request(request)
+    if plan:
+        peer_dirs = {name: directory for name, directory in peer_dirs.items() if name in plan.combination.peers}
+    else:
+        _validate_peer_option_names(request.config, peer_dirs)
     peer_profiles = _peer_option_map(request.config, "peer_profile")
     peer_ports = _peer_option_map(request.config, "peer_port")
 
@@ -293,7 +443,7 @@ def _peer_targets_from_request(
         try:
             app = ArduinoCliBuildConfig.from_test_path(
                 peer_dir,
-                profile=peer_profiles.get(name),
+                profile=plan.combination.peers[name] if plan else peer_profiles.get(name),
                 clean=request.config.getoption("clean"),
                 allow_single_profile=False,
             )
@@ -315,6 +465,7 @@ def _peer_targets_from_request(
             profile=app.profile,
             option_port=peer_ports.get(name),
             profile_port=app.profile_port,
+            allow_common=not plan or f"peer:{name}" not in plan.multiple_roles,
         )
         if not runtime_port and require_ports:
             reason = f"peer {name}: port is not resolved"
@@ -499,17 +650,25 @@ def skip_autoflash() -> bool:
     return True
 
 
+class _EmbeddedFixtures:
+    app_path = staticmethod(app_path)
+    build_dir = staticmethod(build_dir)
+    skip_autoflash = staticmethod(skip_autoflash)
+    test_case_name = staticmethod(test_case_name)
+
+
 def _build_config_from_request(
     request: pytest.FixtureRequest,
     *,
     required: bool = True,
 ) -> ArduinoCliBuildConfig | None:
     config = request.config
+    plan = _plan_from_request(request)
     should_require = required or _request_has_sketch(request)
     try:
         return ArduinoCliBuildConfig.from_test_path(
             _request_path(request),
-            profile=config.getoption("profile"),
+            profile=plan.combination.primary if plan else config.getoption("profile"),
             clean=config.getoption("clean"),
         )
     except UnsupportedProfileError:
@@ -597,7 +756,7 @@ def _resolve_build_property(config: pytest.Config, app: ArduinoCliBuildConfig) -
 
 
 @pytest.fixture(scope="module")
-def arduino_cli_app(request: pytest.FixtureRequest) -> ArduinoCliBuildConfig:
+def arduino_cli_app(request: pytest.FixtureRequest, _arduino_cli_context) -> ArduinoCliBuildConfig:
     try:
         return _build_config_from_request(request)
     except UnsupportedProfileError as e:
@@ -627,16 +786,19 @@ def arduino_cli_flasher(
 
 @pytest.fixture
 def arduino_test(request: pytest.FixtureRequest, dut: Any) -> ArduTestSession:
+    artifact_dir = _ardutest_artifact_dir(request.config)
+    if request.node.stash.get(combinations.PLAN, None):
+        artifact_dir /= combinations.artifact_name(request.node.nodeid)
     return ArduTestSession(
         dut,
         timeout=request.config.getoption("arduino_test_timeout"),
-        artifact_dir=_ardutest_artifact_dir(request.config),
+        artifact_dir=artifact_dir,
         missing_config=request.config.getoption("arduino_test_missing_config"),
     )
 
 
 @pytest.fixture(scope="module", autouse=True)
-def arduino_cli_resolved_port(request: pytest.FixtureRequest) -> None:
+def arduino_cli_resolved_port(request: pytest.FixtureRequest, _arduino_cli_context) -> None:
     try:
         arduino_cli_app = _build_config_from_request(request, required=False)
     except UnsupportedProfileError as e:
@@ -647,14 +809,33 @@ def arduino_cli_resolved_port(request: pytest.FixtureRequest) -> None:
 
     _reset_runtime_ports(request.config)
 
-    if getattr(request.config, "_arduino_cli_initial_port", None):
-        return
-
-    resolved_port = resolve_port(request.config, profile=arduino_cli_app.profile)
+    plan = _plan_from_request(request)
+    resolved_port = resolve_port(request.config, profile=arduino_cli_app.profile,
+                                 allow_common=not plan or "primary" not in plan.multiple_roles)
     if not resolved_port:
         resolved_port = arduino_cli_app.profile_port
     if resolved_port:
         request.config.option.port = resolved_port
+    if plan and request.config.getoption("run_mode") != "build":
+        if not resolved_port:
+            pytest.skip(f"{plan.combination.id}: primary port is not resolved")
+        targets = _peer_targets_from_request(request)
+        _check_combination_devices(request, resolved_port, targets)
+
+
+def _check_combination_devices(request, primary_port, targets) -> None:
+    owners = {}
+    ports = [("primary", primary_port), ("primary", request.config.getoption("flash_port"))]
+    ports.extend((f"peer {target.name}", target.runtime_port) for target in targets)
+    for role, port in ports:
+        if not port or is_socket_url(port):
+            continue
+        if is_monitor_url(port):
+            port = MonitorTarget.from_url(port).address
+        key = normalize_device_key(port)
+        previous = owners.setdefault(key, role)
+        if previous != role:
+            pytest.skip(f"duplicate device: {previous} and {role} use {key}")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -671,10 +852,6 @@ def arduino_cli_build(
         return
     if not _should_build(request.config.getoption("run_mode")):
         return
-
-    # Record profile for state cache
-    if arduino_cli_app.profile:
-        _set_current_profile(request.config, arduino_cli_app.profile)
 
     arduino_cli_app = _resolve_build_property(request.config, arduino_cli_app)
 
@@ -694,24 +871,20 @@ def arduino_cli_build(
 
 
 @pytest.fixture(scope="module", autouse=True)
-def arduino_cli_device_locks(request: pytest.FixtureRequest) -> None:
+def arduino_cli_device_locks(request: pytest.FixtureRequest, _arduino_cli_context) -> None:
     yield
-
-    primary_lock_set = getattr(request.module, "_arduino_cli_primary_device_lock_set", None)
-    if primary_lock_set is not None:
-        primary_lock_set.release()
-    if hasattr(request.module, "_arduino_cli_primary_device_lock_set"):
-        delattr(request.module, "_arduino_cli_primary_device_lock_set")
-    if hasattr(request.config, "_arduino_cli_primary_device_lock_key"):
-        delattr(request.config, "_arduino_cli_primary_device_lock_key")
-
-    lock_set = getattr(request.module, "_arduino_cli_peer_device_lock_set", None)
-    if lock_set is not None:
-        lock_set.release()
-    if hasattr(request.module, "_arduino_cli_peer_device_lock_set"):
-        delattr(request.module, "_arduino_cli_peer_device_lock_set")
-    if hasattr(request.module, "_arduino_cli_peer_device_lock_ready"):
-        delattr(request.module, "_arduino_cli_peer_device_lock_ready")
+    state = _runtime_state(request)
+    with ExitStack() as cleanup:
+        for name in ("_arduino_cli_primary_device_lock_set", "_arduino_cli_peer_device_lock_set"):
+            lock_set = getattr(state, name, None)
+            if lock_set is not None:
+                cleanup.callback(lock_set.release)
+            if hasattr(state, name):
+                delattr(state, name)
+        if hasattr(request.config, "_arduino_cli_primary_device_lock_key"):
+            delattr(request.config, "_arduino_cli_primary_device_lock_key")
+        if hasattr(state, "_arduino_cli_peer_device_lock_ready"):
+            delattr(state, "_arduino_cli_peer_device_lock_ready")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -749,10 +922,21 @@ def arduino_cli_upload(
         arduino_cli_app,
         arduino_cli_flasher.port,
     )
-    lock_set = _acquire_device_locks(request.config, [lock_info] if lock_info else [])
+    plan = _plan_from_request(request)
+    state = _runtime_state(request)
+    infos = [lock_info] if lock_info else []
+    if plan:
+        targets = _peer_targets_from_request(request)
+        peer_infos = _peer_device_lock_infos(targets)
+        if targets and not peer_infos and request.config.getoption("device_lock") == "required":
+            raise pytest.UsageError("device lock is required, but no peer physical serial port was resolved")
+        infos.extend(peer_infos)
+    lock_set = _acquire_device_locks(request.config, infos)
+    state._arduino_cli_primary_device_lock_set = lock_set
+    if plan:
+        state._arduino_cli_peer_device_lock_ready = True
     if lock_info is not None:
         request.config._arduino_cli_primary_device_lock_key = lock_info.key
-        request.module._arduino_cli_primary_device_lock_set = lock_set
 
     _log_command(
         request.config,
@@ -767,10 +951,7 @@ def arduino_cli_upload(
         },
     )
     arduino_cli_flasher.upload()
-
-    # Record profile for state cache after successful upload
-    if arduino_cli_flasher.profile:
-        _set_current_profile(request.config, arduino_cli_flasher.profile)
+    state._arduino_cli_uploaded = True
 
     runtime_port = resolve_port(request.config, profile=arduino_cli_app.profile)
     if socket_url_needs_port_completion(runtime_port):
@@ -815,14 +996,14 @@ def _log_peer_command(
 
 
 def _compile_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
-    cached = getattr(request.module, "_arduino_cli_peer_compile_targets", None)
+    cached = getattr(_runtime_state(request), "_arduino_cli_peer_compile_targets", None)
     if cached is not None:
         return cached
 
     run_mode = request.config.getoption("run_mode")
     if not _should_build(run_mode):
-        request.module._arduino_cli_peer_compile_targets = []
-        request.module._arduino_cli_peer_compiled_names = set()
+        _runtime_state(request)._arduino_cli_peer_compile_targets = []
+        _runtime_state(request)._arduino_cli_peer_compiled_names = set()
         return []
 
     targets = _peer_targets_from_request(request, require_ports=False, strict=False)
@@ -844,13 +1025,13 @@ def _compile_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
         app.compile()
         compiled_names.add(target.name)
 
-    request.module._arduino_cli_peer_compile_targets = targets
-    request.module._arduino_cli_peer_compiled_names = compiled_names
+    _runtime_state(request)._arduino_cli_peer_compile_targets = targets
+    _runtime_state(request)._arduino_cli_peer_compiled_names = compiled_names
     return targets
 
 
 def _prepare_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
-    cached = getattr(request.module, "_arduino_cli_peer_targets", None)
+    cached = getattr(_runtime_state(request), "_arduino_cli_peer_targets", None)
     if cached is not None:
         _lock_peer_targets_for_request(request, cached)
         return cached
@@ -861,7 +1042,7 @@ def _prepare_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
         strict=True,
     )
     run_mode = request.config.getoption("run_mode")
-    compiled_names = getattr(request.module, "_arduino_cli_peer_compiled_names", set())
+    compiled_names = getattr(_runtime_state(request), "_arduino_cli_peer_compiled_names", set())
 
     for target in targets:
         app = target.app
@@ -882,10 +1063,10 @@ def _prepare_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
             app.compile()
             compiled_names.add(target.name)
 
-    request.module._arduino_cli_peer_compiled_names = compiled_names
+    _runtime_state(request)._arduino_cli_peer_compiled_names = compiled_names
 
     if not _should_upload(run_mode):
-        request.module._arduino_cli_peer_targets = targets
+        _runtime_state(request)._arduino_cli_peer_targets = targets
         return targets
 
     for target in targets:
@@ -927,7 +1108,7 @@ def _prepare_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
             wait_for_socket_url(runtime_port)
         completed.append(PeerTarget(name=target.name, app=target.app, runtime_port=runtime_port))
 
-    request.module._arduino_cli_peer_targets = completed
+    _runtime_state(request)._arduino_cli_peer_targets = completed
     return completed
 
 
@@ -937,7 +1118,7 @@ def _lock_peer_targets_for_request(
 ) -> None:
     if request.config.getoption("run_mode") == "build":
         return
-    if getattr(request.module, "_arduino_cli_peer_device_lock_ready", False):
+    if getattr(_runtime_state(request), "_arduino_cli_peer_device_lock_ready", False):
         return
 
     infos = _peer_device_lock_infos(targets)
@@ -945,8 +1126,8 @@ def _lock_peer_targets_for_request(
         raise pytest.UsageError("device lock is required, but no peer physical serial port was resolved")
 
     lock_set = _acquire_device_locks(request.config, infos)
-    request.module._arduino_cli_peer_device_lock_set = lock_set
-    request.module._arduino_cli_peer_device_lock_ready = True
+    _runtime_state(request)._arduino_cli_peer_device_lock_set = lock_set
+    _runtime_state(request)._arduino_cli_peer_device_lock_ready = True
 
 
 def _make_peer_dut(request: pytest.FixtureRequest, target: PeerTarget) -> tuple[Any, Callable[[], None]]:
@@ -967,48 +1148,41 @@ def _make_peer_dut(request: pytest.FixtureRequest, target: PeerTarget) -> tuple[
 
     msg_queue = manager.MessageQueue()
     logfile = str(test_case_tempdir / f"peer-{target.name}{logfile_extension}")
-    listener = _listener_gn(
-        msg_queue,
-        logfile,
-        with_timestamp,
-        0,
-        0,
-    )
-    pexpect_fr = _pexpect_fr_gn(logfile, listener)
-    pexpect_proc = pexpect_proc_fn(pexpect_fr)
-    app = App(app_path=str(target.app.sketch_dir), build_dir=str(target.app.build_path))
-    runtime_port = _runtime_port_for_app(request.config, target.app, target.runtime_port)
-    serial = Serial(msg_queue=msg_queue, port=runtime_port, baud=baud, meta=meta)
-    dut = SerialDut(
-        pexpect_proc=pexpect_proc,
-        msg_queue=msg_queue,
-        app=app,
-        pexpect_logfile=logfile,
-        test_case_name=request.node.name,
-        meta=meta,
-        serial=serial,
-    )
+    def close_listener(listener):
+        if listener.is_alive():
+            listener.terminate()
+            listener.join(timeout=5)
+        listener.close()
 
-    def cleanup() -> None:
-        try:
-            dut.close()
-        finally:
-            try:
-                serial.close()
-            finally:
-                try:
-                    pexpect_fr.close()
-                finally:
-                    if listener.is_alive():
-                        listener.terminate()
-                        listener.join(timeout=5)
-                    listener.close()
-
-    return dut, cleanup
+    with ExitStack() as resources:
+        listener = _listener_gn(msg_queue, logfile, with_timestamp, 0, 0)
+        resources.callback(close_listener, listener)
+        pexpect_fr = _pexpect_fr_gn(logfile, listener)
+        resources.callback(pexpect_fr.close)
+        pexpect_proc = pexpect_proc_fn(pexpect_fr)
+        app = App(app_path=str(target.app.sketch_dir), build_dir=str(target.app.build_path))
+        runtime_port = _runtime_port_for_app(request.config, target.app, target.runtime_port)
+        serial = Serial(msg_queue=msg_queue, port=runtime_port, baud=baud, meta=meta)
+        resources.callback(serial.close)
+        dut = SerialDut(
+            pexpect_proc=pexpect_proc,
+            msg_queue=msg_queue,
+            app=app,
+            pexpect_logfile=logfile,
+            test_case_name=request.node.name,
+            meta=meta,
+            serial=serial,
+        )
+        resources.callback(dut.close)
+        cleanup = resources.pop_all()
+        return dut, cleanup.close
 
 
 @pytest.fixture
 def peers(request: pytest.FixtureRequest) -> PeerDutMap:
+    plan = _plan_from_request(request)
+    if plan and not plan.combination.peers and _peer_dirs(resolve_test_path(_request_path(request))):
+        raise pytest.UsageError("declare a peers fixture dependency for combination collection; dynamic getfixturevalue('peers') is unsupported")
     targets = _prepare_peer_targets(request)
     if request.config.getoption("run_mode") == "build":
         yield PeerDutMap()
@@ -1023,8 +1197,9 @@ def peers(request: pytest.FixtureRequest) -> PeerDutMap:
             cleanups.append(cleanup)
         yield peer_map
     finally:
-        for cleanup in reversed(cleanups):
-            cleanup()
+        with ExitStack() as stack:
+            for cleanup in cleanups:
+                stack.callback(cleanup)
 
 
 @pytest.fixture(autouse=True)
@@ -1043,7 +1218,7 @@ def _initialize_state_cache(config: pytest.Config) -> None:
     # Save config globally for use in pytest_runtest_logreport
     globals()["_GLOBAL_CONFIG"] = config
 
-    if not config.getoption("save_state"):
+    if not config.getoption("save_state") or getattr(config.option, "collectonly", False):
         config._arduino_cli_state_cache = None
         return
 
@@ -1073,16 +1248,6 @@ def _get_state_cache(config: pytest.Config) -> StateCache | None:
     if cache is not None:
         return cache
     return globals().get("_GLOBAL_STATE_CACHE")
-
-
-def _get_current_profile(config: pytest.Config) -> str | None:
-    """Get the profile that was used for the current test run."""
-    return getattr(config, "_arduino_cli_current_profile", None)
-
-
-def _set_current_profile(config: pytest.Config, profile: str | None) -> None:
-    """Record the profile being used for the current test run."""
-    config._arduino_cli_current_profile = profile
 
 
 def _config_from_report(report: pytest.TestReport) -> pytest.Config | None:
@@ -1141,24 +1306,22 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
         collector = _get_log_summary_collector(config)
         if collector is not None:
             try:
-                collector.record(report, _get_current_profile(config) or config.getoption("profile"))
+                collector.record(report, getattr(report, "arduino_profile", None))
             except Exception:
                 pass
-
-    # Only process call phase (actual test execution)
-    if report.when != "call":
-        return
-
-    # Skip if test was skipped or not run
-    if report.outcome == "skipped":
-        return
 
     if config is None:
         # Unable to determine config, skip state update
         return
 
-    # Determine profile: prefer recorded one, fall back to CLI option
-    profile = _get_current_profile(config) or config.getoption("profile")
+    if report.when == "teardown":
+        completed = getattr(config, "_arduino_cli_completed", set())
+        completed.add(report.nodeid)
+        config._arduino_cli_completed = completed
+    result = getattr(report, "arduino_verification_result", None)
+    if result is None:
+        return
+    profile = getattr(report, "arduino_profile", None)
     if profile is None:
         return
 
@@ -1185,12 +1348,6 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     # Collect pending update to apply at session finish
     try:
         nodeid = report.nodeid
-        if report.outcome == "passed":
-            result = "passed"
-        elif report.outcome == "failed":
-            result = "failed"
-        else:
-            result = report.outcome
         _PENDING_STATE_UPDATES.append((profile, nodeid, result))
     except Exception:
         pass
@@ -1217,6 +1374,8 @@ def _write_log_summary(session: pytest.Session, exitstatus: int) -> None:
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Write the log summary and persist pending state cache updates at session end."""
     _write_log_summary(session, exitstatus)
+    if session.config.option.collectonly:
+        return
 
     try:
         config = getattr(session, "config", None)

@@ -161,7 +161,7 @@ To learn whether an update breaks the build, run a scheduled job that rewrites t
 
 ### The upload fails, or the port cannot be opened
 
-Three shapes, and which one you get says where to look. No port configured gives a `ValueError` when the connection is set up. A port that resolves with nothing behind it fails inside `arduino-cli upload`. A path that does not exist gives a `FileNotFoundError` at connect. A symlink in `.env` makes the middle one easy to hit, because **the string resolves while the device is absent.** The primary is never skipped for this; only peers are.
+Three shapes, and which one you get says where to look. No port configured gives a `ValueError` when the connection is set up. A port that resolves with nothing behind it fails inside `arduino-cli upload`. A path that does not exist gives a `FileNotFoundError` at connect. A symlink in `.env` makes the middle one easy to hit, because **the string resolves while the device is absent.** Legacy single execution does not skip the primary. Combination mode (`--profiles` / `--peer-profiles`) also skips an unconfigured primary port before build, but failures on configured ports remain errors.
 
 → [Advanced Testing](TESTING_ADVANCED.md), *The plugin takes care of peer boards*
 

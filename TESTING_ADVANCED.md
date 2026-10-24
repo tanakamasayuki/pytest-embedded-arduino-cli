@@ -4,6 +4,153 @@
 
 A follow-on from [Testing Basics](TESTING_BASICS.md). It covers the traps that are easy to fall into on real hardware, and what to do when the standard features are not enough. When something has already gone wrong, [the FAQ](TESTING_FAQ.md) indexes this guide by symptom.
 
+## Profile combinations and applicability
+
+### Select candidates first; exclude only when necessary
+
+**Use profile selection to define the execution set first.** Applicability rules are for restrictions that a Cartesian product cannot express.
+For example, ESP32-to-ESP32 and S3-to-S3 may be wired, while ESP32-to-S3 is not. The plugin does not infer wiring.
+Wireless tests that work across all combinations need no exclusion rule. Do not use skips to hide defects, connection failures, or timeouts.
+
+```bash
+# Expand primary candidates only; peers keep their default / existing explicit selection
+uv run pytest tests/link --profiles=esp32,esp32s3
+
+# Every profile of each sketch, multiplied by each used peer's candidates
+uv run pytest tests/link --profiles=all --peer-profiles=all
+
+# Limit echo to ESP32; other peers keep their default / existing explicit selection
+uv run pytest tests/link --profiles=all --peer-profiles=echo:esp32
+
+# Inspect items and applicability skips without touching equipment
+uv run pytest tests/link --profiles=all --peer-profiles=all --collect-only -q
+```
+
+Without the new options, execution remains a single configuration. `--profiles` and `--profile` cannot be combined.
+Named `--peer-profiles` can be repeated for different peers, but conflicts with `--peer-profile` for the same peer.
+Bare `--peer-profiles=all` selects all peers and cannot be combined with other peer profile selections.
+With multiple peers, each peer adds an axis. Tests without a `peers` dependency are not multiplied by peer candidates; ordinary Python tests without `.ino` are not duplicated either.
+
+### Assign devices by role and profile
+
+With two ESP32 devices and two S3 devices, assign their ports to these environment variables, for example:
+
+| Environment variable | Device |
+|---|---|
+| `TEST_SERIAL_PORT_ESP32` | Primary ESP32 |
+| `TEST_SERIAL_PORT_ESP32S3` | Primary S3 |
+| `TEST_SERIAL_PORT_PEER_ECHO_ESP32` | Peer ESP32 |
+| `TEST_SERIAL_PORT_PEER_ECHO_ESP32S3` | Peer S3 |
+
+If both sketches define both profiles, `all × all` produces four configurations per test.
+With only one S3, assign it to the primary role and leave the peer S3 port unset. Provided the peer's `sketch.yaml` also has no S3 port, two configurations execute and two skip for missing equipment.
+
+**A role with multiple candidates does not reuse a common port.** Its `--port` / `--flash-port` / `--peer-port` assignment is a configuration error, and the common `TEST_SERIAL_PORT` / `TEST_SERIAL_PORT_PEER_<NAME>` fallback is disabled. Use profile-specific variables or `profiles.<profile>.port`. A role with one candidate retains the existing resolution order.
+An unset environment variable alone does not imply a skip: a port can still resolve from `sketch.yaml`.
+When two roles in one configuration resolve to the same physical port, including symlink aliases, skip before build. Different configurations may use the same device sequentially.
+The plugin does not discover device identity behind unrelated upload / runtime ports; verify those role assignments in the consuming project.
+
+An unresolved port skips; a connection failure on a configured port, compile / upload failure, or lock timeout is an error.
+`--run-mode=build` needs no ports and does not skip for port shortages or physical device duplication. Host-core socket configurations also work.
+Hardware combinations run sequentially; do not combine them with xdist.
+
+### Declare applicability in the test file
+
+This example restricts execution to matching profiles. The predicate runs during collection, before the test body or DUT fixtures.
+
+```python
+# test_uart.py
+import pytest
+
+
+def cross_profile(item, combination):
+    if combination is None or "echo" not in combination.peers:
+        return False
+    return combination.primary != combination.peers["echo"]
+
+
+pytestmark = pytest.mark.arduino_skip_if(
+    cross_profile,
+    reason="This bench connects matching profiles only",
+)
+
+
+def test_uart(dut, peers):
+    pytest.fail("Replace this placeholder with the actual communication checks")
+```
+
+`pytestmark` applies to the whole file. Use the same marker as a class or function decorator for a narrower scope.
+The predicate receives `(item, combination)` and must return an actual `bool`: `True` requests a skip; `False` means this rule does not exclude the item.
+A nonempty string `reason` is required.
+
+For an arbitrary list of allowed combinations, change only the predicate. This example is for tests using peer `echo`:
+
+```python
+ALLOWED = {("esp32", "esp32"), ("esp32s3", "esp32s3")}
+
+
+def outside_allowed(item, combination):
+    if combination is None or "echo" not in combination.peers:
+        return False
+    return (combination.primary, combination.peers["echo"]) not in ALLOWED
+```
+
+An allow list does not automatically admit new profiles. An exclusion list would return `pair in EXCLUDED`, admitting new profiles by default.
+Treating different profile names as incompatible is a bench-specific decision in this example. Do not apply it indiscriminately to wireless tests or other setups.
+
+### Common rules can also live in conftest.py
+
+```python
+# tests/wired/conftest.py
+def pytest_arduino_cli_skip_reason(item, combination):
+    if combination is None or "echo" not in combination.peers:
+        return None
+    if combination.primary != combination.peers["echo"]:
+        return "This bench connects matching profiles only"
+    return None
+```
+
+The hook applies to its `conftest.py` directory and descendants, not sibling directories.
+Return a nonempty reason string or `None`. Do not use hook wrappers for this hook.
+Parent / child hooks and module / class / function / parameter markers all accumulate; any exclusion skips the item.
+`False` / `None` cannot undo another restriction. Multiple reasons retain their sources.
+
+### Test information and predicate errors
+
+For ordinary Python tests, `item.originalname` gives the function name without parameters, `item.name` includes parameters, `item.nodeid` gives the full ID, and `item.path` gives the file.
+You can also use `item.get_closest_marker("name")` and `item.config.getoption("run_mode")`. Rules run on items remaining after selection such as `-k` / `-m` / `--lf`.
+`combination` is a read-only `ArduinoCombination` with `primary` and named `peers`. Unresolved profiles are `None`; tests without peers have an empty mapping. For tests without an Arduino sketch, `combination` itself is `None`.
+The marker and hook also work outside combination execution mode.
+
+**Predicates must only inspect configuration; do not connect to equipment or request fixtures.** They also execute under `--collect-only`.
+Exceptions, invalid return values, and `pytest.skip()` inside a predicate are configuration errors. A prior skip decision does not hide errors in remaining rules.
+For conditions based solely on environment variables, ordinary `pytest.mark.skipif` is sufficient. To share a condition without hierarchical scope, explicitly import a common Python function into the test files.
+
+### A skip is not a pass or proof of coverage
+
+| Situation | Record and meaning |
+|---|---|
+| Configuration not selected as a candidate | Not in the execution plan |
+| Predicate declares it inapplicable | Reasoned skip; behavior was not verified |
+| Required port unset / same device assigned to two roles | Equipment skip; applicable behavior may remain unverified |
+| Connection / build / upload failure | Error; do not hide it with applicability rules |
+| Assertion failure in the test body | Failed |
+| Interruption / `--maxfail` prevents completion | Unfinished; no fabricated pass or skip |
+
+`--collect-only` displays profile applicability skips, but does not perform runtime port or connection preflight. Inspect runtime reasons with `-rs` or JUnit.
+An all-skipped run normally has pytest exit code 0. If CI requires particular configurations, verify their execution in the results. An old success in `state.json` is not a success in this run.
+Skipped test bodies in build-only mode are not successful hardware verification either.
+
+Configurations are part of nodeids. Use exact nodeids, `-k`, or `--lf` with the same candidate options. Quote a full nodeid so the shell does not interpret its brackets.
+
+```bash
+uv run pytest 'tests/link/test_uart.py::test_uart[primary=esp32,echo=esp32]' --profiles=all --peer-profiles=all
+uv run pytest tests/link --profiles=all --peer-profiles=all --lf
+```
+
+Logs and ArduTest artifacts are separated by configuration and full test identity. State remains grouped by primary profile with peer-aware nodeids; it is not implicitly merged with old single-execution entries.
+Cleanup failure is recorded as a teardown error. Other resource releases are still attempted, then combination execution stops rather than assuming resources are safe to reuse.
+
 ## pytest fundamentals
 
 Four mechanisms come up again and again in this guide, so here they are up front.
@@ -244,7 +391,7 @@ SKIPPED [1] peer device2: port is not resolved
 
 So an extra board usually needs no conftest at all. Where the board is attached and its port configured, the test runs; where it is not, the test is skipped quietly. CI and the workbench can share the same test files.
 
-**This skipping is for peers only.** The primary DUT is never skipped; it fails instead, in one of three shapes.
+**In legacy single execution, this skipping is for peers only.** The primary DUT fails. Combination mode with `--profiles` / `--peer-profiles` also skips an unconfigured primary port before build. A failure on a configured port is an error in either mode. Single execution has three failure shapes:
 
 **The upload runs before the connection.** So when nothing is behind the port you named, it fails at the upload, not at the connection. That changes where in the log to look, so here they are in order.
 
@@ -550,17 +697,14 @@ def cleanup_device(dut, peers):
 def cleanup_device(dut):
     yield
     dut.write("stop\n")
-    try:
-        dut.expect_exact("STOPPED", timeout=2)
-    except Exception:
-        pass          # a failed cleanup must not change the test result
+    dut.expect_exact("STOPPED", timeout=2)
 ```
 
 Waiting has two benefits. It prevents the overlap where the port closes before things have stopped, the module teardown releases the lock, and another process starts an upload. It also leaves the outcome of the cleanup in the log.
 
 Not waiting has two benefits of its own. It is simpler, and it works with a sketch that answers nothing. It also costs no time when the sketch is hung.
 
-**If you do wait, swallow the exception.** A failed cleanup must not change the test result. A missing reply is not unusual: the sketch may not read commands at all, or it may be hung. A failed test that also carries a teardown error makes the real cause harder to see.
+**If confirmed shutdown is a prerequisite for the next test, do not hide its failure.** This example requires a sketch that replies; a missing response becomes a teardown error. Combination mode then stops, preserving both test-body and cleanup failures. Only for optional best-effort work may you choose to catch specific expected exceptions and log them.
 
 Note that without waiting, nothing guarantees the sketch finished reading the command before the port closed. Wait if you need that certainty.
 
@@ -824,7 +968,7 @@ A plan is not one run. It is several layers, cheap and frequent at the bottom, e
 
 **About `--clean` on the full run.** It passes through to the compile, so nothing from a previous build is reused, and this plugin also clears the ArduTest artifacts before the run. **Most of the time you can leave it off** — an incremental build is much faster and nothing goes wrong. After bumping a library or core version, first refresh the indexes so Arduino CLI can resolve the new release. If compile then fails, use `--clean` to avoid reusing the previous build. **Before a release, refresh the indexes and run the full test with `--clean`.**
 
-**This plugin handles compiling a selected sketch and profile through `--run-mode=build`.** What it does not own is enumerating the full example-by-profile set and distributing that work into CI jobs. Define that separately as a matrix, then invoke the plugin's build mode or call `arduino-cli compile` directly in each job. Manual tests still use the normal plugin machinery and are merely excluded from the default selection.
+**This plugin handles compiling selected sketches and profiles through `--run-mode=build`.** `--profiles=all` can expand every profile of each collected sketch sequentially. Discovering examples without tests and distributing work into CI jobs remain external responsibilities. Invoke the plugin's build mode or call `arduino-cli compile` directly in each CI matrix job. Manual tests still use the normal plugin machinery and are merely excluded from the default selection.
 
 **Nothing below the build layer asks its question**, because each of those runs builds one sketch for one profile. A change can pass every device test you own and still break a profile you never flash.
 

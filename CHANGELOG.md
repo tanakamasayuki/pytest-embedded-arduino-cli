@@ -1,6 +1,10 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Add opt-in `--profiles` / `--peer-profiles` list and `all` execution, with separate item IDs, DUT lifecycles, logs, artifacts, and verification state. Missing ports and duplicate physical devices skip before compilation; hardware execution remains sequential.
+- (JA) `--profiles` / `--peer-profiles` の list・`all` による明示的な組合せ実行を追加。item ID、DUT lifecycle、log、artifact、検証状態を分離。port 未設定・物理 device 重複は compile 前に skip し、実機は逐次実行する。
+- (EN) Add the collection-time `arduino_skip_if(predicate, reason=...)` marker and scoped `pytest_arduino_cli_skip_reason(item, combination)` hook. Invalid predicates are errors, restrictions accumulate, and collect-only shows applicability skips without building or deleting artifacts.
+- (JA) 収集時に評価する `arduino_skip_if(predicate, reason=...)` マーカーと、適用範囲に従う `pytest_arduino_cli_skip_reason(item, combination)` フックを追加。判定の記述ミスは error、制限は加算とし、collect-only では build・artifact 削除をせず適用条件による skip を表示する。
 - (EN) Docs: add EMULATOR.md, an evaluation of Espressif's esp-emu as a stand-in for hardware tests. It is not adopted, `pytest-embedded-espemu` does not work with Arduino builds, and an unsupported `conftest.py` recipe is included for trying it. Linked from the FAQ.
 - (JA) Docs: Espressif の esp-emu を実機テストの代わりに使えるか評価した EMULATOR.md を追加。採用は見送り、`pytest-embedded-espemu` は Arduino のビルドでは使えないこと、試すためのサポート対象外の `conftest.py` のレシピを記載。FAQ からリンク。
 

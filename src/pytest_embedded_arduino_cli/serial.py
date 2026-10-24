@@ -183,7 +183,7 @@ def ensure_default_embedded_services(config: Config) -> None:
     config.option.embedded_services = ",".join(services)
 
 
-def resolve_port(config: Config, profile: str | None = None) -> str | None:
+def resolve_port(config: Config, profile: str | None = None, *, allow_common: bool = True) -> str | None:
     """The runtime port: ``--port``, then the profile and common env vars.
 
     ``--flash-port`` is an upload port only; see :func:`resolve_upload_port`.
@@ -200,7 +200,7 @@ def resolve_port(config: Config, profile: str | None = None) -> str | None:
         if profile_port:
             return profile_port
 
-    return os.getenv("TEST_SERIAL_PORT")
+    return os.getenv("TEST_SERIAL_PORT") if allow_common else None
 
 
 def resolve_upload_port(config: Config, profile: str | None = None) -> str | None:
@@ -234,6 +234,7 @@ def resolve_peer_port(
     profile: str | None,
     option_port: str | None = None,
     profile_port: str | None = None,
+    allow_common: bool = True,
 ) -> str | None:
     if option_port:
         return option_port
@@ -246,7 +247,7 @@ def resolve_peer_port(
         if env_profile_port:
             return env_profile_port
 
-    env_port = os.getenv(f"TEST_SERIAL_PORT_PEER_{normalized_peer}")
+    env_port = os.getenv(f"TEST_SERIAL_PORT_PEER_{normalized_peer}") if allow_common else None
     if env_port:
         return env_port
 

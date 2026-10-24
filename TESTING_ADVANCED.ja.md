@@ -4,6 +4,153 @@
 
 [テストの基本](TESTING_BASICS.ja.md) の続きです。実機テストで踏みやすい落とし穴と、標準機能で足りないときの手段を扱います。 何かが起きた後は、症状から引ける[よくある質問](TESTING_FAQ.ja.md)からどうぞ。
 
+## profile の組合せと適用条件
+
+### まず候補を選び、必要な場合だけ除外する
+
+**基本は profile の候補指定で実行範囲を決めます。** 除外条件は、候補の直積では表せない制約に使います。
+例えば、ESP32 同士と S3 同士には配線があるが、ESP32 と S3 の間には配線がない場合です。plugin は配線を推測しません。
+無線で全組合せが成立するなら除外は不要です。不具合、接続失敗、timeout を成功扱いにするために skip を使わないでください。
+
+```bash
+# primary の候補だけを展開。peer は既存の default / 明示指定のまま
+uv run pytest tests/link --profiles=esp32,esp32s3
+
+# 各 sketch の全 profile。peer があれば各 peer の候補との直積
+uv run pytest tests/link --profiles=all --peer-profiles=all
+
+# peer echo は ESP32 のみに限定。他の peer は default / 明示指定のまま
+uv run pytest tests/link --profiles=all --peer-profiles=echo:esp32
+
+# 機材へ触れず、対象 item と適用条件による skip を確認
+uv run pytest tests/link --profiles=all --peer-profiles=all --collect-only -q
+```
+
+新 option を指定しなければ従来の単一構成です。`--profiles` と `--profile` は併用できません。
+名前付き `--peer-profiles` は異なる peer に繰り返し指定でき、同じ peer の `--peer-profile` とは競合します。
+裸の `--peer-profiles=all` は全 peer の指定なので、ほかの peer profile 指定とは併用しません。
+peer が複数ある場合は各 peer の候補も掛け合わせます。`peers` に依存しないテストは peer 数で増やさず、`.ino` のない Python テストも複製しません。
+
+### 実機は役割と profile ごとに割り当てる
+
+ESP32 と S3 が各 2 台ある場合、例えば次の環境変数にそれぞれの port を設定します。
+
+| 環境変数 | 実機 |
+|---|---|
+| `TEST_SERIAL_PORT_ESP32` | primary 用 ESP32 |
+| `TEST_SERIAL_PORT_ESP32S3` | primary 用 S3 |
+| `TEST_SERIAL_PORT_PEER_ECHO_ESP32` | peer 用 ESP32 |
+| `TEST_SERIAL_PORT_PEER_ECHO_ESP32S3` | peer 用 S3 |
+
+両側の sketch に両 profile があれば、`all × all` は 1 テストにつき 4 組です。
+S3 が 1 台なら primary に割り当て、peer 用 S3 の port を未設定にできます。peer の `sketch.yaml` にもその port がなければ、4 組中 2 組を実行し、2 組は設備不足として skip します。
+
+**複数候補を持つ役割には、共通の port を流用しません。** その役割の `--port` / `--flash-port` / `--peer-port` は設定エラーにし、`TEST_SERIAL_PORT` / `TEST_SERIAL_PORT_PEER_<NAME>` の共通 fallback も使いません。profile 別環境変数か `profiles.<profile>.port` を使います。候補が 1 個の役割は従来の解決順です。
+環境変数の未設定だけでは skip は決まりません。`sketch.yaml` に port があれば解決できます。
+同じ構成内の primary / peer、または peer 同士が同じ物理 port を指す場合も、symlink を解決して build 前に skip します。別構成で同じ実機を逐次使うことはできます。
+異なる upload / runtime port の裏にある実機を自動発見する機能はありません。役割への割当は利用側で確認してください。
+
+port 未設定は skip、設定した port の接続失敗・compile / upload 失敗・lock timeout は error です。
+`--run-mode=build` では port は不要で、port 不足や実機重複では skip しません。host core の socket 設定も利用できます。
+実機の組合せ実行は逐次実行のみで、xdist と併用しません。
+
+### ファイルやテストに適用条件を明記する
+
+同名 profile 同士だけに制限する例です。判定は収集時であり、テスト本文や DUT fixture を動かす前です。
+
+```python
+# test_uart.py
+import pytest
+
+
+def cross_profile(item, combination):
+    if combination is None or "echo" not in combination.peers:
+        return False
+    return combination.primary != combination.peers["echo"]
+
+
+pytestmark = pytest.mark.arduino_skip_if(
+    cross_profile,
+    reason="この設備は同名profile同士だけ接続している",
+)
+
+
+def test_uart(dut, peers):
+    pytest.fail("ここを実際の通信検証に置き換えてください")
+```
+
+`pytestmark` はファイル全体に適用します。同じマーカーをクラスや関数のデコレーターにすれば、その範囲だけに適用できます。
+判定関数の引数は `(item, combination)`、戻り値は厳密な `bool` です。`True` は skip、`False` はこの条件では除外しないことを表します。
+`reason` は空でない文字列を必須とします。
+
+任意の組を列挙したい場合も、判定関数だけを変えます。次は peer `echo` を使うテスト向けです。
+
+```python
+ALLOWED = {("esp32", "esp32"), ("esp32s3", "esp32s3")}
+
+
+def outside_allowed(item, combination):
+    if combination is None or "echo" not in combination.peers:
+        return False
+    return (combination.primary, combination.peers["echo"]) not in ALLOWED
+```
+
+許可リストは新 profile を自動で対象にしません。逆に除外リストを使うなら `pair in EXCLUDED` を返し、新 profile は原則対象になることを意識してください。
+profile の名前違いだけを不適合とみなすのは上の設備固有の判断です。無線系などへ一律に適用しないでください。
+
+### 共通条件は conftest.py にも書ける
+
+```python
+# tests/wired/conftest.py
+def pytest_arduino_cli_skip_reason(item, combination):
+    if combination is None or "echo" not in combination.peers:
+        return None
+    if combination.primary != combination.peers["echo"]:
+        return "この設備は同名profile同士だけ接続している"
+    return None
+```
+
+この hook は当該 `conftest.py` のディレクトリと配下に適用し、兄弟ディレクトリには適用しません。
+戻り値は空でない理由の文字列か `None` です。hook wrapper は使用しません。
+上位 / 下位の hook、module / class / function / parameter のマーカーはすべて加算し、一つでも除外と判定すれば skip します。
+`False` / `None` は上位の制限を解除しません。複数の理由があれば判定元とともに残します。
+
+### テスト情報と判定エラー
+
+`item.originalname` で通常の Python テストの parameter を除いた関数名、`item.name` で parameter を含む名前、`item.nodeid` で完全な ID、`item.path` でファイルを参照できます。
+`item.get_closest_marker("名前")`、`item.config.getoption("run_mode")` なども使えます。判定は `-k` / `-m` / `--lf` 等による選択後の item に対して行います。
+`combination` は読み取り専用の `ArduinoCombination` で、`primary` と名前付き `peers` を持ちます。未解決の profile は `None`、peer 不使用なら `peers` は空です。Arduino sketch のないテストでは `combination` 自体が `None` です。
+組合せ mode 以外でもこのマーカーと hook を使えます。
+
+**判定関数は設定だけを読み、機材への接続や fixture の取得を行わないでください。** `--collect-only` でも実行されます。
+例外、不正な戻り値、判定関数内の `pytest.skip()` は設定エラーにします。すでに別の条件で skip が決まっていても、残りの判定のエラーを隠しません。
+環境変数だけで判断できる条件なら、通常の `pytest.mark.skipif` でも十分です。条件を共有したいだけなら、テストファイルから共通 Python 関数を明示的に import する方法もあります。
+
+### skip を合格や検証済みと取り違えない
+
+| 状況 | 記録と意味 |
+|---|---|
+| 候補に指定していない構成 | 実行予定に含まれない |
+| 判定関数で適用対象外 | 理由付き skip。動作の検証はしていない |
+| 必要な port が未設定 / 同じ実機を二役に割当 | 設備による skip。適用可能でも今回は未検証 |
+| 接続・build・upload 失敗 | error。除外条件として隠さない |
+| test 本文の assertion 失敗 | failed |
+| 中断・`--maxfail` で未完了 | unfinished。成功や skip を捏造しない |
+
+`--collect-only` では profile 適用条件による skip を表示しますが、port や接続の実行前確認はまだ行いません。実行時の理由は `-rs` や JUnit で確認します。
+全件 skip でも pytest の終了値は通常 0 です。CI で必須の組があるなら、結果でその組が実行されたことを確認してください。古い `state.json` の成功は今回の成功ではありません。
+build-only の test 本文 skip も実機検証の成功には数えません。
+
+組合せは nodeid に含まれます。同じ候補指定で完全な nodeid、`-k`、`--lf` を使えます。shell に `[]` が解釈されないよう完全な nodeid は引用します。
+
+```bash
+uv run pytest 'tests/link/test_uart.py::test_uart[primary=esp32,echo=esp32]' --profiles=all --peer-profiles=all
+uv run pytest tests/link --profiles=all --peer-profiles=all --lf
+```
+
+log と ArduTest artifact は構成・完全な test ID ごとに分離します。state は primary profile の配下で peer を含む nodeid を使い、単一実行の過去 entry と暗黙に統合しません。
+cleanup が失敗した場合は teardown error として記録し、ほかの資源の解放も試みたうえで組合せ実行を中断します。資源が解放できたと仮定して次の実機へ進みません。
+
 ## pytest の基本の仕組み
 
 このガイドで繰り返し出てくる 4 つの仕組みを、先にまとめます。
@@ -244,7 +391,7 @@ SKIPPED [1] peer device2: port is not resolved
 
 つまり追加の board のために conftest を書く必要は、多くの場合ありません。繋いで port を設定した環境ではそのまま走り、繋いでいない環境では静かに skip されます。CI と実験机で同じテストファイルを共有できます。
 
-**この skip は peer だけの挙動です。** primary DUT については skip されず、失敗として出ます。形は 3 通りあります。
+**従来の単一実行では、この skip は peer だけの挙動です。** primary DUT は失敗になります。`--profiles` / `--peer-profiles` を使う組合せ mode では primary の port 未設定も build 前に skip します。設定済み port の障害は両 mode とも error です。単一実行での出方は次の 3 通りです。
 
 **upload は接続より先に走ります。** そのため、指定した先に device が無い場合は接続時ではなく upload で落ちます。ログのどこを見るかが変わるので、順に並べます。
 
@@ -362,7 +509,7 @@ port と define を環境ごとに差し替える仕組みです。[基本](TEST
 
 `<PROFILE>` は profile 名を大文字にし、`-` を `_` に置き換えたものです。`esp32-s3` と `esp32_s3` のように同じ変数になる名前や、`PEER_...` になる名前は設定エラーになります。
 
-どれも解決できなければ **skip ではなく失敗** します。peer との違いはここです。
+従来の単一実行では、どれも解決できなければ **skip ではなく失敗** します。組合せ mode の port 解決と skip は冒頭の節を参照してください。
 
 ### peer DUT の port
 
@@ -550,17 +697,14 @@ def cleanup_device(dut, peers):
 def cleanup_device(dut):
     yield
     dut.write("stop\n")
-    try:
-        dut.expect_exact("STOPPED", timeout=2)
-    except Exception:
-        pass          # 掃除の失敗でテスト結果を変えない
+    dut.expect_exact("STOPPED", timeout=2)
 ```
 
 待つ利点は 2 つです。止まり切る前にポートが閉じて module の teardown で lock が解放され、別プロセスが upload を始める、という重なりを防げます。掃除の結果がログに残るのも利点です。
 
 待たない利点も 2 つです。単純で、応答を返さない sketch でも書けます。sketch が固まっているときに待ち時間を払いません。
 
-**待つ形にするなら例外を潰してください。** 掃除の失敗でテストの結果を変えないためです。応答が返らない状況は珍しくありません。sketch がコマンドを読む作りになっていない、固まっている、といった場合です。落ちたテストが teardown のエラーまで抱えると、本当の原因が見えにくくなります。
+**停止確認が次のテストの前提なら、失敗を隠さないでください。** この例は応答を返す sketch を前提とし、応答がなければ teardown error にします。組合せ mode はその後の実行を中断し、test 本文の失敗と cleanup の失敗を両方記録します。停止確認が不要な best-effort の補助処理に限り、想定する例外を捕捉してログに残す選択もできます。
 
 なお待たない場合、ポートを閉じた直後に sketch がコマンドを読み終えている保証はありません。確実にしたいなら待つ形にしてください。
 
@@ -824,7 +968,7 @@ module に 2 本目のテストを足す費用は、それ自体は小さいで�
 
 **全実行に付ける `--clean` について。** これはコンパイルまで素通しするので、前回のビルド結果を何も再利用しません。加えてこのプラグインは、実行前に ArduTest の生成物も消します。**普段は付けなくて大丈夫なことが多いです。** 差分ビルドのほうがずっと速く、それで困らないからです。利用しているlibraryやcoreのversionを上げたときは、まずindexを更新して新しいversionを解決できるようにします。そのうえでcompileが失敗する場合は、前回のbuild再利用を避けるため `--clean` を付けます。**リリース前はindexを更新し、`--clean` を付けたフルテストを推奨します。**
 
-**このpluginは `--run-mode=build` で、選択したsketchとprofileのcompileを担当します。** 担当しないのは、対応する全example × 全profileの組み合わせを列挙し、CIのjobへ配分する部分です。そこはGitHub Actionsなどのmatrixとして別に用意し、各jobからこのpluginのbuild modeを呼ぶか、`arduino-cli compile`を直接呼びます。manualテストは通常のpluginの仕組みで、既定の選択から外してあるだけです。
+**このpluginは `--run-mode=build` で、選択したsketchとprofileのcompileを担当します。** `--profiles=all` なら収集対象の各sketchの全profileを逐次展開できます。テストを持たない全exampleの探索や、CIのjobへの配分は外側の責務です。GitHub Actionsなどのmatrixの各jobからpluginのbuild modeを呼ぶか、`arduino-cli compile`を直接呼びます。manualテストは通常のpluginの仕組みで、既定の選択から外してあるだけです。
 
 **ビルドテストの問いは、下の層のどれも問いません。** どの実行も、1 つの sketch を 1 つの profile でビルドするだけだからです。手持ちの実機テストが全部通っても、一度も書き込まない profile が壊れていることはあります。
 

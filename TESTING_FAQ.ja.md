@@ -161,7 +161,7 @@ npx arduino-sketch-tool update examples --recursive --platform esp32:esp32 --dry
 
 ### 転送に失敗する、または port を開けない
 
-出方は 3 つあり、どれが出たかで見る場所が決まります。port を指定していなければ、接続の準備で `ValueError` になります。port は解決できるのに実体が無ければ、`arduino-cli upload` の中で失敗します。パスが存在しなければ、接続時に `FileNotFoundError` になります。`.env` に symlink を書いていると真ん中が起きやすくなります。**device が無くても文字列としては解決してしまう**からです。なお、これで primary が skip されることはありません。skip されるのは peer だけです。
+出方は 3 つあり、どれが出たかで見る場所が決まります。port を指定していなければ、接続の準備で `ValueError` になります。port は解決できるのに実体が無ければ、`arduino-cli upload` の中で失敗します。パスが存在しなければ、接続時に `FileNotFoundError` になります。`.env` に symlink を書いていると真ん中が起きやすくなります。**device が無くても文字列としては解決してしまう**からです。従来の単一実行では primary は skip されません。組合せ mode（`--profiles` / `--peer-profiles`）では primary の port 未設定も build 前に skip しますが、設定済み port の障害は error のままです。
 
 → [テストの応用](TESTING_ADVANCED.ja.md) の *peer の board は plugin が面倒を見ます*
 

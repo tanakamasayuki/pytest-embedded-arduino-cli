@@ -8,6 +8,8 @@
 
 本プラグインは `pytest-embedded` の core / serial / expect を土台にしつつ、Arduino 向けの build / upload を `arduino-cli` ベースで提供することを目的とする。
 
+明示指定による複数 profile / peer 組合せ実行と収集時の適用条件判定は [24 章](#24-明示指定による複数-profile--peer-組合せ実行) に記載する。
+
 既存の `pytest-embedded-arduino` 互換を主目的にはせず、ESP 固有実装から距離を取り、将来的に ESP32 以外の Arduino 対応ボードへ広げやすい構成を優先する。
 
 ## 2. 背景
@@ -934,7 +936,7 @@ stale entry の cleanup は初期仕様に含めない。
 peer DUT を使うテストでも、state cache には primary DUT（親ディレクトリの sketch）のみの結果を保存する。
 
 - peer DUT の build / upload 状態は記録しない
-- `nodeid` は peer 名を含まない
+- 単一実行の `nodeid` は peer 名を含まない。24 章の組合せ mode は peer profile を含めて構成を区別する
 - 同じ `nodeid` を持つテストが複数台で実行されても、state には primary DUT の結果のみ反映される
 
 ### 15.8 ArduTest との独立性
@@ -984,7 +986,7 @@ pytest tests/foo --save-state --save-state-dir .test-cache
 テスト実行が実機上で行われたかの判定基準：
 
 - upload フェーズが成功した後、test フェーズの execution に到達したこと
-- この判定は `pytest_runtest_logreport` で `when == "call"` の report を使う
+- item の upload 成功と call 到達を確認し、teardown report で最終結果を確定する。teardown 失敗時は error とし、その実行の成功時刻を更新しない
 
 #### 15.10.4 profile 名の確定
 
@@ -1197,5 +1199,221 @@ README には少なくとも次を含める。
 - build profile と test matrix の統合
 - `fqbn` override や sketch path override の追加
 - board core / fqbn ごとの capability 宣言
+
+複数 profile と peer の組合せ実行については、次章に仕様を定める。
+
+## 24. 明示指定による複数 profile / peer 組合せ実行
+
+### 24.1 状態と目的
+
+本章の機能は次期リリース向けに実装済みである。
+従来実装 `a50b0de8b47a` の単一 profile 実行を維持したまま、明示指定した場合だけ複数の実行構成を一度の pytest session 内に展開する。
+6、13、14、15 章の単一構成の規則に対し、組合せ mode の差分は本章を適用する。収集時の適用条件判定は単一実行と通常の Python テストでも利用できる。
+
+- plugin は候補の展開、構成ごとの DUT lifecycle、skip 判定、結果の識別を担当する。
+- 利用側は profile 定義、役割別の実機割当、機能・配線の適用条件を担当する。
+- CI の job 分割と job 間の artifact 集計は外側の責務とする。
+- 設備の自動発見、配線の自動切替、device farm、実機並列化は追加しない。
+- 独自の matrix 設定ファイルや `sketch.yaml` の独自項目は追加しない。
+
+### 24.2 CLI と候補の選択
+
+追加する option は次のとおりとする。
+
+| option | 意味 |
+|---|---|
+| `--profiles=all` | 各 primary sketch に定義された全 profile を候補にする |
+| `--profiles=esp32,esp32s3` | primary の候補を指定した名前に限定する。1 個の指定も許す |
+| `--peer-profiles=all` | 使用する各 peer sketch の全 profile を候補にする |
+| `--peer-profiles=echo:esp32,esp32s3` | 名前付き peer の候補を指定した名前に限定する |
+| `--peer-profiles=echo:all` | 名前付き peer だけ全 profile を候補にする |
+
+名前付き `--peer-profiles` は異なる peer に対して繰り返し指定できる。指定しなかった peer は従来の解決規則を使う。
+裸の `--peer-profiles=all` は全 peer を対象とする特別な指定であり、名前付き指定や既存の `--peer-profile` とは併用しない。
+`--profiles` と既存の `--profile`、同じ peer に対する `--peer-profiles` と既存の `--peer-profile` は競合として error にする。
+異なる peer については、名前付き複数指定と既存の単一指定を併用できる。
+
+| primary の選択 | peer の選択 | 実行対象 |
+|---|---|---|
+| 新 option なし | 新 option なし | 従来の単一構成 |
+| `all` | 指定なし | primary 全候補 × peer の default / 既存明示指定 |
+| 指定なし | `all` | primary の default / 既存明示指定 × peer 全候補 |
+| `all` | `all` | 両側の全候補の直積 |
+| 明示した候補 | 明示した候補 | 指定した候補同士の直積だけ |
+
+無指定時は primary の `--profile` → `default_profile` → 単一 profile fallback、peer の `--peer-profile` → `default_profile` を維持する。
+default がないことを理由に全候補へ展開しない。peer では単一 profile の自動選択を追加しない。
+primary だけに `all` を指定しても peer 全候補には広げない。
+peer が複数なら、各 peer の候補をそれぞれ軸として直積を生成する。
+`all` は新 option の予約値とし、同名 profile の単一選択には既存の `--profile all` / `--peer-profile <name>:all` を使える。
+
+新 option のいずれかを指定した実行を、本章では「組合せ実行モード」と呼ぶ。候補が 1 個でもこの mode の事前確認を適用する。
+
+### 24.3 収集と入力検証
+
+実行構成は primary profile と、名前順に並べた使用 peer の profile mapping で識別する。
+profile の列挙は既存の sketch 解決規則を使い、各 sketch に対して解決された `sketch.yaml` を読む。環境変数や機材の有無によって収集 item を黙って除外しない。
+
+- `all` は各 sketch の定義内だけを列挙する。全 sketch の profile の和集合を全 sketch に掛け合わせない。
+- 明示候補が個別 sketch で非対応なら、構成と理由の分かる skip item を残す。
+- 明示した profile 名が対象のどの sketch にも存在しない場合は、入力ミスとして error にする。primary と名前付き peer は別々に検証する。
+- 空の list、候補の重複、同じ peer への重複指定、未知の peer 名、`all` と名前の混在、壊れた設定は error にする。
+- `all` の列挙対象に profile がない場合や、選択した Arduino 対象で構造上有効な構成が一つもない場合は error にする。port 未設定で全件 skip になる場合とは区別する。
+- `.ino` のない通常の Python テストは profile 数だけ増やさない。
+- 裸の `--peer-profiles=all` は peer のない module に peer 軸を追加しない。名前付き指定の未知 peer 判定は、収集対象全体で該当 peer が存在するかで行う。
+- `peers` fixture を要求しないテストは peer の組合せ数だけ増やさず、peer の port 不足でも skip しない。間接的な fixture 依存も考慮する。
+- 同じ module に peer 使用・不使用のテストが混在する場合も、必要な構成だけを生成し、同じ primary の peer 不使用テストを重複実行しない。
+- ID と候補の順序は決定的にし、既存の test parameter と組み合わせても衝突しない。
+
+ID は `primary=<profile>,<peer>=<profile>,...` とし、peer 名を辞書順に並べる。名前に含まれる区切り文字は percent encoding し、未解決 profile は `<unresolved>` で表す。既存の parameter ID と併用できる。表示例は次のとおり。
+
+```text
+test_link[primary=esp32,echo=esp32]
+test_link[primary=esp32,echo=esp32s3]
+test_link[primary=esp32s3,echo=esp32]
+test_link[primary=esp32s3,echo=esp32s3]
+```
+
+`--collect-only` では予定 item の列挙と静的な設定検証だけを行う。機材への接続、外部設備への plan 要求、build、upload、monitor 起動、device lock 取得を行わない。
+`--clean` が併用されても、収集のみでは既存 artifact を削除しない。
+
+### 24.4 port 解決と実行前の skip
+
+組合せ実行モードでは、構成に必要な primary / peer の接続先を、最初の DUT 書込みより前に確認する。
+設定だけで判定できる不足は compile より前に skip し、不要な build を避ける。
+
+| 条件 | 組合せ実行モードの動作 |
+|---|---|
+| 必要な primary / peer の runtime port が未解決 | 構成と不足した役割を示して skip |
+| 同じ構成内の異なる役割が同じ物理 DUT を使用 | 衝突した役割を示して skip |
+| 設定済み port の接続失敗、compile / upload 失敗 | error。未設定 skip に置き換えない |
+| lock の取得失敗 / timeout | error。port 未設定として扱わない |
+| `--run-mode=build` | port と実機重複による skip を適用せず compile する |
+| host core | socket 設定が解決できれば対象にする。物理 serial port を要求しない |
+
+判定は「環境変数がない」ではなく「接続先を解決できない」で行う。profile 固有の環境変数と `profiles.<profile>.port` は引き続き利用できる。
+複数候補を持つ役割に対しては、profile を区別しない共通 port を異なる chip へ自動流用しない。
+その役割の共通 CLI port 指定（primary の `--port` / `--flash-port`、peer の `--peer-port`）を error とし、共通環境変数 fallback を適用しない。
+候補が 1 個の役割には従来の port 解決順を適用する。新 option のない従来実行の port 解決と error / skip 動作は変更しない。
+この制限は profile 固有の設定に同じ port を明示することを禁止するものではなく、別々の構成が同じ DUT を逐次使用することは許す。
+
+重複判定は port 文字列の一致だけに頼らず、symlink 解決など既存の device lock と整合する物理識別を使う。
+primary と peer 間だけでなく peer 同士も確認する。別の upload / runtime port が分かっている場合は、その対応も考慮する。
+任意の異なる port 表記が同じ実機かを自動発見する機能は含めず、利用側が正しい割当を提供する。
+host の `socket://localhost` のような動的 port の placeholder が同じであるだけでは、物理 DUT 重複として skip しない。
+upload 先と runtime 接続先の区別、および socket URL を upload port に渡さない既存仕様を維持する。
+
+新しい skip 専用 option は必須としない。新しい組合せ実行モードの動作として上記を提供する。
+配線・能力等の外部設備の判定は利用側で行い、必要なら最初の upload より前の事前確認へ組み込む。OEP 等の固有 API は plugin に持ち込まない。
+
+### 24.5 4 台 / 3 台の運用例
+
+primary sketch と `peer_echo` の両方に `esp32`、`esp32s3` が定義されているものとする。
+ESP32 が 2 台、S3 が 2 台ある場合の役割別環境変数は次のとおり。値は実環境の port とする。
+
+| 環境変数 | 割当 |
+|---|---|
+| `TEST_SERIAL_PORT_ESP32` | primary 用 ESP32 |
+| `TEST_SERIAL_PORT_ESP32S3` | primary 用 S3 |
+| `TEST_SERIAL_PORT_PEER_ECHO_ESP32` | peer 用 ESP32 |
+| `TEST_SERIAL_PORT_PEER_ECHO_ESP32S3` | peer 用 S3 |
+
+```bash
+# 1 テストにつき 4 組を収集し、4 組を実行
+pytest tests/link --profiles=all --peer-profiles=all
+
+# peer を ESP32 に限定し、1 テストにつき 2 組を収集
+pytest tests/link --profiles=esp32,esp32s3 --peer-profiles=echo:esp32
+```
+
+ESP32 が 2 台、S3 が 1 台なら、S3 は primary に割り当て、peer 用 S3 の port を未設定にする。
+peer の S3 profile にも port の設定がない前提で、最初の command は 4 組を収集し、2 組を実行、peer が S3 の 2 組を skip する。
+2 番目の command は最初から 2 組だけを収集する。
+profile 候補から外すことと、予定に含めたうえで設備不足を skip として記録することを区別する。
+
+### 24.6 fixture と資源の lifecycle
+
+profile option を session 全体の config に順次上書きする実装や、test 本文内の loop は採用しない。
+module scope の実行構成 parameter を導入し、app、build property、build / upload、monitor、port、peer、lock の lifecycle を依存させる。
+同じ module / 構成のテストは可能な範囲でまとめ、構成変更時には前構成の依存 fixture を teardown してから次を準備する。
+
+- module オブジェクトに残る peer の compile 済み / upload 済み cache は、構成ごとの状態へ移すか確実に破棄する。
+- 解決済みの runtime port や monitor URL を、次の構成の入力として再利用しない。pytest-embedded への橋渡しも構成の寿命に閉じる。
+- 必要な事前確認を終え、compile を完了した後、最初の upload 前に必要な物理 device lock を決定的な順序で取得する。
+- DUT 接続と利用側 cleanup が終わるまで lock を保持し、途中の setup 失敗でも取得済み資源を解放する。
+- cleanup の一つが失敗しても他の資源の解放を試み、teardown error を該当構成に記録する。共有資源を安全に解放できない場合、次の構成へ無条件に進まない。
+- port 重複による構成不成立の判定と、他 process との device lock 排他は別々に維持する。
+- 逐次実行を前提とし、xdist / 実機並列実行の対応は別案件とする。
+
+`--run-mode=all` / `build` / `test` の役割は維持する。build-only の成功は既存どおり compile 成功と test 本文の skip で表し、実機検証の成功には数えない。
+build path は各 sketch / profile の既存分離を基本とする。初期実装では plugin 独自の compile 省略 cache を追加せず、Arduino CLI の通常の差分 build を利用する。
+将来 compile を省略する場合は、profile 名だけでなく source、core / library、build property / define 等の実際の入力を検証する。
+
+### 24.7 結果、artifact、state cache
+
+実行構成は setup 開始前から item と各 phase の report に結び付ける。
+現在の config の「最後に使った profile」から結果の所属を推測しない。
+
+- nodeid に構成を含め、setup error、skip、call の成否、teardown error を同じ構成へ帰属させる。
+- serial log、ArduTest artifact、JUnit、summary で構成を識別できるようにする。異なる module / parameter / peer 構成の同名成果物を上書きしない。
+- JUnit と既存 summary を基本とし、独自の大規模な report framework は追加しない。
+- 選択済みの予定 item と完了結果を区別する。中断や `--maxfail` で未実行の item を passed / skipped として作らない。収集のみは実行結果として扱わない。
+- 設備不足で全件 skip でも「全構成を検証済み」と表示しない。pytest 標準の exit code を維持し、必須構成の実行を要求する CI の判定は利用側に残す。
+- `--save-state` は引き続き実際に test 本文へ到達した検証結果だけを更新し、未実行、skip、build / upload 失敗で過去の結果を更新しない。
+- state の primary profile ごとの構造は維持し、組合せ mode では peer profile を含む nodeid によって結果を区別する。peer 単体の検証履歴を追加する意味ではない。
+- 新 option のない単一実行の nodeid と state key は変更しない。単一実行と組合せ実行の記録を暗黙に同一視・統合しない。
+
+### 24.8 改修範囲と外部 runner との関係
+
+主な改修対象は `plugin.py` の option / collection / fixture / report、`app.py` の候補解決、`serial.py` / `device_lock.py` の接続先解決と重複確認、`log_summary.py` と ArduTest の artifact 保存先である。
+state cache の保存対象と key の整合、pytest-embedded の fixture / log directory との互換も確認する。
+
+外部 runner で既存の単一 profile pytest を subprocess 起動する案は、移行手段として残す。
+その場合は構成別の JUnit、artifact、cache と、起動予定 / 終了状態 / 中断 / 未起動を記録する manifest を分離し、結果を束ねる。
+既存 plugin の primary port 未設定は skip にならないため、runner が起動を見送る場合は pytest の skip と区別して記録する。
+本改修では runner を実装せず、日常的な一覧・選択・部分再実行を一度の pytest session で扱える plugin 内展開を採用方針とする。
+
+### 24.9 段階的な実装と受け入れ条件
+
+1. 実行構成の内部表現を primary + peer mapping として設計し、まず peer なしの list / `all`、item ID、fixture 切替、結果分離を実装する。
+2. 同じ構成モデルへ peer 候補の直積、port 未解決 / 実機重複の事前 skip、peer lifecycle を追加する。
+3. artifact / summary / state と既存 parameter、選択・再実行の互換を確認し、仕様の既存章と日英ガイドを更新する。
+
+少なくとも次を検証する。compile / upload / 接続は mock で検証できるようにし、実機 smoke test は別に行う。
+
+- 新 option なしの default、単一 profile、peer default / 明示指定、従来の error / skip の回帰がない。
+- peer なしで 2 profile × 2 テストを収集でき、片方の build 失敗を正しく帰属させ、他方を独立して実行できる。
+- 両側 `all` の 4 台例が 4 構成になり、3 台例が 2 実行 / 2 skip、peer 明示限定が 2 構成になる。
+- 複数 peer の直積と peer 同士の物理重複、間接的な `peers` 依存、peer 使用・不使用の混在を扱える。
+- 未設定 port、非対応 profile、利用側の設備不足の判定が最初の書込み前に働き、必要な skip 理由が残る。
+- 同じ device の別 symlink 表記を検出し、異なる構成間の同じ device の逐次利用や host の動的 socket を誤って skip しない。
+- build-only は port なしで動作し、`collect-only` は機材操作・compile・artifact 削除を行わない。
+- setup / teardown 失敗、構成変更後の接続先と firmware、lock 解放、peer cache の分離を確認する。
+- 完全な nodeid 指定、`-k`、同じ候補指定での `--lf`、既存の `parametrize` との併用で構成 ID が安定する。
+- `.ino` のない unit を複製せず、ログ / ArduTest artifact / JUnit / state の peer 違いの結果が衝突しない。
+- 中断・`--maxfail`・全件 skip を実行完了や全件成功と取り違えない。
+
+### 24.10 収集時の適用条件 API
+
+通常は profile 候補で実行範囲を選び、候補の直積では表現できない特殊な制約だけを適用条件で除外する。
+配線によりクロスできない組等を利用側が宣言できるよう、次の API を公開する。設備の意味や配線表は plugin に持たせない。
+
+- `ArduinoCombination`: 読み取り専用の `primary: str | None` と `peers: Mapping[str, str | None]`。`pytest_embedded_arduino_cli` から import できる。
+- `pytest.mark.arduino_skip_if(predicate, reason="...")`: `predicate(item, combination)` が `True` なら skip。実際の `bool` と空でない reason を必須とし、module / class / function / parameter に宣言できる。
+- `pytest_arduino_cli_skip_reason(item, combination)`: `conftest.py` または plugin に置く hookspec。空でない理由の `str` か `None` を返す。hook wrapper は非対応。
+
+両 API は `-k` / `-m` / `--lf` 等による選択後の収集 item に適用する。`item` から test 名、nodeid、path、marker、pytest config を参照できる。
+Arduino sketch のない item の `combination` は `None`、peer 不使用では `peers` が空であり、未解決の profile 値は `None` とする。
+新しい profile option のない実行にも適用し、単一実行の nodeid を変えない。
+
+hook は各 item のディレクトリに適用される実装だけを呼ぶ。兄弟ディレクトリの `conftest.py` を混ぜない。
+上位・下位の hook とすべての marker は加算し、一つでも除外を求めれば標準の skip marker を付ける。`False` / `None` は他の制限を解除しない。
+理由には marker の適用 node と判定関数の出典、または hook の出典を含める。
+複数の条件があればすべて評価する。先に skip が決まっていても、例外・不正な戻り値・判定内の `pytest.skip()` 等は設定エラーとして実行を止め、build は始めない。
+条件は静的な設定だけを読み、機材通信・fixture 取得・config 変更を行わない。`--collect-only` でも評価し、適用条件による skip と理由を表示する。port の実行前確認は収集時には行わない。
+
+module fixture の setup より前に skip を判定し、対象外 item のためだけに compile / upload しない。ただし同じ firmware を別の実行対象が必要とする場合、その対象の build は行う。
+ガイドでは候補選択、適用対象外、設備不足、失敗、中断を区別する。skip を検証成功や実行範囲の充足とみなさず、既知の不具合を除外で隠す運用を勧めない。
+例は [テストの応用](TESTING_ADVANCED.ja.md#profile-の組合せと適用条件) に記載する。
 
 以上を本プロジェクトの仕様とする。

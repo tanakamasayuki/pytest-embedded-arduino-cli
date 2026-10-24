@@ -129,6 +129,8 @@ uv run pytest
 
 - `--run-mode=all|build|test`
 - `--profile`
+- `--profiles=all|PROFILE,...` (multiple configurations only when explicitly requested)
+- `--peer-profiles=all|NAME:all|NAME:PROFILE,...`
 - `--peer-profile=NAME:PROFILE`
 - `--peer-port=NAME:PORT`
 - `--clean`
@@ -388,6 +390,9 @@ If you do not want to pass `--profile`, define `default_profile` in `sketch.yaml
 The single-profile auto-selection is supported as a fallback, but it is better not to rely on it for regular project configuration.
 
 ## Peer DUTs
+
+For multiple primary / peer profiles and applicability checks before build, see [Advanced Testing: Profile combinations and applicability](TESTING_ADVANCED.md#profile-combinations-and-applicability).
+Invocations without the new options retain the single-profile resolution rules below.
 
 Tests that need additional DUTs can place `peer_<name>/` sketch directories next to the primary sketch.
 The primary sketch remains available as `dut`; peer sketches are available through the `peers` fixture.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import ExitStack
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -177,5 +178,6 @@ class DeviceLockSet:
             raise
 
     def release(self) -> None:
-        for lock in reversed(self.locks):
-            lock.release()
+        with ExitStack() as cleanup:
+            for lock in self.locks:
+                cleanup.callback(lock.release)
