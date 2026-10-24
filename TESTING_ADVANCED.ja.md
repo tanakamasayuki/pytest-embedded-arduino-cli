@@ -82,6 +82,7 @@ def test_uart(dut, peers):
 `pytestmark` はファイル全体に適用します。同じマーカーをクラスや関数のデコレーターにすれば、その範囲だけに適用できます。
 判定関数の引数は `(item, combination)`、戻り値は厳密な `bool` です。`True` は skip、`False` はこの条件では除外しないことを表します。
 `reason` は空でない文字列を必須とします。
+上の test 本文は未実装の検証を合格にしないため意図的に失敗します。実際の通信と期待値の確認に置き換えてください。
 
 任意の組を列挙したい場合も、判定関数だけを変えます。次は peer `echo` を使うテスト向けです。
 
@@ -121,6 +122,8 @@ def pytest_arduino_cli_skip_reason(item, combination):
 `item.get_closest_marker("名前")`、`item.config.getoption("run_mode")` なども使えます。判定は `-k` / `-m` / `--lf` 等による選択後の item に対して行います。
 `combination` は読み取り専用の `ArduinoCombination` で、`primary` と名前付き `peers` を持ちます。未解決の profile は `None`、peer 不使用なら `peers` は空です。Arduino sketch のないテストでは `combination` 自体が `None` です。
 組合せ mode 以外でもこのマーカーと hook を使えます。
+組合せ mode の `peers` は引数や fixture の依存関係に宣言してください。`request.getfixturevalue("peers")` だけで動的に要求する形は収集時に展開できません。
+通常の値の `parametrize` は併用できますが、構成が管理する `port` / `flash_port` / `app_path` / `build_dir` の parameter 上書きは error にします。
 
 **判定関数は設定だけを読み、機材への接続や fixture の取得を行わないでください。** `--collect-only` でも実行されます。
 例外、不正な戻り値、判定関数内の `pytest.skip()` は設定エラーにします。すでに別の条件で skip が決まっていても、残りの判定のエラーを隠しません。

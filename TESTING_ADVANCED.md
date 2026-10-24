@@ -82,6 +82,7 @@ def test_uart(dut, peers):
 `pytestmark` applies to the whole file. Use the same marker as a class or function decorator for a narrower scope.
 The predicate receives `(item, combination)` and must return an actual `bool`: `True` requests a skip; `False` means this rule does not exclude the item.
 A nonempty string `reason` is required.
+The example test body deliberately fails rather than passing without verification. Replace it with actual communication and expected-result checks.
 
 For an arbitrary list of allowed combinations, change only the predicate. This example is for tests using peer `echo`:
 
@@ -121,6 +122,8 @@ For ordinary Python tests, `item.originalname` gives the function name without p
 You can also use `item.get_closest_marker("name")` and `item.config.getoption("run_mode")`. Rules run on items remaining after selection such as `-k` / `-m` / `--lf`.
 `combination` is a read-only `ArduinoCombination` with `primary` and named `peers`. Unresolved profiles are `None`; tests without peers have an empty mapping. For tests without an Arduino sketch, `combination` itself is `None`.
 The marker and hook also work outside combination execution mode.
+In combination mode, declare `peers` in test arguments or fixture dependencies. A solely dynamic `request.getfixturevalue("peers")` cannot be expanded at collection.
+Ordinary value parametrization works, but parameter overrides of configuration-owned `port` / `flash_port` / `app_path` / `build_dir` are errors.
 
 **Predicates must only inspect configuration; do not connect to equipment or request fixtures.** They also execute under `--collect-only`.
 Exceptions, invalid return values, and `pytest.skip()` inside a predicate are configuration errors. A prior skip decision does not hide errors in remaining rules.
@@ -509,7 +512,7 @@ Higher wins.
 
 `<PROFILE>` is the profile name upper-cased with `-` replaced by `_`. Names that would share a variable, such as `esp32-s3` and `esp32_s3`, and names that become `PEER_...` are rejected as configuration errors.
 
-If none of them resolves, the run **fails rather than skipping**. That is the difference from a peer.
+In legacy single execution, if none resolves, the run **fails rather than skipping**. See the opening section for combination-mode port resolution and skips.
 
 ### A peer DUT's port
 

@@ -570,8 +570,8 @@ peripheral、timing、割り込み、Flash/NVS、board 固有 API は実機で�
 - `sketch.yaml` に存在しない profile を指定された場合は、その sketch を compile / upload 前に skip する
 - この skip は test 関数内の `pytest.skip()` に依存しない
 
-一方で、同じ profile でも実機状態や外部条件によって実行不能になるケースはテスト側で `pytest.skip()` を使ってよい。
-例えば Wi-Fi 接続条件や外部サービス条件のような runtime 条件は、Python テスト側で扱ってよい。
+同じ profile でも実機状態や外部条件によって適用対象外になる場合は理由付き skip を使える。収集時に判断できる条件は 24.10 の API で build 前に判定する。
+実行時にしか分からない前提条件は Python 側で扱う。ただし、設定済みの Wi-Fi や外部サービスへの接続失敗が検証対象なら、失敗を skip に変えない。
 
 ### 13.6 peer DUT の profile 解決
 
@@ -1159,6 +1159,7 @@ README には少なくとも次を含める。
   - `pytest_embedded_arduino_cli.MonitorTarget`: `MonitorTarget.from_url(port)` で `arduinomonitor://` の runtime port を解き、`to_url()` で作る。フィールドは `address`、`protocol`、`profile`、`sketch_dir`、`cli_path`
   - `pytest_embedded_arduino_cli.is_monitor_url(port)`
 - option（14 章）と環境変数（14.5、13.7）
+- `ArduinoCombination`、`arduino_skip_if` marker、`pytest_arduino_cli_skip_reason` hook（24.10）
 - `*.host-arduino.json`（13.4）
 
 `arduinomonitor://` の URL の文字列そのものは API に含めない。runtime の port の裏の address や profile が要るコードは、文字列を切り出さず `MonitorTarget.from_url` で解く。

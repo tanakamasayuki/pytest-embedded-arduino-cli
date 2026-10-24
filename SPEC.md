@@ -566,8 +566,8 @@ This plugin should be able to determine skip due to unsupported profiles before 
 - If a profile not present in `sketch.yaml` is specified, skip that sketch before compile / upload
 - This skip does not depend on `pytest.skip()` inside the test function
 
-On the other hand, cases where execution becomes impossible due to real-board state or external conditions even with the same profile may use `pytest.skip()` on the test side.
-For example, runtime conditions such as Wi-Fi connection conditions or external service conditions may be handled on the Python test side.
+Real-board state or external conditions can make a test inapplicable for the same profile; record a reasoned skip. Conditions known at collection use section 24.10 to decide before build.
+Handle prerequisites known only at runtime in Python. However, if connectivity to configured Wi-Fi or an external service is under test, do not turn its failure into a skip.
 
 ### 13.6 Profile Resolution of Peer DUTs
 
@@ -1155,6 +1155,7 @@ These names are the plugin's public API and follow semantic versioning.
   - `pytest_embedded_arduino_cli.MonitorTarget`: parses an `arduinomonitor://` runtime port with `MonitorTarget.from_url(port)` and builds one with `to_url()`. Fields: `address`, `protocol`, `profile`, `sketch_dir`, `cli_path`
   - `pytest_embedded_arduino_cli.is_monitor_url(port)`
 - Options (section 14) and environment variables (14.5, 13.7)
+- `ArduinoCombination`, the `arduino_skip_if` marker, and the `pytest_arduino_cli_skip_reason` hook (24.10)
 - The `*.host-arduino.json` file (13.4)
 
 The text of an `arduinomonitor://` URL is not part of the API. Code that needs the address or the profile behind a runtime port parses it with `MonitorTarget.from_url` instead of slicing the string.
