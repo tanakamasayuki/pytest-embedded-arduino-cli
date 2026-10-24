@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.9.0
 - (EN) Add opt-in `--profiles` / `--peer-profiles` list and `all` execution, with separate item IDs, DUT lifecycles, logs, artifacts, and verification state. Missing ports and duplicate physical devices skip before compilation; hardware execution remains sequential.
 - (JA) `--profiles` / `--peer-profiles` の list・`all` による明示的な組合せ実行を追加。item ID、DUT lifecycle、log、artifact、検証状態を分離。port 未設定・物理 device 重複は compile 前に skip し、実機は逐次実行する。
 - (EN) Add the collection-time `arduino_skip_if(predicate, reason=...)` marker and scoped `pytest_arduino_cli_skip_reason(item, combination)` hook. Invalid predicates are errors, restrictions accumulate, and collect-only shows applicability skips without building or deleting artifacts.
