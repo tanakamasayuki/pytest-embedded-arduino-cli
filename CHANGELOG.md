@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.10.0
 - (EN) Add `--combo primary=PROFILE,PEER=PROFILE` to run only listed primary/peer pairs, for setups where wiring fixes the partner. Repeat it to list more pairs, or name pairs in the `arduino_combos` ini setting and select them with `--combo NAME` / `--combo all`. A pair that does not fit a sketch generates no item; a test no pair fits keeps one `combo=none` skip. `--profiles` / `--peer-profiles` stay for products.
 - (JA) 結線で相手が決まる構成向けに、列挙した primary / peer の組だけを実行する `--combo primary=PROFILE,PEER=PROFILE` を追加。繰り返し指定でき、ini 設定 `arduino_combos` に名前付きで書いて `--combo NAME` / `--combo all` で選べる。sketch に当てはまらない組は item を作らず、どの組も当てはまらないテストは `combo=none` の skip を 1 件残す。直積には引き続き `--profiles` / `--peer-profiles` を使う。
 - (EN) Add the `arduino_reset_dirs` ini setting: the listed directories are removed from each test directory and its `peer_*` directories before every test, before any sketch starts. It replaces the common `output/`-wiping `conftest.py`. Paths must be relative; symlinks are refused.
