@@ -788,7 +788,7 @@ For peer DUT build / upload as well, include information in the `-v` / `-vv` log
 - Do not bring ESP-specific terminology into option names
 - Use names that are unlikely to conflict with existing pytest-embedded options
 - Make the responsibility boundaries of build / upload / runtime visible from the option names
-- Keep plugin-specific options small and scoped to execution mode, profile selection, peer DUTs, device locking, ArduTest, local state cache, and the log directory summary
+- Keep plugin-specific options small and scoped to execution mode, profile selection, peer DUTs, device locking, ArduTest, local state cache, the log directory summary, and removing directories before tests
 - `--port`, `--flash-port`, and `--baud` belong to `pytest-embedded`. The plugin reads them and may write the resolved runtime port back into `--port` for the current module
 - Existing option names are kept even where their prefixes differ, such as `--arduino-cli-no-log-summary`
 
@@ -806,6 +806,25 @@ The result of the run is therefore not visible from the directory tree, so this 
 - Truncate failure text to a bounded size, keeping the tail; `dut.log` in the same directory remains the complete serial log
 - Never write anything when `pytest-embedded` did not create a log directory, and never let a failure in this feature affect the pytest exit status
 - Option: `--arduino-cli-no-log-summary` disables the feature. The default is enabled
+
+### 14.10 Directories Removed Before Each Test
+
+A host core sketch can write files to a relative path such as `output/`, with the sketch directory as its working directory.
+That directory is not separated per run, so a file left by an earlier run can make a failing run look like it passed.
+An ini setting removes it before every test, so this no longer needs a `conftest.py`.
+
+```toml
+[tool.pytest.ini_options]
+arduino_reset_dirs = ["output"]
+```
+
+- The default is empty; nothing is removed unless configured. There is no CLI option
+- Remove before each test's setup, that is, before module or function fixtures start building, uploading, or launching a sketch
+- The targets are the test file's directory and each `peer_*` directory directly below it. A peer is uploaded with its own sketch directory as the working directory, so a host core peer writes into its own directory. Whether the test requests `peers` does not change the targets
+- Tests without an `.ino` are covered too
+- Values are paths relative to the test directory. An empty value, an absolute path, `.`, or a path containing `..` is a configuration error
+- A target that is a symlink or not a directory is not removed and causes a setup error, as does a target that resolves outside the test directory
+- A missing target is ignored. `--collect-only` removes nothing
 
 ## 15. Test State Saving Requirements
 
@@ -1244,6 +1263,9 @@ Selecting `all` only for the primary does not expand peer candidates.
 With multiple peers, each peer's candidates form a separate axis of the Cartesian product.
 Reserve `all` in the new options; an actual profile named `all` remains selectable through the existing `--profile all` / `--peer-profile <name>:all` options.
 
+To run only the primary/peer pairs that the wiring allows, rather than the product of candidates, use `--combo` from 24.11.
+Use the product when every combination works, as over the air; use `--combo` when the pairs are fixed.
+
 This section calls an invocation using either new option “combination execution mode.” Its preflight rules apply even when only one candidate is selected.
 
 ### 24.3 Collection and Input Validation
@@ -1392,8 +1414,8 @@ Verify at least the following. Keep compilation / upload / connections mockable,
 
 ### 24.10 Collection-Time Applicability API
 
-Normally select execution scope through profile candidates; use applicability exclusions only for special restrictions that the candidate product cannot express.
-Expose these APIs so consuming projects can declare constraints such as unsupported cross-wired pairs. The plugin does not own equipment semantics or wiring tables.
+Normally select execution scope through profile candidates, and list wiring-determined pairs with `--combo` from 24.11.
+Applicability rules let consuming projects declare special restrictions that candidate selection cannot express. Expose these APIs. The plugin does not own equipment semantics or wiring tables.
 
 - `ArduinoCombination`: read-only `primary: str | None` and `peers: Mapping[str, str | None]`, importable from `pytest_embedded_arduino_cli`.
 - `pytest.mark.arduino_skip_if(predicate, reason="...")`: skip when `predicate(item, combination)` returns `True`. Require an actual `bool` and a nonempty reason. Supported at module / class / function / parameter scope.
@@ -1412,5 +1434,47 @@ Rules must only read static configuration: no equipment communication, fixture r
 Decide skips before module fixture setup, avoiding compile / upload solely for an excluded item. A separate eligible item may still require building the same firmware.
 Guides distinguish candidate selection, inapplicability, equipment shortages, failures, and interruptions. A skip is not successful verification or proof of coverage; do not recommend hiding known defects through exclusions.
 See [Advanced Testing](TESTING_ADVANCED.md#profile-combinations-and-applicability) for examples.
+
+### 24.11 Listed Combinations (`--combo`)
+
+When the wiring fixes the partner, as with a USB host and device, the product from `--profiles=all --peer-profiles=all` includes pairs that cannot work.
+List and run only the pairs that work, without building a product.
+
+```bash
+pytest peer/ \
+  --combo primary=s3_peer_host,device=s3_peer_device \
+  --combo primary=esp32_peer_host,device=esp32_peer_device
+```
+
+The value uses the same form as the configuration ID in node IDs: `primary=<profile>,<peer>=<profile>,...`. `primary` is required, and zero or more peers may follow. Percent-encoded names are decoded.
+`--combo` may be repeated; the union of the given pairs runs.
+
+Frequently used pairs can be named in the pytest ini settings. `pyproject.toml` is the recommended place.
+
+```toml
+[tool.pytest.ini_options]
+arduino_combos = [
+  "s3:    primary=s3_peer_host,device=s3_peer_device",
+  "esp32: primary=esp32_peer_host,device=esp32_peer_device",
+]
+```
+
+- Each line is `<name>: <pair>`. The name is nonempty, contains no `=` or `,`, and is not `all`
+- `--combo <name>` selects a named pair, and `--combo all` selects every pair in `arduino_combos`. A value containing `=` is the pair itself
+- `--combo all` is not combined with other `--combo` values. An empty `arduino_combos` with `--combo all` is an error
+- Selecting the same pair twice, an undefined name, or a malformed value is an error
+
+Each test applies pairs as follows.
+
+- A pair applies when its primary profile is defined by the sketch and every listed peer that the test uses defines its listed profile
+- A listed peer that the test does not use is ignored. A test that does not request `peers` gets a primary-only configuration, and pairs that reduce to the same configuration run once
+- A peer the test uses but the pair does not list resolves through its `default_profile`; if that does not resolve, it skips as before
+- A pair that does not fit the sketch generates no item. A test no pair fits keeps a single skip item with the ID `combo=none`
+- A `--combo` that names a pair or a name explicitly is an input error when it names a peer or profile absent from every collected sketch, or fits no test. Pairs selected through `--combo all` are exempt, because a narrowed run sees unrelated pairs
+- It is an error when no configuration fits any test
+
+`--combo` is not combined with `--profile`, `--profiles`, `--peer-profile`, or `--peer-profiles`.
+A run with `--combo` is in combination execution mode, and 24.3 to 24.7 apply unchanged: port resolution, preflight skips, lifecycle, and results.
+A role whose profile differs between the selected pairs is a role with multiple candidates, so a common port option for it is an error. A role with the same profile in every pair uses the usual port resolution order.
 
 The above defines the project specification.

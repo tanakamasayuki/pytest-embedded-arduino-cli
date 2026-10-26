@@ -9,7 +9,7 @@ Sizes and layouts keep changing, so this page only says **what you can see** in 
 ## Read these first
 
 - **[examples/](examples/)** — the minimal examples that ship in this repository. They are numbered and independent, so you can read them in order. They cover port resolution, passing compile-time defines from environment variables, NVS persistence and erasing, build flags, Unity, and the layouts for a library project and an Arduino IDE project. **The Unity example is here.**
-- **[PCMFlowG722](https://github.com/tanakamasayuki/PCMFlowG722)** — the smallest shape among the real projects. It runs on a host core alone, so you can read and try it without owning a board. Its `tests/conftest.py` only deletes the `output/` files the sketch wrote.
+- **[PCMFlowG722](https://github.com/tanakamasayuki/PCMFlowG722)** — the smallest shape among the real projects. It runs on a host core alone, so you can read and try it without owning a board. Its `tests/conftest.py` only deletes the `output/` files the sketch wrote, which one `arduino_reset_dirs` line now replaces.
 
 ## A clean example
 

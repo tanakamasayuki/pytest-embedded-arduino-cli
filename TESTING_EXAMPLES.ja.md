@@ -9,7 +9,7 @@
 ## まず読む
 
 - **[examples/](examples/)** — このリポジトリに入っている最小例です。番号付きで並んでいて、1 つずつ独立しているので順に読めます。port の解決、環境変数から compile-time define を渡す形、NVS の永続と消去、build flag、Unity、ライブラリ構成と Arduino IDE 構成のレイアウトを扱います。**Unity を使った例はここにあります。**
-- **[PCMFlowG722](https://github.com/tanakamasayuki/PCMFlowG722)** — 実プロジェクトの中でいちばん小さい形です。host core だけで動くので、ボードを持っていなくても読んで試せます。`tests/conftest.py` は sketch が書き出した `output/` を消すだけです。
+- **[PCMFlowG722](https://github.com/tanakamasayuki/PCMFlowG722)** — 実プロジェクトの中でいちばん小さい形です。host core だけで動くので、ボードを持っていなくても読んで試せます。`tests/conftest.py` は sketch が書き出した `output/` を消すだけで、これは今は `arduino_reset_dirs` の設定 1 行で置き換えられます。
 
 ## きれいな例
 

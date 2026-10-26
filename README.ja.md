@@ -131,6 +131,7 @@ uv run pytest
 - `--profile`
 - `--profiles=all|PROFILE,...`（明示指定した場合だけ複数構成を実行）
 - `--peer-profiles=all|NAME:all|NAME:PROFILE,...`
+- `--combo=primary=PROFILE,NAME=PROFILE|NAME|all`（結線で決まる組だけを列挙して実行）
 - `--peer-profile=NAME:PROFILE`
 - `--peer-port=NAME:PORT`
 - `--clean`
@@ -144,6 +145,11 @@ uv run pytest
 - `--arduino-test-timeout=SECONDS`
 - `--arduino-test-artifact-dir=PATH`
 - `--arduino-test-missing-config=skip|error`
+
+`tests/pyproject.toml` の `[tool.pytest.ini_options]` に書く設定:
+
+- `arduino_combos`: `--combo` で名前を指定する組の一覧
+- `arduino_reset_dirs`: 各テストの前に、テストと `peer_*` のディレクトリから削除するディレクトリ（例: `["output"]`）
 
 `--clean` は `arduino-cli compile` に `--clean` を渡します。
 Arduino CLI の incremental build cache を使わずに再 build したいときに使います。
@@ -233,6 +239,16 @@ rm -rf ~/.cache/arduino/cores ~/.cache/arduino/sketches
 ```
 
 削除前に対象を確認したい場合は、`xargs` に繋がずに `find` だけを実行してください。
+
+Windows の PowerShell では、2 の代わりに次を使います。
+
+```powershell
+Get-ChildItem -Recurse -Filter sketch.yaml | Where-Object FullName -notmatch '\\.venv\\' |
+  ForEach-Object { Join-Path $_.DirectoryName build } | Where-Object { Test-Path $_ } |
+  Remove-Item -Recurse -Force
+```
+
+`build/` は `.gitignore` に入れる対象ですが、`git clean -fdX` で消すのは避けてください。同じく ignore している `.env` も消えます。
 
 ### ケース 2: ディスク容量を空けたいとき
 
@@ -627,7 +643,7 @@ uv run pytest examples/01_basic --profile=esp32 --port=/dev/ttyUSB0
 `PytestExperimentalApiWarning: record_xml_attribute is an experimental feature` が出ることがあります。
 
 これはこの plugin ではなく `pytest-embedded` 由来の warning です。通常は無視して構いません。
-気になる場合は `pytest.ini`、`pyproject.toml`、または `examples/pytest.ini` のようなローカル設定で warning filter を追加して抑制してください。
+気になる場合は `pyproject.toml` の `[tool.pytest.ini_options]` に warning filter を追加して抑制してください。書き方は [FAQ](TESTING_FAQ.ja.md#すべてのテストで-record_xml_attribute-の警告が出る) にあります。
 
 ## この plugin が目指していないもの
 

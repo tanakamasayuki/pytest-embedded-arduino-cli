@@ -8,7 +8,7 @@ from itertools import product
 from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import pytest
 import yaml
@@ -43,6 +43,20 @@ class ExecutionPlan:
     multiple_roles: frozenset[str]
     skip_reasons: tuple[str, ...] = ()
     supported: bool = True
+    label: str | None = None
+
+    @property
+    def id(self) -> str:
+        return self.label or self.combination.id
+
+
+@dataclass(frozen=True)
+class Combo:
+    """One ``--combo`` entry: profiles by role (``primary`` / ``peer:<name>``)."""
+
+    label: str
+    roles: tuple[tuple[str, str], ...]
+    explicit: bool
 
 
 class Hooks:
@@ -58,6 +72,8 @@ class Hooks:
 _PLAN_CACHE = pytest.StashKey[dict]()
 _KNOWN = pytest.StashKey[dict[str, set[str]]]()
 _OPTIONS = pytest.StashKey[tuple]()
+_COMBOS = pytest.StashKey["tuple[Combo, ...] | None"]()
+_APPLIED = pytest.StashKey[set[str]]()
 COMBINATION = pytest.StashKey[ArduinoCombination | None]()
 PLAN = pytest.StashKey[ExecutionPlan]()
 PLANNED = pytest.StashKey[list[str]]()
@@ -66,7 +82,62 @@ RULE_REASONS = pytest.StashKey[tuple[str, ...]]()
 
 def enabled(config) -> bool:
     option = getattr(config, "option", None)
-    return bool(getattr(option, "profiles", None) or getattr(option, "peer_profiles", None))
+    return bool(getattr(option, "profiles", None) or getattr(option, "peer_profiles", None)
+                or getattr(option, "combos", None))
+
+
+def _parse_combo(spec: str, origin: str) -> tuple[tuple[str, str], ...]:
+    roles = {}
+    for part in spec.split(","):
+        name, sep, value = (unquote(text.strip()) for text in part.partition("="))
+        if not sep or not name or not value or name in roles:
+            raise pytest.UsageError(f"{origin}: expected primary=PROFILE[,PEER=PROFILE...]: {spec!r}")
+        roles[name] = value
+    if "primary" not in roles:
+        raise pytest.UsageError(f"{origin}: primary=PROFILE is required: {spec!r}")
+    return tuple(("primary" if name == "primary" else f"peer:{name}", value) for name, value in roles.items())
+
+
+def _defined_combos(config) -> dict[str, tuple[tuple[str, str], ...]]:
+    defined = {}
+    for line in config.getini("arduino_combos"):
+        name, sep, spec = line.partition(":")
+        name = name.strip()
+        if not sep or not name or "=" in name or "," in name or name == "all" or name in defined:
+            raise pytest.UsageError(f"arduino_combos: expected unique 'NAME: primary=PROFILE,...' lines: {line!r}")
+        defined[name] = _parse_combo(spec.strip(), f"arduino_combos {name}")
+    return defined
+
+
+def _combos(config) -> tuple[Combo, ...] | None:
+    values = getattr(config.option, "combos", None) or []
+    if not values:
+        return None
+    defined = _defined_combos(config)
+    if "all" in values:
+        if len(values) != 1:
+            raise pytest.UsageError("--combo all cannot be combined with other --combo values")
+        if not defined:
+            raise pytest.UsageError("--combo all: arduino_combos defines no combinations")
+        combos = [Combo(name, roles, False) for name, roles in defined.items()]
+    else:
+        combos = []
+        for value in values:
+            if "=" in value:
+                roles = _parse_combo(value, "--combo")
+            elif value in defined:
+                roles = defined[value]
+            else:
+                known = ", ".join(defined) or "none"
+                raise pytest.UsageError(f"--combo: unknown combination name {value!r} (arduino_combos defines: {known})")
+            combos.append(Combo(value, roles, True))
+    seen = {}
+    for combo in combos:
+        key = frozenset(combo.roles)
+        if key in seen:
+            raise pytest.UsageError(f"--combo: {combo.label!r} repeats {seen[key]!r}")
+        seen[key] = combo.label
+    return tuple(combos)
 
 
 def _candidates(value: str, option: str) -> tuple[str, ...] | str:
@@ -94,6 +165,16 @@ def configure(config) -> None:
     )
     primary = getattr(config.option, "profiles", None)
     peers = getattr(config.option, "peer_profiles", [])
+    combos = _combos(config)
+    if combos is not None:
+        conflicts = [option for option, value in (
+            ("--profile", config.getoption("profile")), ("--profiles", primary),
+            ("--peer-profile", config.getoption("peer_profile")), ("--peer-profiles", peers),
+        ) if value]
+        if conflicts:
+            raise pytest.UsageError(f"--combo cannot be combined with {', '.join(conflicts)}")
+    config.stash[_COMBOS] = combos
+    config.stash[_APPLIED] = set()
     if primary is not None and config.getoption("profile") is not None:
         raise pytest.UsageError("--profiles and --profile cannot be combined")
     primary = _candidates(primary, "--profiles") if primary is not None else None
@@ -143,34 +224,43 @@ def plans(config, path: Path, uses_peers: bool) -> list[ExecutionPlan]:
     if key in cache:
         return cache[key]
     primary_selection, peer_selections, singles = config.stash[_OPTIONS]
+    combos = config.stash[_COMBOS]
     sketch = resolve_sketch_dir(path)
     data = load_sketch_yaml(find_sketch_yaml(sketch))
     known = config.stash[_KNOWN]
     known.setdefault("primary", set()).update(data.get("profiles") or {})
-    axes = {"primary": _profile_candidates(data, primary_selection, config.getoption("profile"))}
     definitions = {"primary": data.get("profiles") or {}}
+    peer_data = {}
     for directory in sorted(sketch.glob("peer_*")):
         if not directory.is_dir():
             continue
         name = directory.name.removeprefix("peer_")
         if not name:
             raise pytest.UsageError(f"invalid peer directory: {directory}")
-        peer_data = load_sketch_yaml(find_sketch_yaml(resolve_sketch_dir(directory)))
         role = f"peer:{name}"
-        known.setdefault(role, set()).update(peer_data.get("profiles") or {})
+        peer_data[role] = load_sketch_yaml(find_sketch_yaml(resolve_sketch_dir(directory)))
+        known.setdefault(role, set()).update(peer_data[role].get("profiles") or {})
         if uses_peers:
+            definitions[role] = peer_data[role].get("profiles") or {}
+    if combos is not None:
+        selections = _combo_selections(config, combos, definitions, peer_data)
+    else:
+        axes = {"primary": _profile_candidates(data, primary_selection, config.getoption("profile"))}
+        for role in definitions:
+            if role == "primary":
+                continue
+            name = role.removeprefix("peer:")
             selection = "all" if peer_selections == "all" else peer_selections.get(name)
-            axes[role] = _profile_candidates(peer_data, selection, singles.get(name), peer=True)
-            definitions[role] = peer_data.get("profiles") or {}
-    multiple = frozenset(name for name, candidates in axes.items() if len(candidates) > 1)
+            axes[role] = _profile_candidates(peer_data[role], selection, singles.get(name), peer=True)
+        selections = [dict(zip(axes, values)) for values in product(*axes.values())]
+    multiple = frozenset(role for role in definitions if len({selected[role] for selected in selections}) > 1)
     if "primary" in multiple and (config.getoption("port") or config.getoption("flash_port")):
         raise pytest.UsageError("multiple primary profiles require profile-specific ports; omit --port / --flash-port")
     peer_ports = named_options(config.getoption("peer_port"), "--peer-port")
     if multiple & {f"peer:{name}" for name in peer_ports}:
         raise pytest.UsageError("multiple peer profiles require profile-specific ports; omit --peer-port for that peer")
     result = []
-    for values in product(*axes.values()):
-        selected = dict(zip(axes, values))
+    for selected in selections:
         reasons = tuple(
             f"{role}: profile is not resolved" if value is None
             else f"{role}: profile {value!r} is not defined in sketch.yaml"
@@ -179,34 +269,70 @@ def plans(config, path: Path, uses_peers: bool) -> list[ExecutionPlan]:
         supported = all(value is None or value in definitions[role] for role, value in selected.items())
         primary = selected.pop("primary")
         result.append(ExecutionPlan(ArduinoCombination(primary, {role.removeprefix("peer:"): value for role, value in selected.items()}), multiple, reasons, supported))
+    if not result:
+        profiles = ", ".join(sorted(definitions["primary"])) or "none"
+        result.append(ExecutionPlan(
+            ArduinoCombination(None), frozenset(),
+            (f"no --combo applies to this sketch (primary profiles: {profiles})",), False, "combo=none"))
     cache[key] = result
     return result
+
+
+def _combo_selections(config, combos, definitions, peer_data) -> list[dict]:
+    """Selections from the combos that fit this sketch; unlisted used peers keep their default."""
+    applied = config.stash[_APPLIED]
+    selections = []
+    for combo in combos:
+        roles = dict(combo.roles)
+        if roles["primary"] not in definitions["primary"]:
+            continue
+        if any(role in roles and roles[role] not in definitions[role] for role in definitions):
+            continue
+        applied.add(combo.label)
+        selected = {role: roles.get(role) or peer_data[role].get("default_profile") or None for role in definitions}
+        selected["primary"] = roles["primary"]
+        if selected not in selections:
+            selections.append(selected)
+    return selections
 
 
 def validate_selection(config) -> None:
     if not enabled(config):
         return
     primary, peers, singles = config.stash[_OPTIONS]
+    combos = config.stash[_COMBOS]
     known = config.stash[_KNOWN]
     if not known:
         raise pytest.UsageError("profile selection matched no Arduino sketches")
-    selections = {"primary": primary}
-    if peers != "all":
-        selections.update({f"peer:{name}": value for name, value in peers.items()})
-    selections.update({f"peer:{name}": (value,) for name, value in singles.items()})
-    if config.getoption("profile"):
-        selections["primary"] = (config.getoption("profile"),)
     for name in named_options(config.getoption("peer_port"), "--peer-port"):
         if f"peer:{name}" not in known:
             raise pytest.UsageError(f"unknown peer: {name}")
-    for role, selection in selections.items():
-        if role not in known:
-            raise pytest.UsageError(f"unknown peer: {role}")
-        if selection is None or selection == "all":
-            continue
-        unknown = set(selection) - known[role]
-        if unknown:
-            raise pytest.UsageError(f"{role}: unknown profiles: {', '.join(sorted(unknown))}")
+    if combos is not None:
+        for combo in combos:
+            if not combo.explicit:
+                continue
+            for role, value in combo.roles:
+                if role not in known:
+                    raise pytest.UsageError(f"--combo {combo.label}: unknown peer: {role.removeprefix('peer:')}")
+                if value not in known[role]:
+                    raise pytest.UsageError(f"--combo {combo.label}: {role}: unknown profile: {value}")
+            if combo.label not in config.stash[_APPLIED]:
+                raise pytest.UsageError(f"--combo {combo.label}: no collected sketch defines all of its profiles")
+    else:
+        selections = {"primary": primary}
+        if peers != "all":
+            selections.update({f"peer:{name}": value for name, value in peers.items()})
+        selections.update({f"peer:{name}": (value,) for name, value in singles.items()})
+        if config.getoption("profile"):
+            selections["primary"] = (config.getoption("profile"),)
+        for role, selection in selections.items():
+            if role not in known:
+                raise pytest.UsageError(f"unknown peer: {role}")
+            if selection is None or selection == "all":
+                continue
+            unknown = set(selection) - known[role]
+            if unknown:
+                raise pytest.UsageError(f"{role}: unknown profiles: {', '.join(sorted(unknown))}")
     if not any(plan.supported for batch in config.stash[_PLAN_CACHE].values() for plan in batch):
         raise pytest.UsageError("no structurally supported Arduino configuration was selected")
 

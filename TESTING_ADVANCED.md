@@ -8,9 +8,13 @@ A follow-on from [Testing Basics](TESTING_BASICS.md). It covers the traps that a
 
 ### Select candidates first; exclude only when necessary
 
-**Use profile selection to define the execution set first.** Applicability rules are for restrictions that a Cartesian product cannot express.
-For example, ESP32-to-ESP32 and S3-to-S3 may be wired, while ESP32-to-S3 is not. The plugin does not infer wiring.
-Wireless tests that work across all combinations need no exclusion rule. Do not use skips to hide defects, connection failures, or timeouts.
+**Use profile selection to define the execution set first.** Choose by how the pairs are decided:
+
+- Every combination works, as over the air: build the product with `--profiles` / `--peer-profiles`
+- The wiring fixes the partner: list only the working pairs with `--combo` (below)
+- A special restriction neither can express: exclude with an applicability rule
+
+The plugin does not infer wiring. Do not use skips to hide defects, connection failures, or timeouts.
 
 ```bash
 # Expand primary candidates only; peers keep their default / existing explicit selection
@@ -30,6 +34,40 @@ Without the new options, execution remains a single configuration. `--profiles` 
 Named `--peer-profiles` can be repeated for different peers, but conflicts with `--peer-profile` for the same peer.
 Bare `--peer-profiles=all` selects all peers and cannot be combined with other peer profile selections.
 With multiple peers, each peer adds an axis. Tests without a `peers` dependency are not multiplied by peer candidates; ordinary Python tests without `.ino` are not duplicated either.
+
+### List wiring-determined pairs with `--combo`
+
+When the wiring fixes the partner, as with a USB host and device, the product does not work. `s3_peer_host` is wired only to `s3_peer_device`, yet the product also pairs it with `esp32_peer_device`.
+In that case list only the pairs that work with `--combo`. The form is the same as the configuration ID shown in node IDs.
+
+```bash
+uv run pytest peer/ \
+  --combo primary=s3_peer_host,device=s3_peer_device \
+  --combo primary=esp32_peer_host,device=esp32_peer_device
+```
+
+Pairs you use every time can be named in `tests/pyproject.toml`.
+
+```toml
+[tool.pytest.ini_options]
+arduino_combos = [
+  "s3:    primary=s3_peer_host,device=s3_peer_device",
+  "esp32: primary=esp32_peer_host,device=esp32_peer_device",
+]
+```
+
+```bash
+uv run pytest peer/ --combo s3        # one pair by name
+uv run pytest peer/ --combo all       # every pair in arduino_combos
+```
+
+- A test that does not use a listed peer runs with the primary alone, and pairs with the same primary run once
+- A peer the test uses but the pair does not list uses its `default_profile`
+- A pair with a profile the sketch does not define does not apply to that test. A test no pair fits leaves one `combo=none` skip
+- When you give a pair or a name directly, a peer or profile name found nowhere, or a pair that fits no test, stops the run as an input error. `--combo all` skips this check so it also works in a narrowed run
+- `--combo` cannot be combined with `--profile` / `--profiles` / `--peer-profile` / `--peer-profiles`. Port resolution and preflight skips are the same as for the product
+
+There is no way to mix the product and a list in one run. To run both at once, list every pair you need with `--combo`.
 
 ### Assign devices by role and profile
 
@@ -84,7 +122,7 @@ The predicate receives `(item, combination)` and must return an actual `bool`: `
 A nonempty string `reason` is required.
 The example test body deliberately fails rather than passing without verification. Replace it with actual communication and expected-result checks.
 
-For an arbitrary list of allowed combinations, change only the predicate. This example is for tests using peer `echo`:
+If all you need is to list the working pairs, use `--combo` first. To write it as a predicate, change only the predicate. This example is for tests using peer `echo`:
 
 ```python
 ALLOWED = {("esp32", "esp32"), ("esp32s3", "esp32s3")}
@@ -285,6 +323,9 @@ pytest reads its settings from exactly one file. There are four candidates, and 
 4. `[tool:pytest]` in `setup.cfg`
 
 A `pytest.ini` wins even when it is empty. **Have two and one of them is ignored entirely.** When a setting has no effect, first suspect that the other file is the one being read. The run prints which one as `configfile:`.
+
+**These guides recommend uv with `tests/pyproject.toml`.** Python dependencies and pytest settings live in one file, and `uv add` updates the same file. Do not add a `pytest.ini`; if you do, the settings in `pyproject.toml` are silently ignored.
+pytest 9 also reads `[tool.pytest]` (native TOML types), but using it together with `[tool.pytest.ini_options]` in one file is an error at startup. Stay with `[tool.pytest.ini_options]`, which pytest 8 reads too.
 
 The syntax differs by format.
 
@@ -637,7 +678,7 @@ python -c "import tempfile; print(tempfile.gettempdir())"
 
 So **archiving logs after a run is usually unnecessary**. Consider it only when you want to collect them somewhere specific as CI artifacts, or to tidy up an accumulation.
 
-**Files the sketch writes itself are a different matter.** When a sketch running on a host core writes with something like `fopen("output/...", ...)`, the working directory at run time is the sketch directory, so the file lands in `tests/<name>/output/`. That path is not per-run, so **files from the previous run remain**. A stale file can make a failing run look like it passed. Wiping it is the single most common reason for a conftest, as the next section shows.
+**Files the sketch writes itself are a different matter.** When a sketch running on a host core writes with something like `fopen("output/...", ...)`, the working directory at run time is the sketch directory, so the file lands in `tests/<name>/output/`. That path is not per-run, so **files from the previous run remain**. A stale file can make a failing run look like it passed. To wipe it before every test, set `arduino_reset_dirs`, described below.
 
 ## Cleaning up after an early exit
 
@@ -832,6 +873,8 @@ This is slow. When the cleanup command is enough, use that instead.
 **First check whether the standard features are enough.** This is what the plugin already provides, and it covers most needs.
 
 - Profile selection (`--profile`, `default_profile` in `sketch.yaml`)
+- Profile combinations (`--profiles`, `--peer-profiles`, `--combo`, `arduino_combos`)
+- Resetting directories the sketch writes (`arduino_reset_dirs`)
 - Port resolution (`--port`, `TEST_SERIAL_PORT_<PROFILE>`, a `socket://` port in `sketch.yaml`)
 - Controlling how far a run goes (`--run-mode=all|build|test`)
 - Injecting compile-time defines (`build_config.toml`)
@@ -842,24 +885,28 @@ This is slow. When the cleanup command is enough, use that instead.
 
 There are still cases that need a conftest. The following are forms actually used in real projects.
 
-### 1. Delete files the sketch wrote, before the run
+### 1. Delete files the sketch wrote, before the run (no conftest needed)
 
-The most common use. A file left from the previous run can make a failing run look like it passed.
+This used to be the most common use; a setting now covers it. A file left from the previous run can make a failing run look like it passed.
+
+```toml
+# tests/pyproject.toml
+[tool.pytest.ini_options]
+arduino_reset_dirs = ["output"]
+```
+
+Before each test's setup, before `dut` or `peers` builds and launches a sketch, `output/` is removed from the test file's directory and from each `peer_*` directory directly below it. A host core peer writes into its own directory, so the peer side is cleared too.
+
+Only paths relative to the test directory are accepted. `..` or an absolute path is a configuration error, and a symlink is not followed but reported as an error. The default is empty, so nothing is removed unless you set it.
+
+If you had a conftest like the following, the one line above replaces it.
 
 ```python
-import shutil
-from pathlib import Path
-
-
 def pytest_runtest_setup(item):
     output_dir = Path(item.fspath).parent / "output"
     if output_dir.exists():
         shutil.rmtree(output_dir)
 ```
-
-**There is a reason this is a hook and not a fixture.** `pytest_runtest_setup` runs before the `dut` fixture builds and launches the sketch. Written as a fixture, the deletion could race the sketch's writes. The hook makes the order certain.
-
-Be aware that this form deletes any directory named `output`, unconditionally. Check what is in there before copying it into another repository.
 
 ### 2. Rewrite configuration before the compile
 

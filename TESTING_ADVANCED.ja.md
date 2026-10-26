@@ -8,9 +8,13 @@
 
 ### まず候補を選び、必要な場合だけ除外する
 
-**基本は profile の候補指定で実行範囲を決めます。** 除外条件は、候補の直積では表せない制約に使います。
-例えば、ESP32 同士と S3 同士には配線があるが、ESP32 と S3 の間には配線がない場合です。plugin は配線を推測しません。
-無線で全組合せが成立するなら除外は不要です。不具合、接続失敗、timeout を成功扱いにするために skip を使わないでください。
+**基本は profile の候補指定で実行範囲を決めます。** 使い分けは組がどう決まるかで選びます。
+
+- 無線のように全組合せが成立する: `--profiles` / `--peer-profiles` で直積を作る
+- 結線で相手が決まっている: `--combo` で成立する組だけを列挙する（後述）
+- どちらでも表せない特殊な制約: 適用条件で除外する
+
+plugin は配線を推測しません。不具合、接続失敗、timeout を成功扱いにするために skip を使わないでください。
 
 ```bash
 # primary の候補だけを展開。peer は既存の default / 明示指定のまま
@@ -30,6 +34,40 @@ uv run pytest tests/link --profiles=all --peer-profiles=all --collect-only -q
 名前付き `--peer-profiles` は異なる peer に繰り返し指定でき、同じ peer の `--peer-profile` とは競合します。
 裸の `--peer-profiles=all` は全 peer の指定なので、ほかの peer profile 指定とは併用しません。
 peer が複数ある場合は各 peer の候補も掛け合わせます。`peers` に依存しないテストは peer 数で増やさず、`.ino` のない Python テストも複製しません。
+
+### 結線で決まる組は `--combo` で列挙する
+
+USB の host と device のように、配線で相手が決まる構成では直積は使えません。`s3_peer_host` には `s3_peer_device` しかつながっていないのに、直積は `esp32_peer_device` との組も作るからです。
+こうした場合は、成立する組だけを `--combo` で列挙します。書式は nodeid に出る構成 ID と同じです。
+
+```bash
+uv run pytest peer/ \
+  --combo primary=s3_peer_host,device=s3_peer_device \
+  --combo primary=esp32_peer_host,device=esp32_peer_device
+```
+
+毎回書く組は `tests/pyproject.toml` に名前を付けて置けます。
+
+```toml
+[tool.pytest.ini_options]
+arduino_combos = [
+  "s3:    primary=s3_peer_host,device=s3_peer_device",
+  "esp32: primary=esp32_peer_host,device=esp32_peer_device",
+]
+```
+
+```bash
+uv run pytest peer/ --combo s3        # 名前で 1 組
+uv run pytest peer/ --combo all       # arduino_combos の全組
+```
+
+- 組に書いた peer を使わないテストは primary だけで実行し、同じ primary の組は 1 回にまとめます
+- テストが使う peer を組に書かなければ、その peer は `default_profile` を使います
+- sketch に定義のない profile を含む組は、そのテストには適用しません。どの組も当てはまらないテストは `combo=none` の skip が 1 件残ります
+- 名前や組を直接指定したときは、どこにもない peer 名・profile 名、どのテストにも当てはまらない組を入力ミスとして止めます。`--combo all` は対象を絞った実行でも使えるよう、この検査をしません
+- `--combo` は `--profile` / `--profiles` / `--peer-profile` / `--peer-profiles` と併用できません。port の解決と事前 skip は直積のときと同じです
+
+直積と列挙を 1 回の実行で混ぜる指定はありません。両方を一度に回したいときは、必要な組をすべて `--combo` に列挙してください。
 
 ### 実機は役割と profile ごとに割り当てる
 
@@ -84,7 +122,7 @@ def test_uart(dut, peers):
 `reason` は空でない文字列を必須とします。
 上の test 本文は未実装の検証を合格にしないため意図的に失敗します。実際の通信と期待値の確認に置き換えてください。
 
-任意の組を列挙したい場合も、判定関数だけを変えます。次は peer `echo` を使うテスト向けです。
+成立する組を列挙するだけなら、先に `--combo` を使ってください。判定関数で書く場合は、関数だけを変えます。次は peer `echo` を使うテスト向けです。
 
 ```python
 ALLOWED = {("esp32", "esp32"), ("esp32s3", "esp32s3")}
@@ -285,6 +323,9 @@ pytest の設定は 1 つのファイルから読まれます。候補は 4 つ�
 4. `setup.cfg` の `[tool:pytest]`
 
 `pytest.ini` は中身が空でも勝ちます。**2 つ置くと片方は完全に無視されます。** 設定を書いたのに効かないときは、まずどちらが読まれているかを疑ってください。実行時の出力に `configfile:` として表示されます。
+
+**このガイドでは uv と `tests/pyproject.toml` を推奨します。** Python の依存と pytest の設定が 1 つのファイルにまとまり、`uv add` で依存を足したときも同じファイルが更新されます。`pytest.ini` は置かないでください。置くと `pyproject.toml` の設定は黙って無視されます。
+pytest 9 からは `[tool.pytest]`（TOML の型をそのまま使う形式）も読めますが、同じファイルで `[tool.pytest.ini_options]` と併用すると起動時に error になります。pytest 8 でも動く `[tool.pytest.ini_options]` に揃えてください。
 
 書き方は形式によって違います。
 
@@ -637,7 +678,7 @@ python -c "import tempfile; print(tempfile.gettempdir())"
 
 つまり**実行後のログ退避は、多くの場合そもそも不要です**。CI で成果物として特定の場所へ集めたい、あるいは溜まり続けるのを整理したい、という要求があるときだけ考えてください。
 
-**sketch 自身が書き出すファイルは別物です。** host core で動かす sketch が `fopen("output/...", ...)` のように書き出す場合、実行時のカレントディレクトリは sketch ディレクトリなので、ファイルは `tests/<name>/output/` に落ちます。ここは実行ごとに分かれないので、**前回のファイルが残ります**。残っていると、失敗した実行が成功に見えることがあります。これを消すのが、次の節でいちばん多く出てくる conftest の用途です。
+**sketch 自身が書き出すファイルは別物です。** host core で動かす sketch が `fopen("output/...", ...)` のように書き出す場合、実行時のカレントディレクトリは sketch ディレクトリなので、ファイルは `tests/<name>/output/` に落ちます。ここは実行ごとに分かれないので、**前回のファイルが残ります**。残っていると、失敗した実行が成功に見えることがあります。毎テスト前に消すには、後述の `arduino_reset_dirs` を設定します。
 
 ## 中断時の後片付け
 
@@ -832,6 +873,8 @@ lock directory は `--device-lock-dir` の値か、指定がなければ `defaul
 **まず標準機能で足りないか確かめてください。** この plugin が用意しているものは次の通りで、多くの要求はこれで済みます。
 
 - profile の選択（`--profile`、`sketch.yaml` の `default_profile`）
+- profile の組合せ（`--profiles`、`--peer-profiles`、`--combo`、`arduino_combos`）
+- sketch が書き出すディレクトリの初期化（`arduino_reset_dirs`）
 - port の解決（`--port`、`TEST_SERIAL_PORT_<PROFILE>`、`sketch.yaml` の `socket://`）
 - 実行範囲の制御（`--run-mode=all|build|test`）
 - compile-time define の注入（`build_config.toml`）
@@ -842,24 +885,28 @@ lock directory は `--device-lock-dir` の値か、指定がなければ `defaul
 
 それでも conftest が必要になる場面はあります。以下は実際のプロジェクトで使われている形です。
 
-### 1. sketch が書き出したファイルを実行前に消す
+### 1. sketch が書き出したファイルを実行前に消す（conftest は不要）
 
-いちばん多い用途です。前回のファイルが残っていると、失敗した実行が成功に見えます。
+これまでいちばん多い用途でしたが、今は設定だけで済みます。前回のファイルが残っていると、失敗した実行が成功に見えます。
+
+```toml
+# tests/pyproject.toml
+[tool.pytest.ini_options]
+arduino_reset_dirs = ["output"]
+```
+
+各テストの setup の前、`dut` や `peers` が sketch を build して起動する前に、テストファイルのディレクトリと、その直下の `peer_*` ディレクトリから `output/` を削除します。host core の peer は自分のディレクトリに書き出すので、peer 側も消えます。
+
+指定できるのはテストディレクトリからの相対パスだけです。`..` や絶対パスは設定エラーになり、symlink は辿らずに error にします。既定は空なので、書かなければ何も消しません。
+
+次のような conftest を書いていたなら、上の 1 行に置き換えられます。
 
 ```python
-import shutil
-from pathlib import Path
-
-
 def pytest_runtest_setup(item):
     output_dir = Path(item.fspath).parent / "output"
     if output_dir.exists():
         shutil.rmtree(output_dir)
 ```
-
-**fixture ではなく hook にする理由があります。** `pytest_runtest_setup` は `dut` fixture が sketch を build して起動する前に走ります。fixture で書くと、消す処理が sketch の書き込みと競合しかねません。順序を確実にするために hook を使います。
-
-注意点として、この形は `output` という名前のディレクトリを無条件に削除します。他のリポジトリへ持っていくときは中身を確認してください。
 
 ### 2. compile より前に設定を書き換える
 

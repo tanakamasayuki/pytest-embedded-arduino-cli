@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from contextlib import ExitStack
-from pathlib import Path
+from pathlib import Path, PurePath, PureWindowsPath
 import shutil
 import shlex
 from typing import Any, Callable
@@ -66,6 +66,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--profiles", help="Primary profile list (comma-separated), or all. Opts into combination execution.")
     group.addoption("--peer-profiles", action="append", default=[], metavar="all|NAME:PROFILES",
                     help="All peers' profiles, or a named peer's list/all. Repeat for different peers.")
+    group.addoption("--combo", dest="combos", action="append", default=[], metavar="primary=P[,PEER=P...]|NAME|all",
+                    help="Run one listed primary/peer profile combination. Repeat to list more; NAME and all "
+                         "refer to the arduino_combos ini setting.")
+    parser.addini("arduino_combos", type="linelist", default=[],
+                  help="Named combinations for --combo, one 'NAME: primary=PROFILE,PEER=PROFILE' per line.")
+    parser.addini("arduino_reset_dirs", type="linelist", default=[],
+                  help="Directories, relative to each test directory and its peer_* directories, "
+                       "removed before every test.")
     group.addoption(
         "--run-mode",
         action="store",
@@ -168,6 +176,7 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
     return [
         f"arduino-cli run-mode: {config.getoption('run_mode')}",
         f"arduino-cli profile: {config.getoption('profiles') or config.getoption('profile') or 'default'}",
+        *([f"arduino-cli combos: {', '.join(config.getoption('combos'))}"] if config.getoption('combos') else []),
         *([f"arduino-cli peer profiles: {config.getoption('peer_profiles')}"] if config.getoption('peer_profiles') else []),
     ]
 
@@ -183,6 +192,7 @@ def pytest_configure(config: pytest.Config) -> None:
     register_protocol_handler()
     _remember_initial_ports(config)
     _clean_ardutest_artifacts(config)
+    config._arduino_cli_reset_dirs = _reset_dir_names(config)
     ensure_default_embedded_services(config)
     _set_optional_metadata(config)
     _initialize_state_cache(config)
@@ -208,6 +218,8 @@ def _set_optional_metadata(config: pytest.Config) -> None:
         config.stash[metadata_key]["Profile"] = getattr(config.option, "profiles", None) or config.getoption("profile") or "default"
         if getattr(config.option, "peer_profiles", None):
             config.stash[metadata_key]["Peer profiles"] = config.option.peer_profiles
+        if getattr(config.option, "combos", None):
+            config.stash[metadata_key]["Combos"] = config.option.combos
 
 
 def _ardutest_artifact_dir(config: pytest.Config) -> Path:
@@ -229,6 +241,36 @@ def _clean_ardutest_artifacts(config: pytest.Config) -> None:
     shutil.rmtree(artifact_dir)
 
 
+def _reset_dir_names(config: pytest.Config) -> list[PurePath]:
+    names = []
+    for value in config.getini("arduino_reset_dirs"):
+        name = PurePath(value)
+        if not value.strip() or name.is_absolute() or PureWindowsPath(value).anchor or ".." in name.parts \
+                or name == PurePath("."):
+            raise pytest.UsageError(f"arduino_reset_dirs: expected a relative directory below the test directory: {value!r}")
+        names.append(name)
+    return names
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Remove the configured scratch directories before any fixture starts a sketch."""
+    names = getattr(item.config, "_arduino_cli_reset_dirs", [])
+    if not names:
+        return
+    base = Path(item.path).parent
+    for directory in [base, *sorted(path for path in base.glob("peer_*") if path.is_dir())]:
+        for name in names:
+            target = directory / name
+            if not target.exists() and not target.is_symlink():
+                continue
+            if target.is_symlink() or not target.is_dir():
+                raise pytest.UsageError(f"arduino_reset_dirs: not a plain directory, refusing to remove: {target}")
+            if not target.resolve().is_relative_to(directory.resolve()):
+                raise pytest.UsageError(f"arduino_reset_dirs: resolves outside {directory}: {target}")
+            shutil.rmtree(target)
+
+
 def pytest_addhooks(pluginmanager) -> None:
     pluginmanager.add_hookspecs(combinations.Hooks)
 
@@ -242,7 +284,7 @@ def pytest_generate_tests(metafunc) -> None:
     plans = combinations.plans(metafunc.config, path, "peers" in metafunc.fixturenames)
     metafunc.parametrize(
         "_arduino_cli_plan",
-        [pytest.param(plan, id=plan.combination.id,
+        [pytest.param(plan, id=plan.id,
                       marks=[pytest.mark.skip(reason="; ".join(plan.skip_reasons))] if plan.skip_reasons else [])
          for plan in plans],
         indirect=True, scope="module",

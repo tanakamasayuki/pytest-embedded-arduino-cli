@@ -536,3 +536,152 @@ def test_parametrized_port_cannot_bypass_profile_assignment(pytester):
     assert result.ret != 0
     assert "combination mode owns port" in result.stderr.str()
     assert events(pytester) == []
+
+
+COMBOS_INI = """
+[pytest]
+arduino_combos =
+    pair32: primary=esp32,echo=esp32
+    pairs3: primary=esp32s3,echo=esp32s3
+"""
+
+
+def test_combo_runs_only_the_listed_pairs(pytester):
+    project(pytester, "def test_link(dut, peers): assert peers['echo'].profile == dut.profile")
+    result = run(pytester, "--combo", "primary=esp32,echo=esp32", "--combo", "primary=esp32s3,echo=esp32s3", "--co")
+    result.stdout.fnmatch_lines(["*test_link[[]primary=esp32,echo=esp32[]]", "*test_link[[]primary=esp32s3,echo=esp32s3[]]"])
+    run(pytester, "--combo", "primary=esp32,echo=esp32", "--combo", "primary=esp32s3,echo=esp32s3").assert_outcomes(passed=2)
+    assert [e[1:] for e in events(pytester) if e[0] == "peer_open"] == [
+        ["echo", "esp32", "/peer-esp32"], ["echo", "esp32s3", "/peer-s3"]]
+
+
+def test_combo_names_and_all_come_from_ini(pytester):
+    project(pytester, "def test_link(dut, peers): assert peers['echo'].profile == dut.profile")
+    pytester.makeini(COMBOS_INI)
+    run(pytester, "--combo", "all").assert_outcomes(passed=2)
+    run(pytester, "--combo", "pairs3").assert_outcomes(passed=1)
+    run(pytester, "--combo", "pair32", "--combo", "primary=esp32s3,echo=esp32s3").assert_outcomes(passed=2)
+
+
+def test_combo_is_read_from_pyproject(pytester):
+    project(pytester, "def test_link(dut, peers): assert peers['echo'].profile == dut.profile")
+    pytester.makepyprojecttoml("""
+        [tool.pytest.ini_options]
+        arduino_combos = ["s3: primary=esp32s3,echo=esp32s3"]
+    """)
+    run(pytester, "--combo", "s3").assert_outcomes(passed=1)
+
+
+def test_combo_peer_free_tests_run_once_per_primary(pytester):
+    project(pytester, '''
+        def test_without(dut): pass
+        def test_with(dut, peers): pass
+    ''')
+    result = run(pytester, "--combo", "primary=esp32,echo=esp32", "--combo", "primary=esp32,echo=esp32s3")
+    result.assert_outcomes(passed=3)
+
+
+def test_combo_unlisted_peer_keeps_its_default(pytester):
+    project(pytester, "def test_link(dut, peers): assert peers['echo'].profile == 'esp32'")
+    run(pytester, "--combo", "primary=esp32s3").assert_outcomes(passed=1)
+
+
+def test_combo_skips_sketch_no_combo_fits_once(pytester):
+    directory = project(pytester, "def test_link(dut, peers): pass")
+    other = pytester.path / "other"
+    sketch(other, {"uno": "/uno"}, default="uno")
+    (other / "test_other.py").write_text("def test_other(dut): pass")
+    pytester.makeini(COMBOS_INI)
+    result = run(pytester, "--combo", "all", "-rs")
+    result.assert_outcomes(passed=2, skipped=1)
+    result.stdout.fnmatch_lines(["*no --combo applies to this sketch (primary profiles: uno)*"])
+    assert all(e[1] != "other" for e in events(pytester) if e[0] == "compile")
+    assert directory.exists()
+
+
+@pytest.mark.parametrize("args", [
+    ["--combo", "primary=esp32", "--profiles=all"],
+    ["--combo", "primary=esp32", "--profile=esp32"],
+    ["--combo", "primary=esp32", "--peer-profile=echo:esp32"],
+    ["--combo", "primary=esp32", "--peer-profiles=all"],
+    ["--combo", "missing"],
+    ["--combo", "all"],
+    ["--combo", "all", "--combo", "primary=esp32"],
+    ["--combo", "echo=esp32"],
+    ["--combo", "primary=esp32,primary=esp32s3"],
+    ["--combo", "primary=esp32", "--combo", "primary=esp32"],
+    ["--combo", "primary=typo"],
+    ["--combo", "primary=esp32,ehco=esp32"],
+    ["--combo", "primary=esp32,echo=typo"],
+    ["--combo", "primary=esp32", "--combo", "primary=esp32s3", "--port=/shared"],
+])
+def test_invalid_combo_fails_without_build(pytester, args):
+    project(pytester, "def test_link(dut, peers): pass")
+    result = run(pytester, *args)
+    assert result.ret != 0
+    assert events(pytester) == []
+
+
+def test_combo_that_fits_no_sketch_is_an_error(pytester):
+    project(pytester, "def test_link(dut, peers): pass")
+    other = pytester.path / "other"
+    sketch(other, {"uno": "/uno"}, default="uno")
+    sketch(other / "peer_echo", {"uno": "/peer-uno"}, default="uno")
+    (other / "test_other.py").write_text("def test_other(dut, peers): pass")
+    result = run(pytester, "--combo", "primary=esp32,echo=uno")
+    assert result.ret != 0
+    assert "no collected sketch defines all of its profiles" in result.stderr.str()
+
+
+def test_single_combo_keeps_common_port(pytester):
+    project(pytester, "def test_link(dut): assert dut.port == '/shared'", peer=False)
+    run(pytester, "--combo", "primary=esp32s3", "--port=/shared").assert_outcomes(passed=1)
+
+
+RESET_PROBE = '''
+from pathlib import Path
+def test_link(dut, peers):
+    here = Path(__file__).parent
+    assert not (here / "output").exists()
+    assert not (here / "peer_echo" / "output").exists()
+    assert (here / "keep" / "file").exists()
+'''
+
+
+def test_reset_dirs_are_removed_before_the_sketch_starts(pytester):
+    directory = project(pytester, RESET_PROBE)
+    pytester.makeini("[pytest]\narduino_reset_dirs = output\n")
+    for path in (directory / "output", directory / "peer_echo" / "output", directory / "keep"):
+        path.mkdir()
+        (path / "file").write_text("stale")
+    pytester.makeconftest(HARDWARE.replace(
+        'record("primary_open"', 'assert not (ROOT / "link" / "output").exists()\n    record("primary_open"'))
+    run(pytester).assert_outcomes(passed=1)
+    assert (directory / "keep" / "file").exists()
+
+
+def test_reset_dirs_off_by_default(pytester):
+    directory = project(pytester, "def test_link(dut): pass", peer=False)
+    (directory / "output").mkdir()
+    run(pytester).assert_outcomes(passed=1)
+    assert (directory / "output").exists()
+
+
+@pytest.mark.parametrize("value", ["../output", "/tmp/output", ".", "a/../../b"])
+def test_reset_dirs_rejects_paths_outside_the_test_directory(pytester, value):
+    project(pytester, "def test_link(dut): pass", peer=False)
+    pytester.makeini(f"[pytest]\narduino_reset_dirs = {value}\n")
+    result = run(pytester)
+    assert result.ret != 0
+    assert "arduino_reset_dirs" in result.stderr.str()
+
+
+def test_reset_dirs_refuses_symlinks(pytester, tmp_path_factory):
+    directory = project(pytester, "def test_link(dut): pass", peer=False)
+    elsewhere = tmp_path_factory.mktemp("elsewhere")
+    (elsewhere / "file").write_text("keep")
+    (directory / "output").symlink_to(elsewhere, target_is_directory=True)
+    pytester.makeini("[pytest]\narduino_reset_dirs = output\n")
+    result = run(pytester)
+    result.assert_outcomes(errors=1)
+    assert (elsewhere / "file").exists()

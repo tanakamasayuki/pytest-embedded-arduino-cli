@@ -131,6 +131,7 @@ uv run pytest
 - `--profile`
 - `--profiles=all|PROFILE,...` (multiple configurations only when explicitly requested)
 - `--peer-profiles=all|NAME:all|NAME:PROFILE,...`
+- `--combo=primary=PROFILE,NAME=PROFILE|NAME|all` (run only the listed, wiring-determined pairs)
 - `--peer-profile=NAME:PROFILE`
 - `--peer-port=NAME:PORT`
 - `--clean`
@@ -144,6 +145,11 @@ uv run pytest
 - `--arduino-test-timeout=SECONDS`
 - `--arduino-test-artifact-dir=PATH`
 - `--arduino-test-missing-config=skip|error`
+
+Settings in `[tool.pytest.ini_options]` of `tests/pyproject.toml`:
+
+- `arduino_combos`: the pairs `--combo` selects by name
+- `arduino_reset_dirs`: directories removed from the test and `peer_*` directories before each test (e.g. `["output"]`)
 
 `--clean` passes `--clean` to `arduino-cli compile`.
 It is useful when Arduino CLI's incremental build cache should be ignored.
@@ -233,6 +239,16 @@ rm -rf ~/.cache/arduino/cores ~/.cache/arduino/sketches
 ```
 
 To review the list before deleting, run the `find` without the `xargs` pipe first.
+
+In Windows PowerShell, use this instead of step 2:
+
+```powershell
+Get-ChildItem -Recurse -Filter sketch.yaml | Where-Object FullName -notmatch '\\.venv\\' |
+  ForEach-Object { Join-Path $_.DirectoryName build } | Where-Object { Test-Path $_ } |
+  Remove-Item -Recurse -Force
+```
+
+`build/` belongs in `.gitignore`, but avoid removing it with `git clean -fdX`: that also removes `.env`, which is ignored too.
 
 ### Case 2: reclaiming disk space
 
@@ -622,7 +638,7 @@ Execution guidance for `examples/` is described in [examples/README.md](https://
 You may see `PytestExperimentalApiWarning: record_xml_attribute is an experimental feature`.
 
 This warning comes from `pytest-embedded`, not from this plugin. It is usually safe to ignore.
-If you want to suppress it in your project, add a warning filter in `pytest.ini`, `pyproject.toml`, or a local config such as `examples/pytest.ini`.
+If you want to suppress it in your project, add a warning filter to `[tool.pytest.ini_options]` in `pyproject.toml`. The [FAQ](TESTING_FAQ.md#every-test-warns-about-record_xml_attribute) shows how.
 
 ## What This Plugin Does Not Try To Be
 

@@ -20,7 +20,7 @@ A test function needs the `test_` prefix. In the other direction, **a fixture wh
 
 ### `PluginValidationError: unknown hook`, and pytest will not start
 
-A `pytest_*` function in a `conftest.py` is misspelled. Hook names are fixed, and pytest refuses to start rather than quietly ignoring one it does not know. Neither pytest-embedded nor this plugin adds hook names of its own; **the names are pytest's alone.**
+A `pytest_*` function in a `conftest.py` is misspelled. Hook names are fixed, and pytest refuses to start rather than quietly ignoring one it does not know. pytest-embedded adds no hook names of its own, and this plugin adds only `pytest_arduino_cli_skip_reason`; **every other name is pytest's.**
 
 → [Advanced Testing](TESTING_ADVANCED.md), *What conftest.py is*
 
@@ -161,7 +161,7 @@ To learn whether an update breaks the build, run a scheduled job that rewrites t
 
 ### The upload fails, or the port cannot be opened
 
-Three shapes, and which one you get says where to look. No port configured gives a `ValueError` when the connection is set up. A port that resolves with nothing behind it fails inside `arduino-cli upload`. A path that does not exist gives a `FileNotFoundError` at connect. A symlink in `.env` makes the middle one easy to hit, because **the string resolves while the device is absent.** Legacy single execution does not skip the primary. Combination mode (`--profiles` / `--peer-profiles`) also skips an unconfigured primary port before build, but failures on configured ports remain errors.
+Three shapes, and which one you get says where to look. No port configured gives a `ValueError` when the connection is set up. A port that resolves with nothing behind it fails inside `arduino-cli upload`. A path that does not exist gives a `FileNotFoundError` at connect. A symlink in `.env` makes the middle one easy to hit, because **the string resolves while the device is absent.** Legacy single execution does not skip the primary. Combination mode (`--profiles` / `--peer-profiles` / `--combo`) also skips an unconfigured primary port before build, but failures on configured ports remain errors.
 
 → [Advanced Testing](TESTING_ADVANCED.md), *The plugin takes care of peer boards*
 

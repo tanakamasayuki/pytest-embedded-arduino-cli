@@ -792,7 +792,7 @@ peer DUT の build / upload でも、`-v` / `-vv` のログには peer 名が分
 - ESP 固有用語を option 名に持ち込まない
 - pytest-embedded 既存 option と競合しにくい名前にする
 - build / upload / runtime の責務境界が option 名から見えるようにする
-- plugin 固有 option は、実行 mode、profile 選択、peer DUT、device lock、ArduTest、local state cache、log directory summary の範囲に絞る
+- plugin 固有 option は、実行 mode、profile 選択、peer DUT、device lock、ArduTest、local state cache、log directory summary、テスト前のディレクトリ削除の範囲に絞る
 - `--port`、`--flash-port`、`--baud` は `pytest-embedded` の option である。plugin はこれらを読み、解決した runtime の port を現在の module の間だけ `--port` に書き戻すことがある
 - `--arduino-cli-no-log-summary` のように接頭辞が揃っていない名前も、既存の option 名は変えない
 
@@ -810,6 +810,25 @@ log directory `<tmpdir>/pytest-embedded/<UTC timestamp>/<テスト名>/` は `py
 - 失敗内容は上限サイズで末尾を残して切り詰める。完全な serial log は同じ directory の `dut.log` とする
 - `pytest-embedded` が log directory を作らなかった実行では何も出力しない。また本機能の失敗が pytest の exit status に影響してはならない
 - option: `--arduino-cli-no-log-summary` で本機能を無効化する。既定値は有効
+
+### 14.10 テスト前に削除するディレクトリ
+
+host core の sketch は、sketch ディレクトリを cwd として `output/` のような相対パスにファイルを書き出せる。
+このディレクトリは実行ごとに分かれないため、前回のファイルが残ると失敗した実行が成功に見えることがある。
+これを毎テスト前に消す処理を `conftest.py` に書かずに済むよう、ini 設定を設ける。
+
+```toml
+[tool.pytest.ini_options]
+arduino_reset_dirs = ["output"]
+```
+
+- 既定値は空で、設定したときだけ削除する。CLI option は設けない
+- 各テストの setup の前、つまり module / function fixture が build・upload・sketch 起動を始める前に削除する
+- 対象はテストファイルのディレクトリと、その直下の各 `peer_*` ディレクトリである。peer の upload は peer の sketch ディレクトリを cwd にするため、host core の peer は自分のディレクトリに書き出す。テストが `peers` を要求するかどうかでは対象を変えない
+- `.ino` のないテストにも適用する
+- 値はテストディレクトリからの相対パスとする。空、絶対パス、`.`、`..` を含むパスは設定エラーとする
+- 対象が symlink、またはディレクトリでない場合は削除せず setup error とする。解決後のパスがテストディレクトリの外になる場合も同様である
+- 存在しない場合は何もしない。`--collect-only` では削除しない
 
 ## 15. テスト状態保存要件
 
@@ -1248,6 +1267,9 @@ primary だけに `all` を指定しても peer 全候補には広げない。
 peer が複数なら、各 peer の候補をそれぞれ軸として直積を生成する。
 `all` は新 option の予約値とし、同名 profile の単一選択には既存の `--profile all` / `--peer-profile <name>:all` を使える。
 
+候補の直積ではなく、結線などで決まる primary と peer の組だけを実行する場合は、24.11 の `--combo` を使う。
+直積は無線のように全組合せが成立する場合、`--combo` は組が決まっている場合に使い分ける。
+
 新 option のいずれかを指定した実行を、本章では「組合せ実行モード」と呼ぶ。候補が 1 個でもこの mode の事前確認を適用する。
 
 ### 24.3 収集と入力検証
@@ -1396,8 +1418,8 @@ state cache の保存対象と key の整合、pytest-embedded の fixture / log
 
 ### 24.10 収集時の適用条件 API
 
-通常は profile 候補で実行範囲を選び、候補の直積では表現できない特殊な制約だけを適用条件で除外する。
-配線によりクロスできない組等を利用側が宣言できるよう、次の API を公開する。設備の意味や配線表は plugin に持たせない。
+通常は profile 候補で実行範囲を選び、結線で決まる組は 24.11 の `--combo` で列挙する。
+適用条件は、候補の選び方では表現できない特殊な制約を利用側が宣言するために使う。次の API を公開する。設備の意味や配線表は plugin に持たせない。
 
 - `ArduinoCombination`: 読み取り専用の `primary: str | None` と `peers: Mapping[str, str | None]`。`pytest_embedded_arduino_cli` から import できる。
 - `pytest.mark.arduino_skip_if(predicate, reason="...")`: `predicate(item, combination)` が `True` なら skip。実際の `bool` と空でない reason を必須とし、module / class / function / parameter に宣言できる。
@@ -1416,5 +1438,47 @@ hook は各 item のディレクトリに適用される実装だけを呼ぶ。
 module fixture の setup より前に skip を判定し、対象外 item のためだけに compile / upload しない。ただし同じ firmware を別の実行対象が必要とする場合、その対象の build は行う。
 ガイドでは候補選択、適用対象外、設備不足、失敗、中断を区別する。skip を検証成功や実行範囲の充足とみなさず、既知の不具合を除外で隠す運用を勧めない。
 例は [テストの応用](TESTING_ADVANCED.ja.md#profile-の組合せと適用条件) に記載する。
+
+### 24.11 列挙した組合せ（`--combo`）
+
+USB の host / device のように結線で相手が決まる構成では、`--profiles=all --peer-profiles=all` の直積は成立しない組を含む。
+成立する組だけを、直積を作らずに列挙して実行する。
+
+```bash
+pytest peer/ \
+  --combo primary=s3_peer_host,device=s3_peer_device \
+  --combo primary=esp32_peer_host,device=esp32_peer_device
+```
+
+値の書式は nodeid の構成 ID と同じ `primary=<profile>,<peer>=<profile>,...` とする。`primary` は必須で、peer は 0 個以上書ける。percent encoding された名前は decode する。
+`--combo` は繰り返し指定でき、指定した組の和集合を実行する。
+
+よく使う組は pytest の ini 設定に名前付きで書ける。推奨は `pyproject.toml` である。
+
+```toml
+[tool.pytest.ini_options]
+arduino_combos = [
+  "s3:    primary=s3_peer_host,device=s3_peer_device",
+  "esp32: primary=esp32_peer_host,device=esp32_peer_device",
+]
+```
+
+- 1 行は `<name>: <組>` とする。名前は空でなく、`=`、`,` を含まず、`all` 以外とする
+- `--combo <name>` で名前の組を、`--combo all` で `arduino_combos` の全組を選ぶ。`=` を含む値は組そのものとして扱う
+- `--combo all` は他の `--combo` と併用しない。`arduino_combos` が空なら error とする
+- 同じ組を 2 回選ぶこと、未定義の名前、書式違反は error とする
+
+各テストへの適用は次のとおりとする。
+
+- 組の primary profile がその sketch に定義され、かつ組に書いた peer のうちテストが使う peer の profile がすべて定義されているとき、その組を適用する
+- 組に書いた peer をテストが使わない場合、その peer は無視する。`peers` を要求しないテストは primary だけの構成になり、同じ構成になる組は 1 つにまとめる
+- テストが使う peer を組に書いていない場合、その peer は `default_profile` で解決する。決まらなければ従来どおり skip とする
+- その sketch に当てはまらない組は item を生成しない。どの組も当てはまらないテストは、ID `combo=none` の skip item を 1 つ残す
+- 名前や組を明示した `--combo` は、収集対象のどこにもない peer 名や profile 名、どのテストにも当てはまらない組を入力ミスとして error にする。`--combo all` で選んだ組にはこの検査を適用しない。対象を絞った実行で、関係しない組が並ぶためである
+- どのテストにも構成が 1 つも当てはまらない場合は error とする
+
+`--combo` は `--profile`、`--profiles`、`--peer-profile`、`--peer-profiles` と併用しない。
+`--combo` を指定した実行は組合せ実行モードであり、24.3〜24.7 の port 解決、事前 skip、lifecycle、結果の扱いをそのまま適用する。
+複数の組で profile が異なる役割は「複数候補を持つ役割」として扱い、共通の port 指定を error とする。全組で同じ profile の役割には従来の port 解決順を適用する。
 
 以上を本プロジェクトの仕様とする。
