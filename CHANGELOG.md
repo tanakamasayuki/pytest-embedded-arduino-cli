@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.11.0
 - (EN) Add the `pytest_arduino_cli_device_lock_key(config, port)` hook. A plugin returns the device identity of a primary or peer port, such as one key for every slot and route of a probe, and the device lock and duplicate-device check use it. `None` keeps the port-string key; `--device-lock-key` still overrides the primary.
 - (JA) hook `pytest_arduino_cli_device_lock_key(config, port)` を追加。plugin が primary / peer の port の device の同一性（probe の口や経路によらず 1 つの key など）を返し、device lock と device 重複の検査がそれを使う。`None` なら port の文字列の key のまま。primary は引き続き `--device-lock-key` が優先する。
 
