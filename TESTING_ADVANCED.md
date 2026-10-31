@@ -862,7 +862,7 @@ Implement it in `pytest_sessionfinish` in a `conftest.py`. Every fixture is gone
 from pytest_embedded_arduino_cli.device_lock import DeviceLock, DeviceLockInfo, default_lock_dir
 ```
 
-The lock directory is the value of `--device-lock-dir`, or `default_lock_dir()` when that is unset. The key is the symlink-resolved port path. Track the boards yourself: relying on which ones the last test connected to misses every board that run did not touch.
+The lock directory is the value of `--device-lock-dir`, or `default_lock_dir()` when that is unset. The key is the symlink-resolved port path, or what the `pytest_arduino_cli_device_lock_key` hook returns for the port. Track the boards yourself: relying on which ones the last test connected to misses every board that run did not touch.
 
 This is slow. When the cleanup command is enough, use that instead.
 

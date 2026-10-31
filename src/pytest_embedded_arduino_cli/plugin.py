@@ -53,6 +53,17 @@ class PeerDutMap(dict[str, Any]):
     pass
 
 
+class DeviceLockHooks:
+    @pytest.hookspec(firstresult=True)
+    def pytest_arduino_cli_device_lock_key(self, config, port):
+        """Return the device identity of ``port`` as a nonempty lock key, or None.
+
+        Called for every primary and peer port, without hardware I/O. None keeps the
+        default: the symlink-resolved path or the port string, and no lock for
+        ``socket://``. Return the same key for ports that address one device.
+        """
+
+
 def _should_build(run_mode: str) -> bool:
     return run_mode in ("all", "build")
 
@@ -273,6 +284,7 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
 
 def pytest_addhooks(pluginmanager) -> None:
     pluginmanager.add_hookspecs(combinations.Hooks)
+    pluginmanager.add_hookspecs(DeviceLockHooks)
 
 
 def pytest_generate_tests(metafunc) -> None:
@@ -589,8 +601,20 @@ def _device_lock_enabled(config: pytest.Config) -> bool:
     return config.getoption("device_lock") != "off"
 
 
-def _is_lockable_port(port: str | None) -> bool:
-    return bool(port and not is_socket_url(port))
+def _hook_device_lock_key(config: pytest.Config, port: str) -> str | None:
+    key = config.hook.pytest_arduino_cli_device_lock_key(config=config, port=port)
+    if key is not None and (not isinstance(key, str) or not key):
+        raise pytest.UsageError(f"pytest_arduino_cli_device_lock_key: expected a nonempty str or None for {port!r}, got {key!r}")
+    return key
+
+
+def _device_lock_key(config: pytest.Config, port: str | None) -> str | None:
+    if not port:
+        return None
+    key = _hook_device_lock_key(config, port)
+    if key is not None:
+        return key
+    return None if is_socket_url(port) else port
 
 
 def _primary_device_lock_info(
@@ -604,12 +628,14 @@ def _primary_device_lock_info(
 
     override = config.getoption("device_lock_key")
     runtime_port = resolve_port(config, profile=app.profile)
-    key = override
-    port = upload_port if _is_lockable_port(upload_port) else runtime_port
-    if key is None and _is_lockable_port(upload_port):
-        key = upload_port
-    if key is None and _is_lockable_port(runtime_port):
-        key = runtime_port
+    port, key = runtime_port, None
+    for candidate in (upload_port, runtime_port):
+        key = _device_lock_key(config, candidate)
+        if key is not None:
+            port = candidate
+            break
+    if override is not None:
+        key = override
 
     if key is None:
         if mode == "required":
@@ -625,14 +651,15 @@ def _primary_device_lock_info(
     )
 
 
-def _peer_device_lock_infos(targets: list[PeerTarget]) -> list[DeviceLockInfo]:
+def _peer_device_lock_infos(config: pytest.Config, targets: list[PeerTarget]) -> list[DeviceLockInfo]:
     infos: list[DeviceLockInfo] = []
     for target in targets:
-        if not _is_lockable_port(target.runtime_port):
+        key = _device_lock_key(config, target.runtime_port)
+        if key is None:
             continue
         infos.append(
             DeviceLockInfo(
-                key=str(target.runtime_port),
+                key=key,
                 port=target.runtime_port,
                 profile=target.app.profile,
                 sketch_dir=str(target.app.sketch_dir),
@@ -870,11 +897,14 @@ def _check_combination_devices(request, primary_port, targets) -> None:
     ports = [("primary", primary_port), ("primary", request.config.getoption("flash_port"))]
     ports.extend((f"peer {target.name}", target.runtime_port) for target in targets)
     for role, port in ports:
-        if not port or is_socket_url(port):
+        if not port:
             continue
-        if is_monitor_url(port):
-            port = MonitorTarget.from_url(port).address
-        key = normalize_device_key(port)
+        key = _hook_device_lock_key(request.config, port)
+        if key is None:
+            if is_socket_url(port):
+                continue
+            key = MonitorTarget.from_url(port).address if is_monitor_url(port) else port
+        key = normalize_device_key(key)
         previous = owners.setdefault(key, role)
         if previous != role:
             pytest.skip(f"duplicate device: {previous} and {role} use {key}")
@@ -969,7 +999,7 @@ def arduino_cli_upload(
     infos = [lock_info] if lock_info else []
     if plan:
         targets = _peer_targets_from_request(request)
-        peer_infos = _peer_device_lock_infos(targets)
+        peer_infos = _peer_device_lock_infos(request.config, targets)
         if targets and not peer_infos and request.config.getoption("device_lock") == "required":
             raise pytest.UsageError("device lock is required, but no peer physical serial port was resolved")
         infos.extend(peer_infos)
@@ -1163,7 +1193,7 @@ def _lock_peer_targets_for_request(
     if getattr(_runtime_state(request), "_arduino_cli_peer_device_lock_ready", False):
         return
 
-    infos = _peer_device_lock_infos(targets)
+    infos = _peer_device_lock_infos(request.config, targets)
     if request.config.getoption("device_lock") == "required" and not infos and targets:
         raise pytest.UsageError("device lock is required, but no peer physical serial port was resolved")
 

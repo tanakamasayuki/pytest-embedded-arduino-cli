@@ -427,7 +427,8 @@ build は device lock 待機より前に実行できる状態を維持する。
 - peer DUT では、各 peer の解決済み runtime / upload 用 serial port を使う
 - profile 名は既定の lock key にしない。同じ profile 名でも project によって別 device を指すことがあり、逆に異なる profile でも同じ物理 device を指すことがあるため
 - `socket://...` は通常 host process または TCP/IP DUT を表し、共有物理 serial device ではないため、既定では lock しない
-- key は port の文字列とする。filesystem の path は symlink を解決する（`/dev/serial/by-id/...` は `/dev/ttyUSB0` と同じ device を lock する）。`wchlink://...` や `oep://...` のようなその他の形は書かれたまま使う。plugin には `wchlink://S` と `/dev/ttyACM3` が同じ probe であることも、2 つの `oep://` の slot が同じ hardware を共有するかも分からない。1 つの device を複数の書き方で指す project は、どの実行でも同じ `--device-lock-key` を指定する
+- key は port の文字列とする。filesystem の path は symlink を解決する（`/dev/serial/by-id/...` は `/dev/ttyUSB0` と同じ device を lock する）。`wchlink://...` や `oep://...` のようなその他の形は書かれたまま使う。plugin には `wchlink://S` と `/dev/ttyACM3` が同じ probe であることも、2 つの `oep://` の slot が同じ hardware を共有するかも分からない。
+- port の背後の device を知っている plugin や `conftest.py` は、hook `pytest_arduino_cli_device_lock_key(config, port)` を実装する。空でない `str` の key か `None` を返す。最初の `None` でない結果を使い（`firstresult`）、`None` なら上の規則のままとする。primary と peer のすべての port について、`socket://...` も含めて呼ぶので、key を返せば socket の target も lock する。hardware I/O はしない。hook の key は書かれたまま使う。ただし存在する path を指す key は symlink を解決する。24.4 の device 重複の検査も同じ key を使う。1 つの probe の別の口や別の経路のように、同じ device を指す port にはすべて同じ key を返す
 
 1 つのテストで複数 peer DUT を使う場合は、`peers` fixture が要求された時点で、その peer DUT 群が必要とする全ての物理 serial lock key を収集する。
 同じ peer 群の中で物理 serial key が重複した場合は設定エラーとして扱う。peer の lock key が既に保持している primary DUT の lock key と重複した場合も設定エラーとして扱う。
@@ -499,7 +500,7 @@ timeout 時の error message には、要求した key と、既存 lock file �
 `--device-lock-dir` は既定の user runtime/cache lock directory を上書きする。
 CI の分離や、共有 lab machine で明示的な調整が必要な場合に使う。
 
-`--device-lock-key` は primary DUT の自動 key 解決を上書きする。
+`--device-lock-key` は primary DUT の自動 key 解決を、hook も含めて上書きする。
 serial port 文字列が物理 device identity として安定しない特殊環境向けである。
 peer DUT は、将来 peer 専用 override を追加するまでは、それぞれの解決済み port key を使う。
 
@@ -1179,6 +1180,7 @@ README には少なくとも次を含める。
   - `pytest_embedded_arduino_cli.is_monitor_url(port)`
 - option（14 章）と環境変数（14.5、13.7）
 - `ArduinoCombination`、`arduino_skip_if` marker、`pytest_arduino_cli_skip_reason` hook（24.10）
+- `pytest_arduino_cli_device_lock_key(config, port)` hook（12.2）
 - `*.host-arduino.json`（13.4）
 
 `arduinomonitor://` の URL の文字列そのものは API に含めない。runtime の port の裏の address や profile が要るコードは、文字列を切り出さず `MonitorTarget.from_url` で解く。

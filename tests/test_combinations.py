@@ -281,6 +281,20 @@ def test_physical_alias_collision_is_skipped_even_with_lock_off(pytester):
     assert events(pytester) == []
 
 
+def test_device_lock_key_hook_detects_shared_device(pytester):
+    directory = project(pytester, "def test_link(dut, peers): pass")
+    with (pytester.path / "conftest.py").open("a") as conftest:
+        conftest.write(textwrap.dedent('''
+            def pytest_arduino_cli_device_lock_key(config, port):
+                return "probe-1" if port in ("/primary-esp32", "/peer-esp32") else None
+        '''))
+    sketch(directory / "peer_echo", {"esp32": "/peer-esp32"})
+    result = run(pytester, "--profiles=esp32", "--peer-profiles=all", "--device-lock=off", "-rs")
+    result.assert_outcomes(skipped=1)
+    assert "duplicate device: primary and peer echo use probe-1" in result.stdout.str()
+    assert events(pytester) == []
+
+
 def test_cleanup_failure_releases_other_peers_and_stops_reuse(pytester, monkeypatch):
     monkeypatch.setenv("FAIL_CLEANUP", "esp32")
     directory = project(pytester, "def test_link(dut, peers): pass")

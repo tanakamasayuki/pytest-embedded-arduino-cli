@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Add the `pytest_arduino_cli_device_lock_key(config, port)` hook. A plugin returns the device identity of a primary or peer port, such as one key for every slot and route of a probe, and the device lock and duplicate-device check use it. `None` keeps the port-string key; `--device-lock-key` still overrides the primary.
+- (JA) hook `pytest_arduino_cli_device_lock_key(config, port)` を追加。plugin が primary / peer の port の device の同一性（probe の口や経路によらず 1 つの key など）を返し、device lock と device 重複の検査がそれを使う。`None` なら port の文字列の key のまま。primary は引き続き `--device-lock-key` が優先する。
 
 ## 1.10.0
 - (EN) Add `--combo primary=PROFILE,PEER=PROFILE` to run only listed primary/peer pairs, for setups where wiring fixes the partner. Repeat it to list more pairs, or name pairs in the `arduino_combos` ini setting and select them with `--combo NAME` / `--combo all`. A pair that does not fit a sketch generates no item; a test no pair fits keeps one `combo=none` skip. `--profiles` / `--peer-profiles` stay for products.

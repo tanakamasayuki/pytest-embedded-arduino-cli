@@ -54,6 +54,14 @@ class DummyPluginManager:
         return self.reporter
 
 
+class DummyHook:
+    def __init__(self, keys: dict[str, object] | None = None) -> None:
+        self.keys = keys or {}
+
+    def pytest_arduino_cli_device_lock_key(self, *, config, port: str):
+        return self.keys.get(port)
+
+
 class DummyConfig:
     def __init__(self, verbose: int, reporter: DummyReporter | None, embedded_services: str | None = None) -> None:
         self.option = type(
@@ -74,6 +82,7 @@ class DummyConfig:
             },
         )()
         self.pluginmanager = DummyPluginManager(reporter)
+        self.hook = DummyHook()
         self.stash = {}
         self.rootpath = Path.cwd()
 
@@ -158,6 +167,7 @@ def test_peer_device_lock_infos_ignore_socket_ports(tmp_path: Path) -> None:
     )
 
     infos = _peer_device_lock_infos(
+        DummyConfig(verbose=0, reporter=None),
         [
             PeerTarget("serial", serial_app, "/dev/ttyUSB1"),
             PeerTarget("socket", socket_app, "socket://localhost"),
@@ -165,6 +175,74 @@ def test_peer_device_lock_infos_ignore_socket_ports(tmp_path: Path) -> None:
     )
 
     assert [info.key for info in infos] == ["/dev/ttyUSB1"]
+
+
+def test_device_lock_key_hook_replaces_port_string(tmp_path: Path) -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.hook = DummyHook({"oep://unit1/a?via=x": "oep:unit1", "oep://unit1/b": "oep:unit1"})
+    config.option.port = "oep://unit1/a?via=x"
+    config.option.flash_port = None
+    app = ArduinoCliBuildConfig(
+        sketch_dir=tmp_path,
+        sketch_yaml=tmp_path / "sketch.yaml",
+        build_path=tmp_path / "build" / "ch32",
+        profile="ch32",
+    )
+
+    primary = _primary_device_lock_info(config, app, None)
+    peers = _peer_device_lock_infos(config, [PeerTarget("echo", app, "oep://unit1/b")])
+
+    assert primary is not None
+    assert (primary.key, primary.port) == ("oep:unit1", "oep://unit1/a?via=x")
+    assert [(info.key, info.port) for info in peers] == [("oep:unit1", "oep://unit1/b")]
+
+
+def test_device_lock_key_hook_can_lock_socket_port(tmp_path: Path) -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.hook = DummyHook({"socket://broker:7000": "wchlink:abc"})
+    app = ArduinoCliBuildConfig(
+        sketch_dir=tmp_path,
+        sketch_yaml=tmp_path / "sketch.yaml",
+        build_path=tmp_path / "build" / "ch32",
+        profile="ch32",
+    )
+
+    infos = _peer_device_lock_infos(config, [PeerTarget("echo", app, "socket://broker:7000")])
+
+    assert [info.key for info in infos] == ["wchlink:abc"]
+
+
+def test_device_lock_key_override_wins_over_hook(tmp_path: Path) -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.hook = DummyHook({"/dev/ttyUSB0": "hooked"})
+    config.option.device_lock_key = "manual"
+    config.option.port = "/dev/ttyUSB0"
+    app = ArduinoCliBuildConfig(
+        sketch_dir=tmp_path,
+        sketch_yaml=tmp_path / "sketch.yaml",
+        build_path=tmp_path / "build" / "esp32",
+        profile="esp32",
+    )
+
+    info = _primary_device_lock_info(config, app, "/dev/ttyUSB0")
+
+    assert info is not None
+    assert info.key == "manual"
+
+
+@pytest.mark.parametrize("key", ["", 1])
+def test_device_lock_key_hook_rejects_invalid_keys(tmp_path: Path, key: object) -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.hook = DummyHook({"/dev/ttyUSB1": key})
+    app = ArduinoCliBuildConfig(
+        sketch_dir=tmp_path,
+        sketch_yaml=tmp_path / "sketch.yaml",
+        build_path=tmp_path / "build" / "esp32",
+        profile="esp32",
+    )
+
+    with pytest.raises(pytest.UsageError, match="pytest_arduino_cli_device_lock_key"):
+        _peer_device_lock_infos(config, [PeerTarget("echo", app, "/dev/ttyUSB1")])
 
 
 class DummyRequest:

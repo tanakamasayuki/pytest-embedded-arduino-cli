@@ -321,6 +321,7 @@ primary DUT の lock は primary upload の前に取得し、module teardown ま
 peer DUT はそれぞれの解決済み port を使い、`peers` fixture が要求された時点で peer upload の前に決定的な順序で lock し、module teardown まで保持します。
 `socket://...` target は通常 host process または TCP/IP DUT を表すため、既定では lock しません。
 lock を無効化する場合は `--device-lock=off`、lock key が解決できない場合に失敗させたい場合は `--device-lock=required`、port 文字列が物理 device identity として安定しない特殊環境では `--device-lock-key=KEY` を使います。
+`oep://...` のような住所の背後の device を知っている plugin は、hook `pytest_arduino_cli_device_lock_key(config, port)` で device の同一性を返します。同じ device の住所はすべて 1 つの lock を共有します（[SPEC.ja.md](SPEC.ja.md) 12.2）。
 lock file は既定で user runtime/cache directory に置かれ、OS file lock を使う想定です。そのため、強制終了後に lock file が残っていても、それだけで device が lock され続けることはありません。
 既定の lock directory は次の通りです。
 

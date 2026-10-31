@@ -862,7 +862,7 @@ sketch が固まったり落ちたりしていると、掃除コマンドを送�
 from pytest_embedded_arduino_cli.device_lock import DeviceLock, DeviceLockInfo, default_lock_dir
 ```
 
-lock directory は `--device-lock-dir` の値か、指定がなければ `default_lock_dir()` です。key は symlink を解決した port path です。対象のボードは自分で把握してください。最後のテストがどのボードに繋いだかに頼ると、その実行で触っていないボードを取りこぼします。
+lock directory は `--device-lock-dir` の値か、指定がなければ `default_lock_dir()` です。key は symlink を解決した port path か、`pytest_arduino_cli_device_lock_key` hook がその port に返す値です。対象のボードは自分で把握してください。最後のテストがどのボードに繋いだかに頼ると、その実行で触っていないボードを取りこぼします。
 
 この手段は時間がかかります。掃除コマンドで足りるなら、そちらを使ってください。
 

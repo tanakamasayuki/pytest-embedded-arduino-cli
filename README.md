@@ -321,6 +321,7 @@ The primary DUT lock is acquired before the primary upload and held until module
 Peer DUTs use their own resolved ports and, when the `peers` fixture is requested, their locks are acquired in a deterministic order before peer upload and held until module teardown.
 `socket://...` targets are not locked by default because they usually represent host-process or TCP/IP DUTs.
 Use `--device-lock=off` to disable locking, `--device-lock=required` to fail when no lock key can be resolved, and `--device-lock-key=KEY` for unusual environments where the port string is not a stable physical-device identity.
+A plugin that knows the device behind an address such as `oep://...` returns its identity from the `pytest_arduino_cli_device_lock_key(config, port)` hook, so every address of one device shares one lock ([SPEC.md](SPEC.md) 12.2).
 The lock files live in a user runtime/cache directory by default and use OS file locking, so a leftover lock file after a forced termination does not by itself keep the device locked.
 Default lock directories are:
 

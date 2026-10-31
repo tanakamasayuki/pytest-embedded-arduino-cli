@@ -426,7 +426,8 @@ The default lock key is the resolved physical serial port.
 - For peer DUTs, use each peer's resolved runtime / upload serial port.
 - Profile name is not the default lock key because two projects can use the same profile name for different devices, and two different profiles can still address the same physical device.
 - `socket://...` targets are not locked by default because they normally represent host-process or TCP/IP DUTs rather than a shared physical serial device.
-- The key is the port string. Filesystem paths are resolved through symlinks (`/dev/serial/by-id/...` locks the same device as `/dev/ttyUSB0`); other forms, such as `wchlink://...` or `oep://...`, are used as written. The plugin cannot know that `wchlink://S` and `/dev/ttyACM3` are the same probe, or whether two `oep://` slots share hardware. Projects that address one device in several ways set the same `--device-lock-key` on each run.
+- The key is the port string. Filesystem paths are resolved through symlinks (`/dev/serial/by-id/...` locks the same device as `/dev/ttyUSB0`); other forms, such as `wchlink://...` or `oep://...`, are used as written. The plugin cannot know that `wchlink://S` and `/dev/ttyACM3` are the same probe, or whether two `oep://` slots share hardware.
+- A plugin or `conftest.py` that knows the device behind a port implements the `pytest_arduino_cli_device_lock_key(config, port)` hook. It returns a nonempty `str` key or `None`; the first non-`None` result wins (`firstresult`), and `None` keeps the rules above. It is called for every primary and peer port, including `socket://...`, so a returned key also locks a socket target. It must not do hardware I/O. Keys from the hook are used as written, except that a key naming an existing path is symlink-resolved. The same key is used for the duplicate-device check in 24.4. Return the same key for every port that addresses one device, such as the slots and routes of one probe.
 
 If multiple peer DUTs are used in one test, all physical serial lock keys required by those peer DUTs are collected when the `peers` fixture is requested. Duplicate physical serial keys in the same peer set are treated as a configuration error. A peer lock key that duplicates the already-held primary DUT lock key is also treated as a configuration error.
 
@@ -495,7 +496,7 @@ On timeout, the error message should include the requested key and any readable 
 `--device-lock-dir` overrides the default user runtime/cache lock directory.
 It is intended for CI isolation or shared lab machines with explicit coordination requirements.
 
-`--device-lock-key` overrides automatic key resolution for the primary DUT.
+`--device-lock-key` overrides automatic key resolution, including the hook, for the primary DUT.
 It is intended for unusual environments where the serial port string is not a stable physical-device identity.
 Peer DUTs continue to use their own resolved port keys unless a future peer-specific override is added.
 
@@ -1175,6 +1176,7 @@ These names are the plugin's public API and follow semantic versioning.
   - `pytest_embedded_arduino_cli.is_monitor_url(port)`
 - Options (section 14) and environment variables (14.5, 13.7)
 - `ArduinoCombination`, the `arduino_skip_if` marker, and the `pytest_arduino_cli_skip_reason` hook (24.10)
+- The `pytest_arduino_cli_device_lock_key(config, port)` hook (12.2)
 - The `*.host-arduino.json` file (13.4)
 
 The text of an `arduinomonitor://` URL is not part of the API. Code that needs the address or the profile behind a runtime port parses it with `MonitorTarget.from_url` instead of slicing the string.
