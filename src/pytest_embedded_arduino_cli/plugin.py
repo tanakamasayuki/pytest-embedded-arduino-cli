@@ -6,7 +6,7 @@ from pathlib import Path, PurePath, PureWindowsPath
 import shutil
 import shlex
 from typing import Any, Callable
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -196,7 +196,7 @@ def pytest_configure(config: pytest.Config) -> None:
     combinations.configure(config)
     # Entry-point discovery order must not determine whether pytest-embedded
     # or this plugin supplies the Arduino paths and per-configuration log name.
-    config.pluginmanager.register(_EmbeddedFixtures(), "arduino-cli-fixture-overrides")
+    config.pluginmanager.register(_embedded_fixtures(), "arduino-cli-fixture-overrides")
     _PENDING_STATE_UPDATES.clear()
     globals()["_GLOBAL_STATE_CACHE"] = None
     install_fast_socket_redirect_thread()
@@ -719,11 +719,14 @@ def skip_autoflash() -> bool:
     return True
 
 
-class _EmbeddedFixtures:
-    app_path = staticmethod(app_path)
-    build_dir = staticmethod(build_dir)
-    skip_autoflash = staticmethod(skip_autoflash)
-    test_case_name = staticmethod(test_case_name)
+def _embedded_fixtures() -> ModuleType:
+    # A module, not a class: pytest 9.2 warns about fixtures behind staticmethod.
+    overrides = ModuleType(f"{__name__}._embedded_fixtures")
+    overrides.app_path = app_path
+    overrides.build_dir = build_dir
+    overrides.skip_autoflash = skip_autoflash
+    overrides.test_case_name = test_case_name
+    return overrides
 
 
 def _build_config_from_request(

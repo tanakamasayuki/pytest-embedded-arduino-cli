@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Fix the pytest 9.2 `PytestWarning` "fixture ... is wrapped by @staticmethod above @pytest.fixture" for `app_path`, `build_dir`, `skip_autoflash`, and `test_case_name`. The overrides of the pytest-embedded fixtures are still registered after pytest-embedded.
+- (JA) pytest 9.2 で `app_path`、`build_dir`、`skip_autoflash`、`test_case_name` に出ていた `PytestWarning`「fixture ... is wrapped by @staticmethod above @pytest.fixture」を修正。pytest-embedded の fixture を上書きする登録は、引き続き pytest-embedded の後に行う。
 
 ## 1.11.0
 - (EN) Add the `pytest_arduino_cli_device_lock_key(config, port)` hook. A plugin returns the device identity of a primary or peer port, such as one key for every slot and route of a probe, and the device lock and duplicate-device check use it. `None` keeps the port-string key; `--device-lock-key` still overrides the primary.
