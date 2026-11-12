@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+
+## 1.11.1
 - (EN) Fix the pytest 9.2 `PytestWarning` "fixture ... is wrapped by @staticmethod above @pytest.fixture" for `app_path`, `build_dir`, `skip_autoflash`, and `test_case_name`. The overrides of the pytest-embedded fixtures are still registered after pytest-embedded.
 - (JA) pytest 9.2 で `app_path`、`build_dir`、`skip_autoflash`、`test_case_name` に出ていた `PytestWarning`「fixture ... is wrapped by @staticmethod above @pytest.fixture」を修正。pytest-embedded の fixture を上書きする登録は、引き続き pytest-embedded の後に行う。
 
