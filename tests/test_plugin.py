@@ -90,6 +90,23 @@ class DummyConfig:
         return getattr(self.option, name)
 
 
+def test_fixtures_listing_shows_each_override_once(pytester: pytest.Pytester) -> None:
+    result = pytester.runpytest(
+        "--fixtures",
+        "-p",
+        "no:embedded-arduino-cli",
+        "-p",
+        "pytest_embedded_arduino_cli.plugin",
+    )
+
+    assert result.ret == 0
+    stdout = result.stdout.str()
+    assert "INTERNALERROR" not in stdout
+    for name in ("app_path", "build_dir", "skip_autoflash", "test_case_name"):
+        listed = [line for line in result.stdout.lines if line.startswith(f"{name} -- ")]
+        assert len([line for line in listed if "pytest_embedded_arduino_cli" in line]) == 1
+
+
 def test_plugin_help_lists_options(pytester: pytest.Pytester) -> None:
     result = pytester.runpytest(
         "--help",

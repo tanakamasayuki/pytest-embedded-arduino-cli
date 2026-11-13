@@ -1,6 +1,10 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Fix `pytest --fixtures` stopping with INTERNALERROR (`'<' not supported between instances of 'FixtureDef'`) on pytest 9.2. `app_path`, `build_dir`, `skip_autoflash`, and `test_case_name` were registered twice from the same module; each is now registered once.
+- (JA) pytest 9.2 で `pytest --fixtures` が INTERNALERROR（`'<' not supported between instances of 'FixtureDef'`）で止まる不具合を修正。`app_path`、`build_dir`、`skip_autoflash`、`test_case_name` が同じモジュールから 2 回ずつ登録されていたのを、1 回にした。
+- (EN) Examples: update `lang-ship:host` to 1.8.0.
+- (JA) Examples: `lang-ship:host` を 1.8.0 に更新。
 
 ## 1.11.1
 - (EN) Fix the pytest 9.2 `PytestWarning` "fixture ... is wrapped by @staticmethod above @pytest.fixture" for `app_path`, `build_dir`, `skip_autoflash`, and `test_case_name`. The overrides of the pytest-embedded fixtures are still registered after pytest-embedded.

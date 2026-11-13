@@ -406,8 +406,7 @@ def _runtime_state(request):
     return request.getfixturevalue("_arduino_cli_context")
 
 
-@pytest.fixture
-def test_case_name(request):
+def _test_case_name(request):
     if request.node.stash.get(combinations.PLAN, None):
         return combinations.artifact_name(request.node.nodeid)
     return request.node.name
@@ -694,15 +693,13 @@ def _acquire_device_locks(
     return lock_set
 
 
-@pytest.fixture
-def app_path(request: pytest.FixtureRequest) -> str:
+def _app_path(request: pytest.FixtureRequest) -> str:
     if not _request_has_sketch(request):
         return str(resolve_test_path(_request_path(request)))
     return str(resolve_sketch_dir(_request_path(request)))
 
 
-@pytest.fixture
-def build_dir(request: pytest.FixtureRequest) -> str:
+def _build_dir(request: pytest.FixtureRequest) -> str:
     try:
         arduino_cli_app = _build_config_from_request(request, required=False)
     except UnsupportedProfileError:
@@ -713,19 +710,19 @@ def build_dir(request: pytest.FixtureRequest) -> str:
     return str(arduino_cli_app.build_path)
 
 
-@pytest.fixture
-def skip_autoflash() -> bool:
+def _skip_autoflash() -> bool:
     # Build/upload are handled explicitly by this plugin instead of pytest-embedded services.
     return True
 
 
 def _embedded_fixtures() -> ModuleType:
-    # A module, not a class: pytest 9.2 warns about fixtures behind staticmethod.
+    # Registered only here, not as fixtures of this module: two definitions with
+    # the same module and name break ``pytest --fixtures`` on pytest 9.2. A module,
+    # not a class: pytest 9.2 warns about fixtures behind staticmethod.
     overrides = ModuleType(f"{__name__}._embedded_fixtures")
-    overrides.app_path = app_path
-    overrides.build_dir = build_dir
-    overrides.skip_autoflash = skip_autoflash
-    overrides.test_case_name = test_case_name
+    for function in (_app_path, _build_dir, _skip_autoflash, _test_case_name):
+        name = function.__name__.removeprefix("_")
+        setattr(overrides, name, pytest.fixture(name=name)(function))
     return overrides
 
 
