@@ -5,4 +5,4 @@ from .combination import ArduinoCombination
 
 __all__ = ["ArduinoCombination", "MonitorTarget", "__version__", "is_monitor_url"]
 
-__version__ = "1.11.1"
+__version__ = "1.12.0"
