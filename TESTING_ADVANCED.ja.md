@@ -192,6 +192,43 @@ uv run pytest tests/link --profiles=all --peer-profiles=all --lf
 log と ArduTest artifact は構成・完全な test ID ごとに分離します。state は primary profile の配下で peer を含む nodeid を使い、単一実行の過去 entry と暗黙に統合しません。
 cleanup が失敗した場合は teardown error として記録し、ほかの資源の解放も試みたうえで組合せ実行を中断します。資源が解放できたと仮定して次の実機へ進みません。
 
+### 必須の組と中断後の残りは `summary.json` で確かめる
+
+どちらも plugin の option はありません。実行後に `summary.json`（[ログとアーティファクトの置き場所](#ログとアーティファクトの置き場所)）を読んで扱います。CI で読むなら、`--root-logdir` で場所を決めておきます。`summary.json` は `<--root-logdir>/pytest-embedded/<時刻>/summary.json` に置かれます。
+
+`summary.json` の `tests` には、item ごとに `nodeid`、`status`（`PASSED`、`SKIPPED`、`FAILED`、`ERROR` など）、`profile`（primary）、`peers`（peer 名から profile）が入ります。組合せ実行では、さらに `planned`（実行予定の nodeid）と `unfinished`（中断などで終わらなかった nodeid）が入ります。`--combo` の名前は入らないので、組は profile の値で照合します。
+
+**必須の組が実際に通ったかを確かめる。** 全件 skip でも終了値は 0 なので、CI の手順で確かめます。
+
+```python
+# tools/check_required.py
+import json
+import sys
+from pathlib import Path
+
+REQUIRED = [("x035_pico", {"swd": "rp2040"})]   # (primary, peers)
+
+summary = max(Path("logs").glob("pytest-embedded/*/summary.json"))   # 最新の実行（ディレクトリ名は時刻）
+tests = json.loads(summary.read_text(encoding="utf-8"))["tests"]
+missing = [combo for combo in REQUIRED
+           if not any(t["status"] == "PASSED" and (t["profile"], t["peers"]) == combo for t in tests)]
+for primary, peers in missing:
+    print(f"required combination did not pass: primary={primary} peers={peers}")
+sys.exit(1 if missing else 0)
+```
+
+```bash
+uv run pytest tests --combo all --root-logdir logs
+uv run python tools/check_required.py
+```
+
+**中断した後の残りを流し直す。** cleanup の失敗で中断すると、そのボードを使わない組も流れずに終わります。止まったボードを外してから（`.env` からその port を消す、ボードを抜くなど）、`unfinished` の nodeid を同じ候補指定で流し直します。外したボードを使う組は、port が無いので skip になります。pytest 8.2 以降は、`@ファイル` で引数をファイルから読めます。
+
+```bash
+uv run python -c "import json, pathlib; s = max(pathlib.Path('logs').glob('pytest-embedded/*/summary.json')); print('\n'.join(json.loads(s.read_text())['unfinished']))" > unfinished.txt
+uv run pytest @unfinished.txt --combo all --root-logdir logs
+```
+
 ## pytest の基本の仕組み
 
 このガイドで繰り返し出てくる 4 つの仕組みを、先にまとめます。

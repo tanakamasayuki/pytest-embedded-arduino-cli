@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Docs: show how to check from `summary.json` that required combinations passed (an all-skipped run exits with 0), and how to rerun the `unfinished` items after a stop.
+- (JA) Docs: 必須の組が通ったかを `summary.json` で確かめる方法（全件 skip でも終了値は 0）と、中断後に `unfinished` の item を流し直す方法を追加。
 
 ## 1.12.0
 - (EN) Add the `pytest_arduino_cli_upload(config, role, port, profile, fqbn, sketch_dir, build_path)` hook. A plugin that writes the build itself, through a route the platform's upload tool does not reach, returns `True` and the plugin skips `arduino-cli upload`; `None` keeps `arduino-cli upload`. Called for the primary and each peer, inside the device lock, only when the run mode uploads; the upload log names the implementation that took it.

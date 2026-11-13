@@ -192,6 +192,43 @@ uv run pytest tests/link --profiles=all --peer-profiles=all --lf
 Logs and ArduTest artifacts are separated by configuration and full test identity. State remains grouped by primary profile with peer-aware nodeids; it is not implicitly merged with old single-execution entries.
 Cleanup failure is recorded as a teardown error. Other resource releases are still attempted, then combination execution stops rather than assuming resources are safe to reuse.
 
+### Check required combinations and rerun the rest after a stop with `summary.json`
+
+The plugin has no option for either. Read `summary.json` ([Where Logs and Artifacts Go](#where-logs-and-artifacts-live)) after the run. To read it from CI, fix its location with `--root-logdir`: each run writes `<--root-logdir>/pytest-embedded/<timestamp>/summary.json`.
+
+Each entry of `tests` in `summary.json` has `nodeid`, `status` (`PASSED`, `SKIPPED`, `FAILED`, `ERROR`, ...), `profile` (the primary's) and `peers` (peer name to profile). Combination runs also record `planned` (the nodeids planned to run) and `unfinished` (those that did not finish, after a stop for example). `--combo` names are not recorded, so match combinations by their profiles.
+
+**Check that required combinations actually passed.** An all-skipped run exits with 0, so check in the CI steps.
+
+```python
+# tools/check_required.py
+import json
+import sys
+from pathlib import Path
+
+REQUIRED = [("x035_pico", {"swd": "rp2040"})]   # (primary, peers)
+
+summary = max(Path("logs").glob("pytest-embedded/*/summary.json"))   # the latest run (directories are named by time)
+tests = json.loads(summary.read_text(encoding="utf-8"))["tests"]
+missing = [combo for combo in REQUIRED
+           if not any(t["status"] == "PASSED" and (t["profile"], t["peers"]) == combo for t in tests)]
+for primary, peers in missing:
+    print(f"required combination did not pass: primary={primary} peers={peers}")
+sys.exit(1 if missing else 0)
+```
+
+```bash
+uv run pytest tests --combo all --root-logdir logs
+uv run python tools/check_required.py
+```
+
+**Rerun what a stop left unfinished.** A cleanup failure stops the run, including combinations that do not use the failed board. Take that board out (remove its port from `.env`, unplug it, ...), then run the `unfinished` nodeids again with the same candidate options. Combinations that use the removed board skip for lack of a port. pytest 8.2 and later read arguments from a file given as `@file`.
+
+```bash
+uv run python -c "import json, pathlib; s = max(pathlib.Path('logs').glob('pytest-embedded/*/summary.json')); print('\n'.join(json.loads(s.read_text())['unfinished']))" > unfinished.txt
+uv run pytest @unfinished.txt --combo all --root-logdir logs
+```
+
 ## pytest fundamentals
 
 Four mechanisms come up again and again in this guide, so here they are up front.
