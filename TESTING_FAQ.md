@@ -84,7 +84,7 @@ Commit `uv.lock` for a project-specific test workspace when reproducible CI is t
 
 `.env` may contain Wi-Fi credentials as well as real serial ports. Never commit the real values; share only the required variable names through `.env.example`. Adding an already tracked file to `.gitignore` does not remove it from history. If credentials were committed, check the repository history and rotate the credentials as well.
 
-→ [Your First Test](FIRST_TEST.md#2-create-a-python-workspace), `.gitignore` example
+→ [Your First Test](FIRST_TEST.md#2-create-the-python-workspace), `.gitignore` example
 
 ## Build and upload
 

@@ -533,6 +533,8 @@ build_property = "build.defines"        # all profiles
 build_property = "build.defines"        # per-profile override
 ```
 
+## Verbosity and Logs
+
 For command visibility, follow pytest's standard verbosity:
 
 - `-v` shows the `arduino-cli compile` / `arduino-cli upload` command line

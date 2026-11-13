@@ -505,7 +505,7 @@ ENABLE_TEST_HOOKS = true
 `[flags]` は値なし define 用です。
 `true` の項目だけが `-DPYTEST_BUILD` のように渡され、`false` の項目は渡されません。
 
-実行前に対応する環境変数を設定しておくと、plugin が `arduino-cli compile --build-property build.extra_flags=...` に変換して渡します。
+pytest を実行する前に値を設定します。
 
 ```bash
 export TEST_WIFI_SSID=my-ssid

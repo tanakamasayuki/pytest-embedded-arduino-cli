@@ -46,7 +46,7 @@ A host core checks logic and serial protocols. Use hardware for peripherals, int
 | [`07_arduino_library_project`](07_arduino_library_project/README.md) | One board | Arduino library workspace | [Basics: directory layout](../TESTING_BASICS.md#directory-layout) |
 | [`08_arduino_ide_project`](08_arduino_ide_project/README.md) | One board | Arduino IDE project workspace | [Basics: directory layout](../TESTING_BASICS.md#directory-layout) |
 | [`09_host_arduino_core`](09_host_arduino_core/README.md) | Host core, C++ toolchain | Running a sketch without a board | [Basics: zero boards](../TESTING_BASICS.md#zero-boards-run-on-a-host-core) |
-| [`10_build_flags`](10_build_flags/README.md) | Host core, C++ toolchain | Valueless compile-time flags | [Advanced: compile-time defines](../TESTING_ADVANCED.md#compile-time-defines) |
+| [`10_build_flags`](10_build_flags/README.md) | Host core, C++ toolchain | Valueless compile-time flags | [Advanced: compile-time defines](../TESTING_ADVANCED.md#defines-at-compile-time) |
 | [`11_ardutest`](11_ardutest/README.md) | Host core or board | ArduTest fixture | [README: ArduTest](../README.md#ardutest-fixture) |
 | [`12_peer_host_core`](12_peer_host_core/README.md) | Host core, C++ toolchain | Primary and peer layout | [Basics: two boards](../TESTING_BASICS.md#two-boards-tests-that-need-a-partner) |
 
@@ -75,15 +75,25 @@ The primary profile is resolved from `--profile`, `default_profile`, then automa
 
 The port is resolved from `--flash-port`, `--port`, `TEST_SERIAL_PORT_<PROFILE>`, `TEST_SERIAL_PORT`, then a `socket://...` value in `sketch.yaml`. Write physical ports with `=`, such as `--port=/dev/ttyUSB0`, to avoid ambiguity with pytest path parsing. Repeated values can go in `.env`.
 
+```bash
+uv run --env-file .env pytest examples/01_basic --profile=esp32
+```
+
 ## Running examples
 
 Run examples one at a time. Add `-s` for device logs, `-v` for assembled commands, and `-vv` for resolved paths, profiles, and ports.
 
-- `--run-mode=all`: compile, upload, and test; the default
-- `--run-mode=build`: compile only; test items are reported as skipped
-- `--run-mode=test`: upload and test an existing build for the same profile
+`--run-mode` selects how much to do:
+
+- `all`: compile, upload, and test; the default
+- `build`: compile only; test items are reported as skipped
+- `test`: upload and test an existing build; build the same profile first
 
 Examples require different hardware and environment values, so running the entire tree is not the normal onboarding path. Name compatible examples explicitly when compiling a group.
+
+```bash
+uv run pytest examples/01_basic examples/03_dut_input --profile=uno --run-mode=build
+```
 
 ## Maintaining examples
 

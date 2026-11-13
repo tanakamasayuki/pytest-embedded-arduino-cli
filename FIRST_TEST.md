@@ -15,15 +15,13 @@ arduino-cli version
 uv --version
 ```
 
-This example uses an Arduino Uno. Do not preinstall its board core into the environment. The `sketch.yaml` below declares the platform and version for Arduino CLI to resolve. An ESP32 follows the same route through the `esp32` profile.
+This example uses an Arduino Uno. Do not preinstall its board core into the environment. The `sketch.yaml` below declares the platform and version for Arduino CLI to resolve. For an ESP32, likewise select the `esp32` profile and the port for your board.
 
 A stale local package index may not know about a newer core version declared in `sketch.yaml`, even after that version has been published. Refresh the index before the first run, after updating a core version, or when Arduino CLI reports that the version cannot be found:
 
 ```bash
 arduino-cli core update-index
 ```
-
-For an ESP32, select the `esp32` profile below and the port for your board.
 
 ## 2. Create the Python workspace
 
