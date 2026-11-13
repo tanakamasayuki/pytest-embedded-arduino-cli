@@ -958,7 +958,7 @@ def probe():
 
 ### 5. 実行前に環境を用意する
 
-ローカルの platform を Arduino のディレクトリへ symlink する、といった準備を session 単位で行う用途です。build より前に一度だけ実行する必要があるので、session scope の autouse fixture にします。
+ローカルの platform を Arduino のディレクトリへ symlink する、といった準備を session 単位で行う用途です。build より前に一度だけ実行する必要があるので、session scope の autouse fixture にします。pytest は scope の高い fixture から順に作り、plugin のビルドと upload は module scope の fixture で行うので、session scope の fixture は最初のビルドより前に終わります。sketch や組合せごとに変わる値は、この方法では入れられません。`conftest.py` の module scope の fixture は、plugin 自身の module scope の fixture より後に動くからです。
 
 ### 6. 実機を使わないユニットテストのヘルパー
 

@@ -958,7 +958,7 @@ This is not a constraint the audit introduces; it is one that **already holds.**
 
 ### 5. Prepare the environment before a run
 
-For work such as symlinking a local platform into the Arduino directory. It has to happen once, before any build, so it belongs in a session-scoped autouse fixture.
+For work such as symlinking a local platform into the Arduino directory. It has to happen once, before any build, so it belongs in a session-scoped autouse fixture. pytest sets up higher-scoped fixtures first, and the plugin builds and uploads in module-scoped fixtures, so a session-scoped one finishes before the first build. A value that differs per sketch or combination cannot be set this way: a module-scoped `conftest.py` fixture runs after the plugin's own module-scoped ones.
 
 ### 6. Helpers for unit tests that use no hardware
 
