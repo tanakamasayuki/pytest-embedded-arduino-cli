@@ -292,6 +292,45 @@ def test_arduino_combination_fixture_gives_the_items_profiles(pytester):
     run(pytester).assert_outcomes(passed=2)
 
 
+UPLOAD_HOOK = '''
+def pytest_arduino_cli_upload(role, port, profile, fqbn, sketch_dir, build_path):
+    record("hook_upload", role, port, profile, fqbn, sketch_dir.name, build_path.is_dir())
+    return {result}
+'''
+
+
+def test_upload_hook_takes_primary_and_peer_uploads(pytester):
+    project(pytester, "def test_link(dut, peers): pass")
+    with (pytester.path / "conftest.py").open("a") as conftest:
+        conftest.write(UPLOAD_HOOK.format(result="True"))
+    run(pytester, "--profile=esp32", "--peer-profile=echo:esp32").assert_outcomes(passed=1)
+    uploads = [e for e in events(pytester) if "upload" in e[0]]
+    assert uploads == [
+        ["hook_upload", "primary", "/primary-esp32", "esp32", None, "link", True],
+        ["hook_upload", "peer:echo", "/peer-esp32", "esp32", None, "peer_echo", True],
+    ]
+
+
+def test_upload_hook_returning_none_keeps_arduino_cli_upload(pytester):
+    project(pytester, "def test_link(dut): pass", peer=False)
+    with (pytester.path / "conftest.py").open("a") as conftest:
+        conftest.write(UPLOAD_HOOK.format(result="None"))
+    run(pytester, "--profile=esp32").assert_outcomes(passed=1)
+    assert [e[0] for e in events(pytester) if "upload" in e[0]] == ["hook_upload", "upload"]
+
+
+def test_upload_hook_rejects_other_results_and_is_not_called_for_builds(pytester):
+    project(pytester, "def test_link(dut): pass", peer=False)
+    with (pytester.path / "conftest.py").open("a") as conftest:
+        conftest.write(UPLOAD_HOOK.format(result="False"))
+    result = run(pytester, "--profile=esp32")
+    assert result.ret != 0
+    assert "pytest_arduino_cli_upload" in result.stdout.str() + result.stderr.str()
+    (pytester.path / "events.jsonl").unlink()
+    run(pytester, "--profile=esp32", "--run-mode=build")
+    assert not any("upload" in e[0] for e in events(pytester))
+
+
 def test_ports_with_one_lock_name_share_the_lock(pytester):
     directory = project(pytester, '''
         import pytest

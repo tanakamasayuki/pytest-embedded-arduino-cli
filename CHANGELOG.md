@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Add the `pytest_arduino_cli_upload(config, role, port, profile, fqbn, sketch_dir, build_path)` hook. A plugin that writes the build itself, through a route the platform's upload tool does not reach, returns `True` and the plugin skips `arduino-cli upload`; `None` keeps `arduino-cli upload`. Called for the primary and each peer, inside the device lock, only when the run mode uploads; the upload log names the implementation that took it.
+- (JA) hook `pytest_arduino_cli_upload(config, role, port, profile, fqbn, sketch_dir, build_path)` を追加。platform の書き込みの道具が届かない経路で plugin が自分で書き込んだら `True` を返し、`arduino-cli upload` を実行しない。`None` なら `arduino-cli upload` のまま。primary と各 peer について、device lock の中で、upload する run mode のときだけ呼ぶ。upload のログに、引き受けた実装を出す。
 - (EN) Add the `arduino_combination` fixture: the test's `ArduinoCombination` (the same value `pytest_arduino_cli_skip_reason` receives), or `None` without an Arduino sketch.
 - (JA) fixture `arduino_combination` を追加。そのテストの `ArduinoCombination`（`pytest_arduino_cli_skip_reason` が受け取るのと同じ値）を返し、Arduino sketch がなければ `None`。
 - (EN) `pytest_arduino_cli_device_lock_key` now names the lock to take when using a port, and ports that return the same name share one lock, also within one test (two ports of one board, or a peer on the primary's board, or the primary's `--device-lock-key`). One port in two roles is still refused, now judged by the port itself rather than the lock name, also outside combination runs (usage error).

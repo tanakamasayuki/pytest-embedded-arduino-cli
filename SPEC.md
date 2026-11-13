@@ -410,6 +410,16 @@ Organize the information needed to run `arduino-cli upload` and separate the upl
 - A runtime connection target such as `--port=socket://...` is not passed to `arduino-cli upload --port`
 - If runtime connection target completion is needed after upload, it is handled in the DUT / Serial integration layer
 
+### 11.5 Upload Hook
+
+A bench can write through a route the platform's upload tool does not reach: a programmer the core does not support, a bench-specific flashing device, or a board behind a network. The plugin does not own such strategies; a plugin or `conftest.py` takes the upload through the `pytest_arduino_cli_upload(config, role, port, profile, fqbn, sketch_dir, build_path)` hook.
+
+- `role` is `"primary"` or `"peer:<name>"`. `port` is the resolved upload port, the one `arduino-cli upload --port` would receive (`None` when there is none, such as for `socket://...`). `fqbn` is the profile's `fqbn` in `sketch.yaml`, or `None`. `sketch_dir` and `build_path` are `Path`s; the build artifacts are in `build_path` under the names arduino-cli gives them, and the plugin does not choose among them.
+- Return `True` after writing the build; the plugin then does not run `arduino-cli upload`. Return `None` to leave the upload to `arduino-cli upload`. Any other result is a usage error. The first non-`None` result wins (`firstresult`); hook wrappers are unsupported.
+- Raise to report a failed upload; it is handled like a failed `arduino-cli upload`.
+- The hook is called only where the plugin uploads (`--run-mode=all` / `test`), never for `--run-mode=build` or `--collect-only`, and inside the device lock (12.3). Only implementations that apply to the test's directory are called.
+- The upload log line names the implementation that took the upload in place of the `arduino-cli upload` command.
+
 ## 12. Device Lock Requirements
 
 ### 12.1 Purpose
@@ -1181,6 +1191,7 @@ These names are the plugin's public API and follow semantic versioning.
 - Options (section 14) and environment variables (14.5, 13.7)
 - `ArduinoCombination`, the `arduino_skip_if` marker, and the `pytest_arduino_cli_skip_reason` hook (24.10)
 - The `pytest_arduino_cli_device_lock_key(config, port)` hook (12.2)
+- The `pytest_arduino_cli_upload(config, role, port, profile, fqbn, sketch_dir, build_path)` hook (11.5)
 - The `*.host-arduino.json` file (13.4)
 
 The text of an `arduinomonitor://` URL is not part of the API. Code that needs the address or the profile behind a runtime port parses it with `MonitorTarget.from_url` instead of slicing the string.

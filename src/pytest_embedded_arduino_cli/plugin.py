@@ -17,6 +17,7 @@ from .app import (
     SketchConfigError,
     UnsupportedProfileError,
     detect_build_properties,
+    find_sketch_yaml,
     load_sketch_yaml,
     resolve_sketch_dir,
     resolve_test_path,
@@ -61,6 +62,15 @@ class DeviceLockHooks:
         Called for every primary and peer port, without hardware I/O. None keeps the
         default: the symlink-resolved path or the port string, and no lock for
         ``socket://``. Ports of one board return the same name and share its lock.
+        """
+
+    @pytest.hookspec(firstresult=True)
+    def pytest_arduino_cli_upload(self, config, role, port, profile, fqbn, sketch_dir, build_path):
+        """Upload the build in ``build_path`` and return True, or return None for ``arduino-cli upload``.
+
+        Called inside the device lock, for the primary (``role="primary"``) and each
+        peer (``role="peer:<name>"``), only when the run mode uploads. Raise to fail
+        the upload.
         """
 
 
@@ -557,7 +567,7 @@ def _log_command(
     config: pytest.Config,
     *,
     action: str,
-    command: list[str],
+    command: list[str] | str,
     details: dict[str, str | None],
 ) -> None:
     verbosity = _verbose_level(config)
@@ -568,7 +578,9 @@ def _log_command(
     if reporter is None:
         return
 
-    reporter.write_line(f"[arduino-cli] {action}: {shlex.join(command)}")
+    if not isinstance(command, str):
+        command = shlex.join(command)
+    reporter.write_line(f"[arduino-cli] {action}: {command}")
     if verbosity < 2:
         return
 
@@ -576,6 +588,58 @@ def _log_command(
         if value is None:
             continue
         reporter.write_line(f"[arduino-cli] {action} {key}: {value}")
+
+
+def _profile_fqbn(sketch_dir: Path, profile: str | None) -> str | None:
+    try:
+        profiles = load_sketch_yaml(find_sketch_yaml(sketch_dir)).get("profiles") or {}
+    except (OSError, SketchConfigError):
+        return None
+    fqbn = (profiles.get(profile) or {}).get("fqbn") if profile else None
+    return fqbn if isinstance(fqbn, str) else None
+
+
+def _upload_by_plugin(request: pytest.FixtureRequest, flasher: ArduinoCliUploadConfig, role: str) -> str | None:
+    """Offer the upload to ``pytest_arduino_cli_upload``; the source of the taker, or None."""
+    arguments = {
+        "config": request.config,
+        "role": role,
+        "port": flasher.port,
+        "profile": flasher.profile,
+        "fqbn": _profile_fqbn(flasher.sketch_dir, flasher.profile),
+        "sketch_dir": flasher.sketch_dir,
+        "build_path": flasher.build_path,
+    }
+    # Call in pluggy's order by hand to name the implementation that took it.
+    for impl in reversed(request.node.ihook.pytest_arduino_cli_upload.get_hookimpls()):
+        origin = f"pytest_arduino_cli_upload ({combinations._source(impl.function)})"
+        if impl.hookwrapper or impl.wrapper:
+            raise pytest.UsageError(f"{origin}: wrappers are not supported")
+        result = impl.function(**{name: arguments[name] for name in impl.argnames})
+        if result is None:
+            continue
+        if result is not True:
+            raise pytest.UsageError(f"{origin}: expected True or None, got {result!r}")
+        return origin
+    return None
+
+
+def _upload(request: pytest.FixtureRequest, flasher: ArduinoCliUploadConfig, role: str, action: str) -> None:
+    details = {
+        "cwd": str(flasher.sketch_dir),
+        "sketch_dir": str(flasher.sketch_dir),
+        "build_path": str(flasher.build_path),
+        "profile": flasher.profile,
+        "port": flasher.port,
+    }
+    if role != "primary":
+        details = {"peer": role.removeprefix("peer:"), **details}
+    origin = _upload_by_plugin(request, flasher, role)
+    if origin is not None:
+        _log_command(request.config, action=action, command=f"taken by {origin}", details=details)
+        return
+    _log_command(request.config, action=action, command=flasher.upload_command(), details=details)
+    flasher.upload()
 
 
 def _log_skip(config: pytest.Config, reason: str) -> None:
@@ -1027,19 +1091,7 @@ def arduino_cli_upload(
     if lock_info is not None:
         request.config._arduino_cli_primary_device_lock_key = lock_info.key
 
-    _log_command(
-        request.config,
-        action="upload",
-        command=arduino_cli_flasher.upload_command(),
-        details={
-            "cwd": str(arduino_cli_flasher.sketch_dir),
-            "sketch_dir": str(arduino_cli_flasher.sketch_dir),
-            "build_path": str(arduino_cli_flasher.build_path),
-            "profile": arduino_cli_flasher.profile,
-            "port": arduino_cli_flasher.port,
-        },
-    )
-    arduino_cli_flasher.upload()
+    _upload(request, arduino_cli_flasher, "primary", "upload")
     state._arduino_cli_uploaded = True
 
     runtime_port = resolve_port(request.config, profile=arduino_cli_app.profile)
@@ -1174,20 +1226,7 @@ def _prepare_peer_targets(request: pytest.FixtureRequest) -> list[PeerTarget]:
             app,
             port=resolve_peer_upload_port(target.runtime_port),
         )
-        _log_peer_command(
-            request.config,
-            peer=target.name,
-            action="upload",
-            command=flasher.upload_command(),
-            details={
-                "cwd": str(flasher.sketch_dir),
-                "sketch_dir": str(flasher.sketch_dir),
-                "build_path": str(flasher.build_path),
-                "profile": flasher.profile,
-                "port": flasher.port,
-            },
-        )
-        flasher.upload()
+        _upload(request, flasher, f"peer:{target.name}", f"peer {target.name} upload")
 
     completed: list[PeerTarget] = []
     for target in targets:

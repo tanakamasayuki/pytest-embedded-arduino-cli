@@ -410,6 +410,16 @@ arduino-cli に渡すだけで、plugin は約束しないもの:
 - `--port=socket://...` のような runtime 接続先は、`arduino-cli upload --port` には渡さない
 - upload 後に runtime 接続先の補完が必要な場合は、DUT / Serial 連携層で扱う
 
+### 11.5 upload の hook
+
+ベンチでは、platform の書き込みの道具が届かない経路で書くことがある。コアが対応しない書き込み器、ベンチ固有の書き込み装置、ネットワークの先のボードなどである。plugin はそうした戦略を持たず、plugin や `conftest.py` が hook `pytest_arduino_cli_upload(config, role, port, profile, fqbn, sketch_dir, build_path)` で upload を引き受ける。
+
+- `role` は `"primary"` か `"peer:<name>"`。`port` は解決済みの upload 用の port で、`arduino-cli upload --port` に渡すはずのもの（`socket://...` のように無いときは `None`）。`fqbn` は `sketch.yaml` の profile の `fqbn` か `None`。`sketch_dir` と `build_path` は `Path`。build の成果物は `build_path` の中に arduino-cli が付けた名前で置かれ、plugin はその中から選ばない。
+- 書き込んだら `True` を返す。plugin は `arduino-cli upload` を実行しない。`None` を返すと `arduino-cli upload` に任せる。それ以外の値は usage error とする。最初の `None` でない結果を使う（`firstresult`）。hook wrapper は非対応。
+- upload の失敗は例外で伝える。`arduino-cli upload` の失敗と同じに扱う。
+- hook は plugin が upload する所（`--run-mode=all` / `test`）でだけ呼び、`--run-mode=build` と `--collect-only` では呼ばない。device lock の中で呼ぶ（12.3）。テストのディレクトリに適用される実装だけを呼ぶ。
+- upload のログには、`arduino-cli upload` のコマンドの代わりに、引き受けた実装を出す。
+
 ## 12. Device Lock 要件
 
 ### 12.1 目的
@@ -1184,6 +1194,7 @@ README には少なくとも次を含める。
 - option（14 章）と環境変数（14.5、13.7）
 - `ArduinoCombination`、`arduino_skip_if` marker、`pytest_arduino_cli_skip_reason` hook（24.10）
 - `pytest_arduino_cli_device_lock_key(config, port)` hook（12.2）
+- `pytest_arduino_cli_upload(config, role, port, profile, fqbn, sketch_dir, build_path)` hook（11.5）
 - `*.host-arduino.json`（13.4）
 
 `arduinomonitor://` の URL の文字列そのものは API に含めない。runtime の port の裏の address や profile が要るコードは、文字列を切り出さず `MonitorTarget.from_url` で解く。

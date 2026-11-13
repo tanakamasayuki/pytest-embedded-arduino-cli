@@ -20,7 +20,7 @@ A test function needs the `test_` prefix. In the other direction, **a fixture wh
 
 ### `PluginValidationError: unknown hook`, and pytest will not start
 
-A `pytest_*` function in a `conftest.py` is misspelled. Hook names are fixed, and pytest refuses to start rather than quietly ignoring one it does not know. pytest-embedded adds no hook names of its own, and this plugin adds only `pytest_arduino_cli_skip_reason` and `pytest_arduino_cli_device_lock_key`; **every other name is pytest's.**
+A `pytest_*` function in a `conftest.py` is misspelled. Hook names are fixed, and pytest refuses to start rather than quietly ignoring one it does not know. pytest-embedded adds no hook names of its own, and this plugin adds only `pytest_arduino_cli_skip_reason`, `pytest_arduino_cli_device_lock_key`, and `pytest_arduino_cli_upload`; **every other name is pytest's.**
 
 → [Advanced Testing](TESTING_ADVANCED.md), *What conftest.py is*
 

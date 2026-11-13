@@ -20,7 +20,7 @@
 
 ### `PluginValidationError: unknown hook` が出て pytest が起動しない
 
-`conftest.py` の `pytest_*` 関数の名前が間違っています。フック名は決まっていて、知らない名前を黙って無視するのではなく、起動を拒否します。pytest-embedded は独自のフック名を追加しておらず、このプラグインが追加しているのは `pytest_arduino_cli_skip_reason` と `pytest_arduino_cli_device_lock_key` だけです。**それ以外のフック名は pytest のものです。**
+`conftest.py` の `pytest_*` 関数の名前が間違っています。フック名は決まっていて、知らない名前を黙って無視するのではなく、起動を拒否します。pytest-embedded は独自のフック名を追加しておらず、このプラグインが追加しているのは `pytest_arduino_cli_skip_reason`、`pytest_arduino_cli_device_lock_key`、`pytest_arduino_cli_upload` だけです。**それ以外のフック名は pytest のものです。**
 
 → [テストの応用](TESTING_ADVANCED.ja.md) の *conftest.py とは*
 
