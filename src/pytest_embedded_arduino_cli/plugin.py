@@ -860,6 +860,12 @@ def arduino_cli_flasher(
 
 
 @pytest.fixture
+def arduino_combination(request: pytest.FixtureRequest) -> combinations.ArduinoCombination | None:
+    """The profiles of this test, as passed to ``pytest_arduino_cli_skip_reason``."""
+    return request.node.stash.get(combinations.COMBINATION, None)
+
+
+@pytest.fixture
 def arduino_test(request: pytest.FixtureRequest, dut: Any) -> ArduTestSession:
     artifact_dir = _ardutest_artifact_dir(request.config)
     if request.node.stash.get(combinations.PLAN, None):

@@ -1174,6 +1174,7 @@ These names are the plugin's public API and follow semantic versioning.
   - `arduino_cli_build_properties` (module): `dict[str, str]` of `arduino-cli compile --show-properties` for the sketch and profile under test (13.9)
   - `arduino_test` (function): the ArduTest session ([`ARDUTEST_PYTEST_SPEC.md`](ARDUTEST_PYTEST_SPEC.md))
   - `peers` (function): a mapping of peer name to DUT (13.8)
+  - `arduino_combination` (function): the test's `ArduinoCombination`, or `None` (24.10)
 - Python
   - `pytest_embedded_arduino_cli.MonitorTarget`: parses an `arduinomonitor://` runtime port with `MonitorTarget.from_url(port)` and builds one with `to_url()`. Fields: `address`, `protocol`, `profile`, `sketch_dir`, `cli_path`
   - `pytest_embedded_arduino_cli.is_monitor_url(port)`
@@ -1423,6 +1424,7 @@ Normally select execution scope through profile candidates, and list wiring-dete
 Applicability rules let consuming projects declare special restrictions that candidate selection cannot express. Expose these APIs. The plugin does not own equipment semantics or wiring tables.
 
 - `ArduinoCombination`: read-only `primary: str | None` and `peers: Mapping[str, str | None]`, importable from `pytest_embedded_arduino_cli`.
+- The `arduino_combination` fixture (function scope): the same `ArduinoCombination` the hook receives for the item, for use during setup and in the test. `None` for items without an Arduino sketch.
 - `pytest.mark.arduino_skip_if(predicate, reason="...")`: skip when `predicate(item, combination)` returns `True`. Require an actual `bool` and a nonempty reason. Supported at module / class / function / parameter scope.
 - `pytest_arduino_cli_skip_reason(item, combination)`: a hookspec implemented in `conftest.py` or a plugin. Return a nonempty reason `str` or `None`. Hook wrappers are unsupported.
 

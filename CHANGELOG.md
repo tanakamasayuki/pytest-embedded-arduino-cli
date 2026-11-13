@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Add the `arduino_combination` fixture: the test's `ArduinoCombination` (the same value `pytest_arduino_cli_skip_reason` receives), or `None` without an Arduino sketch.
+- (JA) fixture `arduino_combination` を追加。そのテストの `ArduinoCombination`（`pytest_arduino_cli_skip_reason` が受け取るのと同じ値）を返し、Arduino sketch がなければ `None`。
 - (EN) `pytest_arduino_cli_device_lock_key` now names the lock to take when using a port, and ports that return the same name share one lock, also within one test (two ports of one board, or a peer on the primary's board, or the primary's `--device-lock-key`). One port in two roles is still refused, now judged by the port itself rather than the lock name, also outside combination runs (usage error).
 - (JA) `pytest_arduino_cli_device_lock_key` は、その port を使うときに取る lock の名前を返すものとし、同じ名前を返す port は 1 つのテストの中でも 1 つの lock を共有するようにした（1 枚のボードの 2 つの口、primary のボードに載る peer、primary の `--device-lock-key`）。1 つの port を 2 つの役に使う設定は、lock の名前ではなく port 自体で判定し、組合せ実行以外でも引き続き断る（usage error）。
 - (EN) Fix stale builds after a `sketch.yaml` profile change: when the build path was last compiled from a different profile entry (such as a library version), compile with `--clean`. arduino-cli otherwise kept sketch objects built against the old library's headers and failed to link them with the new one. The profile is recorded in `.arduino-cli-profile.json` in the build path; existing build paths are cleaned once.

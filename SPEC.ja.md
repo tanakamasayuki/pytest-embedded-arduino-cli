@@ -1177,6 +1177,7 @@ README には少なくとも次を含める。
   - `arduino_cli_build_properties`（module）: 対象の sketch と profile の `arduino-cli compile --show-properties` の `dict[str, str]`（13.9）
   - `arduino_test`（function）: ArduTest の session（[`ARDUTEST_PYTEST_SPEC.ja.md`](ARDUTEST_PYTEST_SPEC.ja.md)）
   - `peers`（function）: peer 名から DUT への mapping（13.8）
+  - `arduino_combination`（function）: そのテストの `ArduinoCombination` か `None`（24.10）
 - Python
   - `pytest_embedded_arduino_cli.MonitorTarget`: `MonitorTarget.from_url(port)` で `arduinomonitor://` の runtime port を解き、`to_url()` で作る。フィールドは `address`、`protocol`、`profile`、`sketch_dir`、`cli_path`
   - `pytest_embedded_arduino_cli.is_monitor_url(port)`
@@ -1426,6 +1427,7 @@ state cache の保存対象と key の整合、pytest-embedded の fixture / log
 適用条件は、候補の選び方では表現できない特殊な制約を利用側が宣言するために使う。次の API を公開する。設備の意味や配線表は plugin に持たせない。
 
 - `ArduinoCombination`: 読み取り専用の `primary: str | None` と `peers: Mapping[str, str | None]`。`pytest_embedded_arduino_cli` から import できる。
+- fixture `arduino_combination`（function scope）: その item について hook が受け取るのと同じ `ArduinoCombination`。setup やテストの中で使う。Arduino sketch のない item では `None`。
 - `pytest.mark.arduino_skip_if(predicate, reason="...")`: `predicate(item, combination)` が `True` なら skip。実際の `bool` と空でない reason を必須とし、module / class / function / parameter に宣言できる。
 - `pytest_arduino_cli_skip_reason(item, combination)`: `conftest.py` または plugin に置く hookspec。空でない理由の `str` か `None` を返す。hook wrapper は非対応。
 

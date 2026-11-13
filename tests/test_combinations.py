@@ -281,6 +281,17 @@ def test_physical_alias_collision_is_skipped_even_with_lock_off(pytester):
     assert events(pytester) == []
 
 
+def test_arduino_combination_fixture_gives_the_items_profiles(pytester):
+    project(pytester, '''
+        def test_link(dut, peers, arduino_combination):
+            assert arduino_combination.primary == dut.profile
+            assert dict(arduino_combination.peers) == {"echo": peers["echo"].profile}
+    ''')
+    pytester.makepyfile(test_unit="def test_unit(arduino_combination): assert arduino_combination is None")
+    run(pytester, "--profiles=all", "--peer-profiles=all").assert_outcomes(passed=5)
+    run(pytester).assert_outcomes(passed=2)
+
+
 def test_ports_with_one_lock_name_share_the_lock(pytester):
     directory = project(pytester, '''
         import pytest
