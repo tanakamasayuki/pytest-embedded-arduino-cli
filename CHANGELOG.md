@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) `pytest_arduino_cli_device_lock_key` now names the lock to take when using a port, and ports that return the same name share one lock, also within one test (two ports of one board, or a peer on the primary's board, or the primary's `--device-lock-key`). One port in two roles is still refused, now judged by the port itself rather than the lock name, also outside combination runs (usage error).
+- (JA) `pytest_arduino_cli_device_lock_key` は、その port を使うときに取る lock の名前を返すものとし、同じ名前を返す port は 1 つのテストの中でも 1 つの lock を共有するようにした（1 枚のボードの 2 つの口、primary のボードに載る peer、primary の `--device-lock-key`）。1 つの port を 2 つの役に使う設定は、lock の名前ではなく port 自体で判定し、組合せ実行以外でも引き続き断る（usage error）。
 - (EN) Fix stale builds after a `sketch.yaml` profile change: when the build path was last compiled from a different profile entry (such as a library version), compile with `--clean`. arduino-cli otherwise kept sketch objects built against the old library's headers and failed to link them with the new one. The profile is recorded in `.arduino-cli-profile.json` in the build path; existing build paths are cleaned once.
 - (JA) `sketch.yaml` の profile を変えた後に古い build が残る不具合を修正。build path を前に compile したときと profile の内容（library の版など）が違えば、`--clean` を付けて compile する。これまでは、古い library の header で作った sketch の object を arduino-cli が使い回し、新しい library との link に失敗していた。profile の内容は build path の `.arduino-cli-profile.json` に記録する。既存の build path は 1 回だけ clean される。
 - (EN) Fix `pytest --fixtures` stopping with INTERNALERROR (`'<' not supported between instances of 'FixtureDef'`) on pytest 9.2. `app_path`, `build_dir`, `skip_autoflash`, and `test_case_name` were registered twice from the same module; each is now registered once.

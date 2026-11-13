@@ -428,10 +428,11 @@ build は device lock 待機より前に実行できる状態を維持する。
 - profile 名は既定の lock key にしない。同じ profile 名でも project によって別 device を指すことがあり、逆に異なる profile でも同じ物理 device を指すことがあるため
 - `socket://...` は通常 host process または TCP/IP DUT を表し、共有物理 serial device ではないため、既定では lock しない
 - key は port の文字列とする。filesystem の path は symlink を解決する（`/dev/serial/by-id/...` は `/dev/ttyUSB0` と同じ device を lock する）。`wchlink://...` や `oep://...` のようなその他の形は書かれたまま使う。plugin には `wchlink://S` と `/dev/ttyACM3` が同じ probe であることも、2 つの `oep://` の slot が同じ hardware を共有するかも分からない。
-- port の背後の device を知っている plugin や `conftest.py` は、hook `pytest_arduino_cli_device_lock_key(config, port)` を実装する。空でない `str` の key か `None` を返す。最初の `None` でない結果を使い（`firstresult`）、`None` なら上の規則のままとする。primary と peer のすべての port について、`socket://...` も含めて呼ぶので、key を返せば socket の target も lock する。hardware I/O はしない。hook の key は書かれたまま使う。ただし存在する path を指す key は symlink を解決する。24.4 の device 重複の検査も同じ key を使う。1 つの probe の別の口や別の経路のように、同じ device を指す port にはすべて同じ key を返す
+- hook `pytest_arduino_cli_device_lock_key(config, port)` は、その port を使うときに取る lock の名前を返す。空でない `str` か、上の規則のままにする `None` を返す。どの port が 1 枚のボードに属するかを知っている plugin や `conftest.py` は、それらに同じ名前を返す。たとえば 1 枚の ESP32-S3 の UART 変換と内蔵の USB CDC、1 つの probe の口などである。最初の `None` でない結果を使う（`firstresult`）。primary と peer のすべての port について、`socket://...` も含めて呼ぶので、名前を返せば socket の target も lock する。hardware I/O はしない。hook の名前は書かれたまま使う。ただし存在する path を指す名前は symlink を解決する
 
-1 つのテストで複数 peer DUT を使う場合は、`peers` fixture が要求された時点で、その peer DUT 群が必要とする全ての物理 serial lock key を収集する。
-同じ peer 群の中で物理 serial key が重複した場合は設定エラーとして扱う。peer の lock key が既に保持している primary DUT の lock key と重複した場合も設定エラーとして扱う。
+1 つのテストが使うすべての port の lock の名前を集め、同じ名前は 1 回だけ lock する。同じ名前を返す port は、その lock を共有する。primary DUT がすでに持っている名前を peer が返した場合も、`--device-lock-key` で指定した primary の名前も同じである。1 つのテストで複数 peer DUT を使う場合は、`peers` fixture が要求された時点で、その名前を集める。
+
+lock の名前は、構成が正しいかの判定には使わない。1 つの port を 2 つの役に使うのは設定の誤りで、hook ではなく port 自体（symlink を解決した path、`arduinomonitor://` の address、それ以外は port の文字列。`socket://...` は比べない）で判定する。組合せ実行ではその構成を skip し（24.4）、それ以外の実行では usage error にする。
 
 ### 12.3 lock の取得タイミングと保持期間
 
@@ -1323,7 +1324,7 @@ test_link[primary=esp32s3,echo=esp32s3]
 候補が 1 個の役割には従来の port 解決順を適用する。新 option のない従来実行の port 解決と error / skip 動作は変更しない。
 この制限は profile 固有の設定に同じ port を明示することを禁止するものではなく、別々の構成が同じ DUT を逐次使用することは許す。
 
-重複判定は port 文字列の一致だけに頼らず、symlink 解決など既存の device lock と整合する物理識別を使う。
+重複判定は port 文字列の一致だけに頼らず、symlink 解決を含む port 自体の同一性を使う。lock の名前（12.2）は使わない。
 primary と peer 間だけでなく peer 同士も確認する。別の upload / runtime port が分かっている場合は、その対応も考慮する。
 任意の異なる port 表記が同じ実機かを自動発見する機能は含めず、利用側が正しい割当を提供する。
 host の `socket://localhost` のような動的 port の placeholder が同じであるだけでは、物理 DUT 重複として skip しない。

@@ -56,11 +56,11 @@ class PeerDutMap(dict[str, Any]):
 class DeviceLockHooks:
     @pytest.hookspec(firstresult=True)
     def pytest_arduino_cli_device_lock_key(self, config, port):
-        """Return the device identity of ``port`` as a nonempty lock key, or None.
+        """Return the name of the lock to take when using ``port``, or None.
 
         Called for every primary and peer port, without hardware I/O. None keeps the
         default: the symlink-resolved path or the port string, and no lock for
-        ``socket://``. Return the same key for ports that address one device.
+        ``socket://``. Ports of one board return the same name and share its lock.
         """
 
 
@@ -675,11 +675,17 @@ def _acquire_device_locks(
     if not infos or not _device_lock_enabled(config):
         return None
 
-    primary_key = getattr(config, "_arduino_cli_primary_device_lock_key", None)
-    if primary_key is not None:
-        for info in infos:
-            if info.key == primary_key:
-                raise pytest.UsageError(f"duplicate device lock key already used by primary DUT: {info.key}")
+    # One lock per name: ports that share a name share the lock, including the
+    # primary's, which is already held by this process.
+    held = {getattr(config, "_arduino_cli_primary_device_lock_key", None)}
+    unique: list[DeviceLockInfo] = []
+    for info in infos:
+        if info.key not in held:
+            held.add(info.key)
+            unique.append(info)
+    infos = unique
+    if not infos:
+        return None
 
     try:
         lock_set = DeviceLockSet(
@@ -892,22 +898,27 @@ def arduino_cli_resolved_port(request: pytest.FixtureRequest, _arduino_cli_conte
         _check_combination_devices(request, resolved_port, targets)
 
 
-def _check_combination_devices(request, primary_port, targets) -> None:
+def _duplicate_device(config, primary_port, targets) -> str | None:
+    """The first port two roles share, judged by the port itself, not by lock names."""
     owners = {}
-    ports = [("primary", primary_port), ("primary", request.config.getoption("flash_port"))]
+    ports = [("primary", primary_port), ("primary", config.getoption("flash_port"))]
     ports.extend((f"peer {target.name}", target.runtime_port) for target in targets)
     for role, port in ports:
-        if not port:
+        if not port or is_socket_url(port):
             continue
-        key = _hook_device_lock_key(request.config, port)
-        if key is None:
-            if is_socket_url(port):
-                continue
-            key = MonitorTarget.from_url(port).address if is_monitor_url(port) else port
-        key = normalize_device_key(key)
+        if is_monitor_url(port):
+            port = MonitorTarget.from_url(port).address
+        key = normalize_device_key(port)
         previous = owners.setdefault(key, role)
         if previous != role:
-            pytest.skip(f"duplicate device: {previous} and {role} use {key}")
+            return f"duplicate device: {previous} and {role} use {key}"
+    return None
+
+
+def _check_combination_devices(request, primary_port, targets) -> None:
+    reason = _duplicate_device(request.config, primary_port, targets)
+    if reason:
+        pytest.skip(reason)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -1192,6 +1203,11 @@ def _lock_peer_targets_for_request(
         return
     if getattr(_runtime_state(request), "_arduino_cli_peer_device_lock_ready", False):
         return
+
+    if not _plan_from_request(request):
+        reason = _duplicate_device(request.config, request.config.getoption("port"), targets)
+        if reason:
+            raise pytest.UsageError(reason)
 
     infos = _peer_device_lock_infos(request.config, targets)
     if request.config.getoption("device_lock") == "required" and not infos and targets:

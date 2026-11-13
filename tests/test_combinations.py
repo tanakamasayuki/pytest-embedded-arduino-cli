@@ -281,18 +281,32 @@ def test_physical_alias_collision_is_skipped_even_with_lock_off(pytester):
     assert events(pytester) == []
 
 
-def test_device_lock_key_hook_detects_shared_device(pytester):
-    directory = project(pytester, "def test_link(dut, peers): pass")
+def test_ports_with_one_lock_name_share_the_lock(pytester):
+    directory = project(pytester, '''
+        import pytest
+        from pathlib import Path
+        from pytest_embedded_arduino_cli.device_lock import DeviceLock, DeviceLockError, DeviceLockInfo
+        def test_link(dut, peers):
+            lock = DeviceLock(DeviceLockInfo(key="board-1"), lock_dir=Path("locks").resolve(), timeout=0.01)
+            with pytest.raises(DeviceLockError):
+                lock.acquire()
+    ''')
     with (pytester.path / "conftest.py").open("a") as conftest:
         conftest.write(textwrap.dedent('''
             def pytest_arduino_cli_device_lock_key(config, port):
-                return "probe-1" if port in ("/primary-esp32", "/peer-esp32") else None
+                return "board-1" if port in ("/primary-esp32", "/peer-esp32") else None
         '''))
     sketch(directory / "peer_echo", {"esp32": "/peer-esp32"})
-    result = run(pytester, "--profiles=esp32", "--peer-profiles=all", "--device-lock=off", "-rs")
-    result.assert_outcomes(skipped=1)
-    assert "duplicate device: primary and peer echo use probe-1" in result.stdout.str()
-    assert events(pytester) == []
+    run(pytester, "--profiles=esp32", "--peer-profiles=all").assert_outcomes(passed=1)
+
+
+def test_one_port_in_two_roles_is_refused_without_combinations(pytester):
+    directory = project(pytester, "def test_link(dut, peers): pass")
+    sketch(directory, {"esp32": "/shared"})
+    sketch(directory / "peer_echo", {"esp32": "/shared"})
+    result = run(pytester, "--device-lock=off")
+    assert result.ret != 0
+    assert "duplicate device: primary and peer echo use /shared" in result.stdout.str() + result.stderr.str()
 
 
 def test_cleanup_failure_releases_other_peers_and_stops_reuse(pytester, monkeypatch):

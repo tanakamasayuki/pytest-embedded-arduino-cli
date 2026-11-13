@@ -79,6 +79,8 @@ class DummyConfig:
                 "device_lock_timeout": 0.1,
                 "device_lock_dir": None,
                 "device_lock_key": None,
+                "port": None,
+                "flash_port": None,
             },
         )()
         self.pluginmanager = DummyPluginManager(reporter)
@@ -292,6 +294,25 @@ def test_peer_device_lock_is_held_until_module_release(tmp_path: Path) -> None:
     request.module._arduino_cli_peer_device_lock_set.release()
     competing_lock.acquire()
     competing_lock.release()
+
+
+def test_peer_shares_lock_name_held_by_primary(tmp_path: Path) -> None:
+    config = DummyConfig(verbose=0, reporter=None)
+    config.option.device_lock_dir = str(tmp_path)
+    config.option.port = "/dev/ttyACM0"
+    config.hook = DummyHook({"/dev/ttyACM0": "board-1", "/dev/ttyUSB1": "board-1"})
+    config._arduino_cli_primary_device_lock_key = "board-1"
+    request = DummyRequest(config)
+    app = ArduinoCliBuildConfig(
+        sketch_dir=tmp_path / "peer",
+        sketch_yaml=tmp_path / "peer" / "sketch.yaml",
+        build_path=tmp_path / "peer" / "build" / "esp32",
+        profile="esp32",
+    )
+
+    _lock_peer_targets_for_request(request, [PeerTarget("echo", app, "/dev/ttyUSB1")])
+
+    assert request.module._arduino_cli_peer_device_lock_set is None
 
 
 def test_primary_device_lock_is_held_during_test_call(pytester: pytest.Pytester) -> None:

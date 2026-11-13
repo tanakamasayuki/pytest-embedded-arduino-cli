@@ -427,9 +427,11 @@ The default lock key is the resolved physical serial port.
 - Profile name is not the default lock key because two projects can use the same profile name for different devices, and two different profiles can still address the same physical device.
 - `socket://...` targets are not locked by default because they normally represent host-process or TCP/IP DUTs rather than a shared physical serial device.
 - The key is the port string. Filesystem paths are resolved through symlinks (`/dev/serial/by-id/...` locks the same device as `/dev/ttyUSB0`); other forms, such as `wchlink://...` or `oep://...`, are used as written. The plugin cannot know that `wchlink://S` and `/dev/ttyACM3` are the same probe, or whether two `oep://` slots share hardware.
-- A plugin or `conftest.py` that knows the device behind a port implements the `pytest_arduino_cli_device_lock_key(config, port)` hook. It returns a nonempty `str` key or `None`; the first non-`None` result wins (`firstresult`), and `None` keeps the rules above. It is called for every primary and peer port, including `socket://...`, so a returned key also locks a socket target. It must not do hardware I/O. Keys from the hook are used as written, except that a key naming an existing path is symlink-resolved. The same key is used for the duplicate-device check in 24.4. Return the same key for every port that addresses one device, such as the slots and routes of one probe.
+- The `pytest_arduino_cli_device_lock_key(config, port)` hook returns the name of the lock to take when using a port: a nonempty `str`, or `None` to keep the rules above. A plugin or `conftest.py` that knows which ports belong to one board returns the same name for each of them, such as the UART bridge and native USB CDC of one ESP32-S3, or the ports of one probe. The first non-`None` result wins (`firstresult`). It is called for every primary and peer port, including `socket://...`, so a returned name also locks a socket target. It must not do hardware I/O. Names from the hook are used as written, except that a name naming an existing path is symlink-resolved.
 
-If multiple peer DUTs are used in one test, all physical serial lock keys required by those peer DUTs are collected when the `peers` fixture is requested. Duplicate physical serial keys in the same peer set are treated as a configuration error. A peer lock key that duplicates the already-held primary DUT lock key is also treated as a configuration error.
+The lock names of all ports a test uses are collected, and each name is locked once. Ports that return the same name share that lock, including a peer whose name is the one the primary DUT already holds, and a primary name set with `--device-lock-key`. If multiple peer DUTs are used in one test, their names are collected when the `peers` fixture is requested.
+
+Lock names do not decide whether a configuration is valid. One port given to two roles is a configuration error, judged by the port itself (symlink-resolved path, the address of an `arduinomonitor://` port, or the port string; `socket://...` is not compared), never by the hook. Combination runs skip such a configuration (24.4); other runs fail with a usage error.
 
 ### 12.3 Lock Timing and Lifetime
 
@@ -1319,7 +1321,7 @@ Reject common CLI port assignments for that role (primary `--port` / `--flash-po
 A role with one candidate retains the existing port resolution order. Invocations without the new options retain existing port resolution and error / skip behavior.
 This restriction does not prohibit explicitly assigning the same port in profile-specific configuration: different execution configurations may use the same DUT sequentially.
 
-Duplicate detection must use physical identity consistent with device locking, including symlink resolution, rather than just port-string equality.
+Duplicate detection must use the identity of the port itself, including symlink resolution, rather than just port-string equality. It does not use lock names (12.2).
 Check peer-to-peer as well as primary-to-peer conflicts. Account for separate upload / runtime ports when their relationship is known.
 Discovering whether arbitrary different port representations refer to the same device is out of scope; the consuming project supplies correct assignments.
 Identical dynamic host placeholders such as `socket://localhost` alone must not cause a duplicate-physical-DUT skip.
