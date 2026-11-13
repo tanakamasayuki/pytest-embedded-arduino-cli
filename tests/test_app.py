@@ -120,6 +120,47 @@ def test_build_command_uses_profile_and_properties(tmp_path: Path) -> None:
     ]
 
 
+def test_profile_change_cleans_build_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(sketch_dir / "sample.ino", "void setup() {}\nvoid loop() {}\n")
+    write_text(
+        sketch_dir / "sketch.yaml",
+        "profiles:\n  esp32:\n    libraries:\n      - EspUsbDevice (2.6.1)\n",
+    )
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        Path(command[3]).mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    def compile_once() -> bool:
+        ArduinoCliBuildConfig.from_test_path(sketch_dir, profile="esp32").compile()
+        return "--clean" in commands[-1]
+
+    assert compile_once() is False
+    assert compile_once() is False
+    write_text(
+        sketch_dir / "sketch.yaml",
+        "profiles:\n  esp32:\n    libraries:\n      - EspUsbDevice (3.2.0)\n",
+    )
+    assert compile_once() is True
+    assert compile_once() is False
+
+
+def test_build_path_without_profile_record_is_cleaned(tmp_path: Path) -> None:
+    sketch_dir = tmp_path / "sample"
+    write_text(sketch_dir / "sample.ino", "void setup() {}\nvoid loop() {}\n")
+    write_text(sketch_dir / "sketch.yaml", "profiles:\n  esp32: {}\n")
+    (sketch_dir / "build" / "esp32").mkdir(parents=True)
+
+    config = ArduinoCliBuildConfig.from_test_path(sketch_dir, profile="esp32")
+
+    assert "--clean" in config.build_command()
+
+
 def test_missing_ino_is_rejected(tmp_path: Path) -> None:
     sketch_dir = tmp_path / "sample"
     write_text(sketch_dir / "test_sample.py", "def test_ok(): pass\n")

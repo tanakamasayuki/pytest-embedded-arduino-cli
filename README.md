@@ -153,6 +153,7 @@ Settings in `[tool.pytest.ini_options]` of `tests/pyproject.toml`:
 
 `--clean` passes `--clean` to `arduino-cli compile`.
 It is useful when Arduino CLI's incremental build cache should be ignored.
+After a change to the profile in `sketch.yaml`, such as a library version, the plugin cleans the build path by itself.
 It also removes the ArduTest artifact directory before running.
 It does not touch Arduino CLI's shared caches; see [Build Output and Cache Cleanup (Linux)](#build-output-and-cache-cleanup-linux).
 

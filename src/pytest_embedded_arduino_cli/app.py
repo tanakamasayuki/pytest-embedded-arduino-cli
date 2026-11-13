@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import json
 from pathlib import Path
 import subprocess
 import os
@@ -15,6 +16,9 @@ from .serial import normalize_profile_name, reserved_profile_name_error
 #: Default property used to inject build_config.toml defines/flags when no
 #: explicit override is given and auto-detection has not run.
 DEFAULT_BUILD_PROPERTY = "build.extra_flags"
+
+#: File in the build path holding the sketch.yaml profile it was compiled from.
+PROFILE_STAMP_NAME = ".arduino-cli-profile.json"
 
 #: Auto-detection candidates, in priority order. Each group is selected only
 #: when all properties in that group exist and are empty. The C/C++ fallback is
@@ -411,9 +415,36 @@ class ArduinoCliBuildConfig:
             build_properties=self.extra_build_properties + format_build_properties(self.build_flags, names),
         )
 
+    @property
+    def _profile_stamp(self) -> Path:
+        return self.build_path / PROFILE_STAMP_NAME
+
+    def _profile_fingerprint(self) -> str | None:
+        try:
+            profiles = load_sketch_yaml(self.sketch_yaml).get("profiles")
+        except (OSError, yaml.YAMLError, SketchConfigError):
+            return None
+        if not isinstance(profiles, dict) or not self.profile:
+            return None
+        return json.dumps(profiles.get(self.profile), sort_keys=True, default=str)
+
+    def profile_changed(self) -> bool:
+        """True when the build path was last compiled from a different profile.
+
+        arduino-cli keeps sketch objects whose dependency files still name an old
+        library's extracted headers, then links them with the new library.
+        """
+        fingerprint = self._profile_fingerprint()
+        if fingerprint is None or not self.build_path.is_dir():
+            return False
+        try:
+            return self._profile_stamp.read_text(encoding="utf-8") != fingerprint
+        except OSError:
+            return True
+
     def build_command(self) -> list[str]:
         command = [self.cli_path, "compile", "--build-path", str(self.build_path)]
-        if self.clean:
+        if self.clean or self.profile_changed():
             command.append("--clean")
         if self.profile:
             command.extend(["--profile", self.profile])
@@ -424,9 +455,13 @@ class ArduinoCliBuildConfig:
         return command
 
     def compile(self, *, check: bool = True) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        result = subprocess.run(
             self.build_command(),
             check=check,
             cwd=self.sketch_dir,
             text=True,
         )
+        fingerprint = self._profile_fingerprint()
+        if result.returncode == 0 and fingerprint is not None and self.build_path.is_dir():
+            self._profile_stamp.write_text(fingerprint, encoding="utf-8")
+        return result

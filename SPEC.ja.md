@@ -700,6 +700,7 @@ platform によっては、runtime の console を素の serial port ではな�
 本プラグイン固有の compile 関連 option は `--profile` と `--clean` とする。
 
 `--clean` は 2 つの役を持つ。`arduino-cli compile` に `--clean` を渡すことと、実行前に ArduTest の artifact directory を消すことである。どちらも 1 つの option のまま保つ。
+`--clean` がなくても、build path を前に compile したときと `sketch.yaml` の profile の内容（platform と library の版、fqbn など、その profile の全体）が違えば、plugin は `arduino-cli compile` に `--clean` を渡す。arduino-cli は、古い library の header で作った sketch の object を残したまま、新しい library と link するためである。compile が成功するたびに、使った profile の内容を build path の `.arduino-cli-profile.json` に記録する。この記録のない build path は、1 回だけ `--clean` で compile する。
 build path は `<sketch_dir>/build/<profile or default>` に固定し、MVP では override を持たない。
 
 build 実行前に profile 対応可否を判定し、非対応 profile の sketch では compile を行わない。

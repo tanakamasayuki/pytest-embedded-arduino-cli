@@ -696,6 +696,7 @@ The meanings are as follows.
 The compile-related options specific to this plugin are `--profile` and `--clean`.
 
 `--clean` has two roles: it passes `--clean` to `arduino-cli compile`, and it removes the ArduTest artifact directory before the run. Both are kept in one option.
+Without `--clean`, the plugin still passes `--clean` to `arduino-cli compile` when the build path was last compiled from a different `sketch.yaml` profile entry (platform and library versions, fqbn, and the rest of that profile). arduino-cli keeps sketch objects built against an old library's headers and links them with the new library. The profile entry compiled from is recorded in `.arduino-cli-profile.json` in the build path after each successful compile; a build path without that record is compiled with `--clean` once.
 The build path is fixed to `<sketch_dir>/build/<profile or default>`, and the MVP does not have an override.
 
 Before build execution, determine whether the profile is supported, and do not compile sketches with unsupported profiles.

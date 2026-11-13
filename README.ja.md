@@ -153,6 +153,7 @@ uv run pytest
 
 `--clean` は `arduino-cli compile` に `--clean` を渡します。
 Arduino CLI の incremental build cache を使わずに再 build したいときに使います。
+library の版など、`sketch.yaml` の profile を変えたときは、指定しなくても plugin が build path を clean します。
 ArduTest の artifact 保存先 directory も、実行前に directory ごと削除します。
 Arduino CLI の共有 cache には触れません。[build 成果物と cache の掃除（Linux）](#build-成果物と-cache-の掃除linux) を参照してください。
 

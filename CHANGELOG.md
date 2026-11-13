@@ -1,6 +1,8 @@
 # Changelog / 変更履歴
 
 ## Unreleased
+- (EN) Fix stale builds after a `sketch.yaml` profile change: when the build path was last compiled from a different profile entry (such as a library version), compile with `--clean`. arduino-cli otherwise kept sketch objects built against the old library's headers and failed to link them with the new one. The profile is recorded in `.arduino-cli-profile.json` in the build path; existing build paths are cleaned once.
+- (JA) `sketch.yaml` の profile を変えた後に古い build が残る不具合を修正。build path を前に compile したときと profile の内容（library の版など）が違えば、`--clean` を付けて compile する。これまでは、古い library の header で作った sketch の object を arduino-cli が使い回し、新しい library との link に失敗していた。profile の内容は build path の `.arduino-cli-profile.json` に記録する。既存の build path は 1 回だけ clean される。
 - (EN) Fix `pytest --fixtures` stopping with INTERNALERROR (`'<' not supported between instances of 'FixtureDef'`) on pytest 9.2. `app_path`, `build_dir`, `skip_autoflash`, and `test_case_name` were registered twice from the same module; each is now registered once.
 - (JA) pytest 9.2 で `pytest --fixtures` が INTERNALERROR（`'<' not supported between instances of 'FixtureDef'`）で止まる不具合を修正。`app_path`、`build_dir`、`skip_autoflash`、`test_case_name` が同じモジュールから 2 回ずつ登録されていたのを、1 回にした。
 - (EN) Examples: update `lang-ship:host` to 1.8.0.
